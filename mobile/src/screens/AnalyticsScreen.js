@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, RefreshControl
+  StatusBar, RefreshControl, ActivityIndicator
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/api';
@@ -11,48 +11,49 @@ import { formatDuration } from '../utils/formatDuration';
 
 const TABS    = ['Summary', 'Analysis', 'Trends'];
 const PERIODS = [
-  { key: 'today', label: 'Today' },
-  { key: 'week',  label: 'This Week' },
+  { key: 'today', label: 'Today'      },
+  { key: 'week',  label: 'This Week'  },
   { key: 'month', label: 'This Month' },
-  { key: 'all',   label: 'All Time' },
+  { key: 'all',   label: 'All Time'   },
 ];
 
-function filterByPeriod(calls, period) {
+function getPeriodParams(period) {
   const now = new Date();
-  return calls.filter((c) => {
-    const d = new Date(c.timestamp);
-    if (period === 'today') {
-      return d.toDateString() === now.toDateString();
-    } else if (period === 'week') {
-      const weekAgo = new Date(now); weekAgo.setDate(now.getDate() - 7);
-      return d >= weekAgo;
-    } else if (period === 'month') {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    return true;
-  });
+  let startDate;
+  if (period === 'today') {
+    startDate = new Date(now); startDate.setHours(0, 0, 0, 0);
+  } else if (period === 'week') {
+    startDate = new Date(now); startDate.setDate(now.getDate() - 7); startDate.setHours(0, 0, 0, 0);
+  } else if (period === 'month') {
+    startDate = new Date(now); startDate.setDate(1); startDate.setHours(0, 0, 0, 0);
+  }
+  return startDate
+    ? { startDate: startDate.toISOString(), endDate: now.toISOString() }
+    : {};
 }
 
-// Minimal donut ring using Animated + arc approximation via Views
+function getDayTrend(calls, days = 7) {
+  const result = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d     = new Date(); d.setDate(d.getDate() - i);
+    const dStr  = d.toDateString();
+    const count = calls.filter((c) => new Date(c.timestamp).toDateString() === dStr).length;
+    result.push({ label: d.toLocaleDateString('en', { weekday: 'narrow' }), value: count });
+  }
+  return result;
+}
+
+// Minimal donut ring
 function DonutRing({ percent, color = Colors.primary, size = 96 }) {
   const filled = Math.max(0, Math.min(100, percent || 0));
-  const deg    = filled * 3.6; // 0–360
-
+  const deg    = filled * 3.6;
   return (
     <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
       <View style={[{ width: size, height: size, borderRadius: size / 2, borderWidth: 10, borderColor: '#E2E8F0', position: 'absolute' }]} />
-      {/* Right half */}
       {deg > 0 && (
         <View style={[{ width: size, height: size, borderRadius: size / 2, position: 'absolute', overflow: 'hidden' }]}>
-          <View style={{
-            width: size / 2, height: size, backgroundColor: deg > 180 ? color : 'transparent',
-            position: 'absolute', left: size / 2,
-          }} />
-          <View style={{
-            width: size, height: size / 2, backgroundColor: deg > 90 ? color : 'transparent',
-            position: 'absolute', bottom: 0,
-            transform: [{ rotate: `${Math.min(deg, 180) - 90}deg` }],
-          }} />
+          <View style={{ width: size / 2, height: size, backgroundColor: deg > 180 ? color : 'transparent', position: 'absolute', left: size / 2 }} />
+          <View style={{ width: size, height: size / 2, backgroundColor: deg > 90 ? color : 'transparent', position: 'absolute', bottom: 0, transform: [{ rotate: `${Math.min(deg, 180) - 90}deg` }] }} />
         </View>
       )}
       <View style={{ width: size - 22, height: size - 22, borderRadius: (size - 22) / 2, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center' }}>
@@ -63,7 +64,6 @@ function DonutRing({ percent, color = Colors.primary, size = 96 }) {
   );
 }
 
-// Simple bar chart for calls by day
 function BarChart({ data, color = Colors.primary }) {
   if (!data?.length) return null;
   const max = Math.max(...data.map((d) => d.value), 1);
@@ -79,76 +79,73 @@ function BarChart({ data, color = Colors.primary }) {
   );
 }
 
-function computeStats(calls) {
-  const total    = calls.length;
-  const incoming = calls.filter((c) => c.callType === 'incoming').length;
-  const outgoing = calls.filter((c) => c.callType === 'outgoing').length;
-  const missed   = calls.filter((c) => c.callType === 'missed').length;
-  const rejected = calls.filter((c) => c.callType === 'rejected').length;
-  const answered = incoming + outgoing;
-  const connRate = total > 0 ? Math.round((answered / total) * 100) : 0;
-  const unique   = new Set(calls.map((c) => c.contactNumber)).size;
-  const durArr   = calls.filter((c) => c.duration > 0).map((c) => c.duration);
-  const avgDur   = durArr.length ? Math.round(durArr.reduce((a, b) => a + b, 0) / durArr.length) : 0;
-  const totalDur = calls.reduce((a, c) => a + (c.duration || 0), 0);
-  return { total, incoming, outgoing, missed, rejected, connRate, unique, avgDur, totalDur };
-}
-
-function getDayTrend(calls, days = 7) {
-  const result = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d     = new Date(); d.setDate(d.getDate() - i);
-    const dStr  = d.toDateString();
-    const count = calls.filter((c) => new Date(c.timestamp).toDateString() === dStr).length;
-    result.push({ label: d.toLocaleDateString('en', { weekday: 'narrow' }), value: count });
-  }
-  return result;
-}
-
-function getHourlyData(calls) {
-  const hours = Array(24).fill(0);
-  calls.forEach((c) => { const h = new Date(c.timestamp).getHours(); hours[h]++; });
-  return Array.from({ length: 24 }, (_, i) => ({ label: `${i}h`, value: hours[i] }));
-}
-
 export default function AnalyticsScreen() {
-  const [calls, setCalls]       = useState([]);
-  const [tab, setTab]           = useState('Summary');
-  const [period, setPeriod]     = useState('month');
+  const [stats,      setStats]      = useState(null);
+  const [calls,      setCalls]      = useState([]);
+  const [tab,        setTab]        = useState('Summary');
+  const [period,     setPeriod]     = useState('month');
   const [refreshing, setRefreshing] = useState(false);
-  const [userId, setUserId]     = useState(null);
+  const [userId,     setUserId]     = useState(null);
+  const [loading,    setLoading]    = useState(true);
 
-  const load = async (uid) => {
+  const load = useCallback(async (uid, p) => {
+    if (!uid) return;
     try {
-      const res = await api.get(`/api/calls/employee/${uid}`, { params: { page: 1, limit: 200 } });
-      setCalls(res.data.data.calls || []);
+      const [statsRes, callsRes] = await Promise.all([
+        api.get('/api/calls/my-stats', { params: { period: p } }),
+        api.get(`/api/calls/employee/${uid}`, {
+          params: { page: 1, limit: 200, ...getPeriodParams(p) }
+        })
+      ]);
+      setStats(statsRes.data.data);
+      setCalls(callsRes.data.data.calls || []);
     } catch {}
-  };
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem('user').then((str) => {
-      if (str) { const u = JSON.parse(str); setUserId(u._id); load(u._id); }
+      if (str) {
+        const u = JSON.parse(str);
+        setUserId(u._id);
+        load(u._id, period).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     });
   }, []);
 
+  // Re-fetch stats and calls whenever period changes
+  useEffect(() => {
+    if (userId) load(userId, period);
+  }, [period, userId]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    if (userId) await load(userId);
+    await load(userId, period);
     setRefreshing(false);
   };
 
-  const visibleCalls = filterByPeriod(calls, period);
-  const st      = computeStats(visibleCalls);
-  const dayData = getDayTrend(visibleCalls);
-  const hourData = getHourlyData(visibleCalls);
+  // callsPerHour from API (accurate for all calls, not just the 200 fetched)
+  const hourData = (stats?.callsPerHour || Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 })))
+    .map((h) => ({ label: `${h.hour}h`, value: h.count }));
   const peakHour = hourData.reduce((max, d) => d.value > max.value ? d : max, { label: '—', value: 0 });
 
+  const dayData  = getDayTrend(calls);
+
   const typeData = [
-    { label: 'In',  value: st.incoming, color: Colors.success },
-    { label: 'Out', value: st.outgoing, color: Colors.warning },
-    { label: 'Miss',value: st.missed,   color: Colors.danger  },
-    { label: 'Rej', value: st.rejected, color: Colors.danger  },
+    { label: 'In',   value: stats?.incoming || 0, color: Colors.success },
+    { label: 'Out',  value: stats?.outgoing || 0, color: Colors.warning },
+    { label: 'Miss', value: stats?.missed   || 0, color: Colors.danger  },
+    { label: 'Rej',  value: stats?.rejected || 0, color: Colors.danger  },
   ];
+
+  if (loading) {
+    return (
+      <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={Colors.primary} size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={s.root}>
@@ -190,26 +187,26 @@ export default function AnalyticsScreen() {
           <>
             {/* Connection rate hero */}
             <View style={s.heroCard}>
-              <DonutRing percent={st.connRate} size={100} />
+              <DonutRing percent={stats?.connectedRate || 0} size={100} />
               <View style={s.heroStats}>
                 <Text style={s.heroLabel}>Connection Rate</Text>
-                <Text style={s.heroSub}>{st.total} total calls</Text>
-                <Text style={[s.heroBig, { color: Colors.success }]}>{st.incoming} answered</Text>
-                <Text style={[s.heroBig, { color: Colors.danger }]}>{st.missed + st.rejected} unanswered</Text>
+                <Text style={s.heroSub}>{stats?.total || 0} total calls</Text>
+                <Text style={[s.heroBig, { color: Colors.success }]}>{stats?.connectedCalls || 0} connected</Text>
+                <Text style={[s.heroBig, { color: Colors.danger  }]}>{(stats?.missed || 0) + (stats?.rejected || 0)} unanswered</Text>
               </View>
             </View>
 
-            {/* Stat grid */}
+            {/* Stat grid — all figures come from the server aggregation */}
             <View style={s.grid}>
               {[
-                { icon: '📊', label: 'Total Calls',  value: st.total,    color: Colors.primary, duration: st.totalDur },
-                { icon: '↙',  label: 'Incoming',     value: st.incoming, color: Colors.success  },
-                { icon: '↗',  label: 'Outgoing',     value: st.outgoing, color: Colors.warning  },
-                { icon: '✕',  label: 'Missed',       value: st.missed,   color: Colors.danger   },
-                { icon: '⊘',  label: 'Rejected',     value: st.rejected, color: Colors.danger   },
-                { icon: '👤', label: 'Unique Contacts', value: st.unique, color: Colors.purple  },
-                { icon: '⏱',  label: 'Avg Duration', value: formatDuration(st.avgDur), color: Colors.primary },
-                { icon: '🔗', label: 'Connection %', value: `${st.connRate}%`, color: Colors.success },
+                { icon: '📊', label: 'Total Calls',      value: stats?.total,              color: Colors.primary, duration: stats?.totalDuration },
+                { icon: '↙',  label: 'Incoming',         value: stats?.incoming,           color: Colors.success  },
+                { icon: '↗',  label: 'Outgoing',         value: stats?.outgoing,           color: Colors.warning  },
+                { icon: '✕',  label: 'Missed',           value: stats?.missed,             color: Colors.danger   },
+                { icon: '⊘',  label: 'Rejected',         value: stats?.rejected,           color: Colors.danger   },
+                { icon: '👤', label: 'Unique Contacts',  value: stats?.uniqueContacts,     color: Colors.purple   },
+                { icon: '⏱',  label: 'Avg Duration',     value: formatDuration(stats?.avgDuration || 0), color: Colors.primary },
+                { icon: '🔗', label: 'Connection %',     value: `${stats?.connectedRate || 0}%`, color: Colors.success },
               ].map(({ icon, label, value, color, duration }) => (
                 <View key={label} style={s.halfWrap}>
                   <StatCard icon={icon} label={label} value={value} color={color} duration={duration} half />
@@ -242,6 +239,7 @@ export default function AnalyticsScreen() {
               </View>
             </View>
 
+            {/* Hourly chart uses server-side aggregation — accurate across all calls */}
             <View style={s.chartCard}>
               <Text style={s.chartTitle}>Calls by Hour (24h)</Text>
               <BarChart data={hourData} color={Colors.primaryDark || '#0050CC'} />
@@ -253,10 +251,9 @@ export default function AnalyticsScreen() {
         {tab === 'Trends' && (
           <>
             <View style={s.chartCard}>
-              <Text style={s.chartTitle}>This Week vs Last Week</Text>
+              <Text style={s.chartTitle}>Last 7 Days Trend</Text>
               {(() => {
                 const thisWeek = getDayTrend(calls, 7);
-                const total1 = thisWeek.reduce((a, d) => a + d.value, 0);
                 const max7 = Math.max(...thisWeek.map((d) => d.value), 1);
                 return (
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 80 }}>

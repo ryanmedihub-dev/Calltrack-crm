@@ -1,13 +1,18 @@
 const config = {
-  incoming: { label: 'Incoming', cls: 'bg-green-500/20 text-green-400' },
-  outgoing: { label: 'Outgoing', cls: 'bg-blue-500/20 text-blue-400' },
-  missed: { label: 'Missed', cls: 'bg-red-500/20 text-red-400' },
-  rejected: { label: 'Rejected', cls: 'bg-yellow-500/20 text-yellow-400' }
+  incoming: { label: 'Incoming', bg: '#ECFDF5', color: '#10B981', dot: '#10B981' },
+  outgoing: { label: 'Outgoing', bg: '#FFFBEB', color: '#F59E0B', dot: '#F59E0B' },
+  missed:   { label: 'Missed',   bg: '#FEF2F2', color: '#EF4444', dot: '#EF4444' },
+  rejected: { label: 'Rejected', bg: '#F5F3FF', color: '#8B5CF6', dot: '#8B5CF6' },
 };
 
 export default function CallTypeBadge({ type }) {
-  const { label, cls } = config[type] || { label: type, cls: 'bg-gray-500/20 text-gray-400' };
+  const c = config[type] || { label: type, bg: '#F1F5F9', color: '#94A3B8', dot: '#94A3B8' };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>
+    <span
+      className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-semibold whitespace-nowrap"
+      style={{ background: c.bg, color: c.color }}>
+      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: c.dot }} />
+      {c.label}
+    </span>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  View, ActivityIndicator, AppRegistry, AppState,
+  View, Text, ActivityIndicator, AppRegistry, AppState,
   NativeModules, PermissionsAndroid, Platform
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,7 +19,7 @@ import AddNoteModal      from './src/components/AddNoteModal';
 import { requestCallPermissions, requestOverlayPermission, onCallEnded } from './src/services/phoneStateService';
 import { applyTrackedSim } from './src/services/simService';
 import { getPendingFollowUps } from './src/utils/callNotes';
-import { syncCallLogs } from './src/services/callLogService';
+import { syncCallLogs, processPendingQueue, getPendingCount } from './src/services/callLogService';
 
 const { CallLogModule } = NativeModules;
 
@@ -40,6 +40,7 @@ function App() {
   const [pendingCall, setPendingCall]     = useState(null);
   const [noteCall, setNoteCall]           = useState(null);
   const [followUpBadge, setFollowUpBadge] = useState(0);
+  const [pendingCount, setPendingCount]   = useState(0);
   const appState  = useRef(AppState.currentState);
   const syncTimer = useRef(null);
 
@@ -62,8 +63,11 @@ function App() {
     // Listen for calls that end while app is open
     const unsub = onCallEnded((data) => setPendingCall(data));
 
-    // Check for call that happened while app was closed — delay 800ms on cold start
-    checkPendingCall(800);
+    // Flush any calls that failed to sync while offline
+    processPendingQueue().then(() => getPendingCount().then(setPendingCount));
+
+    // Check for call that happened while app was closed
+    checkPendingCallWithRetry(5, 400);
 
     // Refresh follow-up badge
     refreshFollowUpBadge();
@@ -71,7 +75,7 @@ function App() {
     // Live sync: when app comes back to foreground
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        checkPendingCall(300);
+        checkPendingCallWithRetry(3, 300);
         doSync();
         refreshFollowUpBadge();
       }
@@ -88,12 +92,14 @@ function App() {
     };
   }, [screen]);
 
-  const checkPendingCall = async (delayMs = 0) => {
-    try {
-      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
-      const pending = await CallLogModule?.getPendingCall?.();
-      if (pending?.callType) setPendingCall(pending);
-    } catch {}
+  const checkPendingCallWithRetry = async (maxRetries, delayMs) => {
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise((r) => setTimeout(r, delayMs));
+      try {
+        const pending = await CallLogModule?.getPendingCall?.();
+        if (pending?.callType) { setPendingCall(pending); return; }
+      } catch {}
+    }
   };
 
   const doSync = async () => {
@@ -140,6 +146,13 @@ function App() {
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: '#F8F9FB' }}>
+        {pendingCount > 0 && (
+          <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 16, paddingVertical: 6 }}>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+              {pendingCount} call{pendingCount !== 1 ? 's' : ''} pending sync — will retry when online
+            </Text>
+          </View>
+        )}
         <View style={{ flex: 1 }}>
           {tab === 'calls'     && <CallHistoryScreen onAddNote={setNoteCall} onFollowUp={setNoteCall} />}
           {tab === 'analytics' && <AnalyticsScreen />}

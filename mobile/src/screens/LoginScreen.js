@@ -40,6 +40,15 @@ export default function LoginScreen({ onLogin }) {
       <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
       <ScrollView contentContainerStyle={s.inner} keyboardShouldPersistTaps="handled">
 
+        {/* iOS warning */}
+        {Platform.OS === 'ios' && (
+          <View style={s.iosBanner}>
+            <Text style={s.iosBannerText}>
+              ⚠️ CallTrack is optimised for Android. Call log sync is not available on iOS.
+            </Text>
+          </View>
+        )}
+
         {/* Logo area */}
         <View style={s.logoWrap}>
           <View style={s.logoCircle}>
@@ -90,7 +99,7 @@ export default function LoginScreen({ onLogin }) {
           </TouchableOpacity>
         </View>
 
-        <Text style={s.hint}>Demo: employee1@calltrack.com / password123</Text>
+        {__DEV__ && <Text style={s.hint}>Demo: employee1@calltrack.com / password123</Text>}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -121,4 +130,7 @@ const s = StyleSheet.create({
   btnText:    { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.3 },
 
   hint:       { color: C.textMuted, textAlign: 'center', fontSize: 11, marginTop: 20 },
+
+  iosBanner:     { width: '100%', backgroundColor: '#FEF3C7', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 16, borderWidth: 1, borderColor: '#FCD34D' },
+  iosBannerText: { color: '#92400E', fontSize: 12, fontWeight: '500', textAlign: 'center' },
 });

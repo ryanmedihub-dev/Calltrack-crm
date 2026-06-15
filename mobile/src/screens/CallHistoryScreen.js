@@ -97,6 +97,17 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     setFiltered(result);
   }, [calls, filter, search, sort]);
 
+  const handleDeleteCall = async (call) => {
+    if (!call._id) {
+      setCalls((prev) => prev.filter((c) => c !== call));
+      return;
+    }
+    try {
+      await api.delete(`/api/calls/${call._id}`);
+      setCalls((prev) => prev.filter((c) => c._id !== call._id));
+    } catch {}
+  };
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setSyncing(true);
@@ -189,7 +200,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
                 call={call}
                 onNote={onAddNote}
                 onFollowUp={onFollowUp}
-                onDelete={(c) => setCalls((prev) => prev.filter((x) => x !== c))}
+                onDelete={handleDeleteCall}
               />
             ))}
           </View>

@@ -4,9 +4,12 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
-const authRoutes = require('./routes/auth');
+const authRoutes    = require('./routes/auth');
 const callLogRoutes = require('./routes/callLogs');
-const leadRoutes = require('./routes/leads');
+const leadRoutes    = require('./routes/leads');
+const reportRoutes  = require('./routes/reports');
+const auditRoutes   = require('./routes/auditLog');
+const scriptRoutes  = require('./routes/scripts');
 const { protect, isManager } = require('./middleware/auth');
 const User = require('./models/User');
 
@@ -18,9 +21,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    // allow any localhost port in development
     if (origin.match(/^http:\/\/localhost:\d+$/)) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     callback(new Error(`CORS: origin ${origin} not allowed`));
@@ -32,40 +33,73 @@ const corsOptions = {
 
 app.set('trust proxy', 1);
 app.use(cors(corsOptions));
-// handle OPTIONS preflight explicitly — required on Vercel serverless
 app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '5mb' }));
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const limiter        = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
+const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: 20,  standardHeaders: true, legacyHeaders: false });
+// 5 registrations per hour — prevents bulk account creation via the protected route
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false });
+// Reports run heavy aggregations; cap at 30 per 5 minutes
+const reportsLimiter  = rateLimit({ windowMs:  5 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 
 app.use('/api/', limiter);
 app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/register', registerLimiter);
+app.use('/api/reports', reportsLimiter);
 
-// connect MongoDB once and reuse across serverless invocations
-let isConnected = false;
-app.use(async (_req, _res, next) => {
-  if (isConnected) return next();
+// Fail immediately if not connected — no silent 10s buffering
+mongoose.set('bufferCommands', false);
+
+async function connectDB() {
+  // Already live — nothing to do
+  if (mongoose.connection.readyState === 1) return;
+
+  // Reuse cached promise across Vercel warm-start invocations
+  if (!global._mongoConnPromise) {
+    global._mongoConnPromise = mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+    });
+  }
+
   try {
-    await mongoose.connect(process.env.MONGO_URI);
-    isConnected = true;
+    await global._mongoConnPromise;
+  } catch (err) {
+    global._mongoConnPromise = null; // reset so next request retries
+    throw err;
+  }
+}
+
+app.use(async (_req, res, next) => {
+  try {
+    await connectDB();
     next();
   } catch (err) {
-    next(err);
+    console.error('DB connection error:', err.message);
+    return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again in a moment.' });
   }
 });
 
-// routes
-app.use('/api/auth', authRoutes);
-app.use('/api/calls', callLogRoutes);
-app.use('/api/leads', leadRoutes);
+app.use('/api/auth',       authRoutes);
+app.use('/api/calls',      callLogRoutes);
+app.use('/api/leads',      leadRoutes);
+app.use('/api/reports',    reportRoutes);
+app.use('/api/audit-logs', auditRoutes);
+app.use('/api/scripts',    scriptRoutes);
 
 // employees
 app.get('/api/employees', protect, isManager, async (req, res) => {
   try {
-    const employees = await User.find({ role: 'employee' }).sort({ name: 1 });
-    return res.json({ success: true, data: employees });
+    const { search, page = 1, limit = 200 } = req.query;
+    const filter = { role: 'employee' };
+    if (search) filter.name = { $regex: search, $options: 'i' };
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [employees, total] = await Promise.all([
+      User.find(filter).sort({ name: 1 }).skip(skip).limit(parseInt(limit)),
+      User.countDocuments(filter),
+    ]);
+    return res.json({ success: true, data: employees, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -104,6 +138,52 @@ app.patch('/api/employees/:id/status', protect, isManager, async (req, res) => {
   }
 });
 
+app.patch('/api/employees/:id/target', protect, isManager, async (req, res) => {
+  try {
+    const { dailyTarget } = req.body;
+    if (typeof dailyTarget !== 'number' || dailyTarget < 0) {
+      return res.status(400).json({ success: false, error: 'dailyTarget must be a non-negative number' });
+    }
+    const employee = await User.findByIdAndUpdate(req.params.id, { dailyTarget }, { new: true });
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    return res.json({ success: true, data: employee });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/auth/fcm-token', protect, async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    if (!fcmToken) return res.status(400).json({ success: false, error: 'fcmToken required' });
+    await User.findByIdAndUpdate(req.user._id, { fcmToken });
+    return res.json({ success: true, message: 'FCM token saved' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/employees/:id', protect, isManager, async (req, res) => {
+  try {
+    const { name, phone, deviceId } = req.body;
+    const employee = await User.findByIdAndUpdate(req.params.id, { name, phone, deviceId }, { new: true });
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    return res.json({ success: true, data: employee });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/employees/:id', protect, isManager, async (req, res) => {
+  try {
+    const employee = await User.findOneAndDelete({ _id: req.params.id, role: 'employee' });
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    return res.json({ success: true, message: 'Employee deleted' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/health', (_req, res) => res.json({ success: true, message: 'CallTrack API running' }));
 
 app.use((_req, res) => res.status(404).json({ success: false, error: 'Route not found' }));
@@ -112,7 +192,6 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ success: false, error: 'Internal server error' });
 });
 
-// local dev only — Vercel handles listening itself
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   mongoose.connect(process.env.MONGO_URI).then(() => {

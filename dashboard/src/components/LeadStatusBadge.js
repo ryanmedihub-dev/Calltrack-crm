@@ -1,15 +1,20 @@
 const config = {
-  new: { label: 'New', cls: 'bg-blue-500/20 text-blue-400' },
-  contacted: { label: 'Contacted', cls: 'bg-purple-500/20 text-purple-400' },
-  interested: { label: 'Interested', cls: 'bg-yellow-500/20 text-yellow-400' },
-  not_interested: { label: 'Not Interested', cls: 'bg-red-500/20 text-red-400' },
-  converted: { label: 'Converted', cls: 'bg-green-500/20 text-green-400' },
-  lost: { label: 'Lost', cls: 'bg-gray-500/20 text-gray-400' }
+  new:           { label: 'New',          bg: '#EEF3FF', color: '#1A6BFF' },
+  contacted:     { label: 'Contacted',    bg: '#F3EEFF', color: '#7C3AED' },
+  interested:    { label: 'Interested',   bg: '#FFF6E8', color: '#FF9500' },
+  not_interested:{ label: 'Not Interest', bg: '#FFF0EE', color: '#FF3B30' },
+  converted:     { label: 'Converted',    bg: '#EDFAF2', color: '#34C759' },
+  lost:          { label: 'Lost',         bg: '#F1F5F9', color: '#94A3B8' },
 };
 
 export default function LeadStatusBadge({ status }) {
-  const { label, cls } = config[status] || { label: status, cls: 'bg-gray-500/20 text-gray-400' };
+  const c = config[status] || { label: status, bg: '#F1F5F9', color: '#94A3B8' };
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>
+    <span
+      className="text-xs px-2.5 py-1 rounded-full font-semibold"
+      style={{ background: c.bg, color: c.color }}
+    >
+      {c.label}
+    </span>
   );
 }

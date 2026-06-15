@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, Alert
+  StatusBar, Alert, Share, ActivityIndicator
 } from 'react-native';
+import api from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../theme/colors';
 import ContactAvatar from '../components/ContactAvatar';
@@ -21,7 +22,6 @@ const MENU_SECTIONS = [
     title: 'Account',
     items: [
       { icon: '🔒', label: 'SIM Settings',  sublabel: 'Choose which SIM to track', key: 'sim' },
-      { icon: '🌙', label: 'Dark Mode',      sublabel: 'Coming soon',               key: 'darkmode',  disabled: true },
       { icon: '❓', label: 'Help & Support', sublabel: 'FAQs and contact us',       key: 'help' },
       { icon: '🚪', label: 'Logout',         sublabel: null,                        key: 'logout',    danger: true },
     ],
@@ -29,8 +29,9 @@ const MENU_SECTIONS = [
 ];
 
 export default function MoreScreen({ onLogout }) {
-  const [user, setUser]           = useState(null);
+  const [user, setUser]                   = useState(null);
   const [showSimPicker, setShowSimPicker] = useState(false);
+  const [exporting, setExporting]         = useState(false);
 
   useEffect(() => {
     AsyncStorage.getItem('user').then((s) => { if (s) setUser(JSON.parse(s)); });
@@ -38,7 +39,7 @@ export default function MoreScreen({ onLogout }) {
 
   const quickStats = user?.stats || {};
 
-  const handleMenu = (key) => {
+  const handleMenu = async (key) => {
     if (key === 'logout') {
       Alert.alert('Logout?', 'You will need to log in again.', [
         { text: 'Cancel', style: 'cancel' },
@@ -54,7 +55,31 @@ export default function MoreScreen({ onLogout }) {
     } else if (key === 'sim') {
       setShowSimPicker(true);
     } else if (key === 'export') {
-      Alert.alert('Coming Soon', 'CSV export will be available in the next update.');
+      const userId = user?._id;
+      if (!userId) return;
+      setExporting(true);
+      try {
+        const res  = await api.get(`/api/calls/employee/${userId}`, { params: { limit: 500 } });
+        const calls = res.data.data?.calls || [];
+        const headers = ['Date', 'Time', 'Contact Name', 'Number', 'Type', 'Duration (s)'];
+        const rows = calls.map((c) => {
+          const d = new Date(c.timestamp);
+          return [
+            d.toLocaleDateString('en-IN'),
+            d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+            `"${(c.contactName || '').replace(/"/g, '""')}"`,
+            c.contactNumber || '',
+            c.callType || '',
+            c.duration || 0,
+          ];
+        });
+        const csv = [headers, ...rows].map((r) => r.join(',')).join('\n');
+        await Share.share({ title: 'Call History Export', message: csv });
+      } catch {
+        Alert.alert('Export Failed', 'Could not export call history. Check your connection.');
+      } finally {
+        setExporting(false);
+      }
     } else if (key === 'help') {
       Alert.alert('Help & Support', 'For help, contact your admin or write to support@calltracker.app');
     }
@@ -122,6 +147,12 @@ export default function MoreScreen({ onLogout }) {
           </View>
         ))}
 
+        {exporting && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10 }}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+            <Text style={{ color: Colors.primary, fontSize: 13, fontWeight: '600' }}>Exporting…</Text>
+          </View>
+        )}
         <Text style={s.version}>CallTracker v1.0 · Built with ♥</Text>
       </ScrollView>
 

@@ -8,8 +8,8 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState([]);
   const [callStats, setCallStats] = useState({});
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
-  const [loading, setLoading] = useState(false);
+  const [form, setForm]           = useState({ name: '', email: '', password: '', phone: '' });
+  const [loading, setLoading]     = useState(false);
 
   const fetchEmployees = async () => {
     try {
@@ -19,9 +19,7 @@ export default function EmployeesPage() {
       ]);
       setEmployees(empRes.data.data);
       const dialerMap = {};
-      (statsRes.data.data.topDialers || []).forEach((d) => {
-        dialerMap[d.employeeId] = d.count;
-      });
+      (statsRes.data.data.topDialers || []).forEach((d) => { dialerMap[d.employeeId] = d.count; });
       setCallStats(dialerMap);
     } catch {}
   };
@@ -33,7 +31,7 @@ export default function EmployeesPage() {
     setLoading(true);
     try {
       await api.post('/api/employees', form);
-      toast.success('Employee added');
+      toast.success('Employee added successfully');
       setShowModal(false);
       setForm({ name: '', email: '', password: '', phone: '' });
       fetchEmployees();
@@ -47,85 +45,90 @@ export default function EmployeesPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-white">Employees</h2>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-accent hover:bg-red-600 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-        >
+        <div>
+          <h2 className="text-xl font-bold text-textPrimary">Employees</h2>
+          <p className="text-textMuted text-sm">{employees.length} team members</p>
+        </div>
+        <button onClick={() => setShowModal(true)}
+          className="bg-primary hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
           + Add Employee
         </button>
       </div>
 
-      <div className="bg-card rounded-xl border border-navy overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-navy text-gray-400 uppercase text-xs">
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Phone</th>
-              <th className="px-4 py-3 text-left">Calls Today</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employees.map((emp) => (
-              <tr key={emp._id} className="border-b border-navy hover:bg-navy/40 transition-colors">
-                <td className="px-4 py-3">
-                  <div>
-                    <p className="text-white font-medium">{emp.name}</p>
-                    <p className="text-gray-500 text-xs">{emp.email}</p>
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-gray-300">{emp.phone || '—'}</td>
-                <td className="px-4 py-3 text-gray-300">{callStats[emp._id] || 0}</td>
-                <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${emp.isActive ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                    {emp.isActive ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <Link href={`/employees/${emp._id}`} className="text-accent hover:underline text-xs">
-                    View Details →
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {employees.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-gray-500">No employees found</td></tr>
-            )}
-          </tbody>
-        </table>
+      {/* Grid of employee cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {employees.map((emp) => (
+          <div key={emp._id} className="bg-white rounded-2xl border border-border shadow-card p-5 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              {/* Avatar */}
+              <div className="w-11 h-11 rounded-2xl bg-primaryLt text-primary text-lg font-bold flex items-center justify-center flex-shrink-0">
+                {emp.name[0].toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-textPrimary font-semibold truncate">{emp.name}</p>
+                <p className="text-textMuted text-xs truncate">{emp.email}</p>
+              </div>
+              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold flex-shrink-0 ${emp.isActive ? 'bg-green-50 text-success border border-green-200' : 'bg-gray-50 text-textMuted border border-border'}`}>
+                {emp.isActive ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-bg rounded-xl p-3 text-center">
+                <p className="text-textPrimary font-bold text-lg">{callStats[emp._id] || 0}</p>
+                <p className="text-textMuted text-xs">Calls Today</p>
+              </div>
+              <div className="bg-bg rounded-xl p-3 text-center">
+                <p className="text-textPrimary font-bold text-lg">{emp.phone || '—'}</p>
+                <p className="text-textMuted text-xs">Phone</p>
+              </div>
+            </div>
+
+            <Link href={`/employees/${emp._id}`}
+              className="block text-center text-sm font-semibold text-primary bg-primaryLt hover:bg-blue-100 py-2 rounded-xl transition-colors">
+              View Details →
+            </Link>
+          </div>
+        ))}
+
+        {employees.length === 0 && (
+          <div className="col-span-full bg-white rounded-2xl border border-border shadow-card p-10 text-center">
+            <span className="text-4xl block mb-3">👥</span>
+            <p className="text-textMuted">No employees yet. Add your first team member.</p>
+          </div>
+        )}
       </div>
 
       {/* Add Employee Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-card border border-navy rounded-xl p-6 w-full max-w-md mx-4">
-            <h3 className="text-white font-semibold mb-4">Add New Employee</h3>
-            <form onSubmit={handleAddEmployee} className="space-y-3">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl border border-border shadow-modal w-full max-w-md">
+            <div className="p-6 border-b border-border">
+              <h3 className="text-textPrimary font-bold text-lg">Add New Employee</h3>
+              <p className="text-textMuted text-sm mt-0.5">They'll receive an app login with these credentials</p>
+            </div>
+            <form onSubmit={handleAddEmployee} className="p-6 space-y-4">
               {[
-                { key: 'name', label: 'Full Name', type: 'text', placeholder: 'John Doe' },
-                { key: 'email', label: 'Email', type: 'email', placeholder: 'john@company.com' },
-                { key: 'password', label: 'Password', type: 'password', placeholder: '••••••••' },
-                { key: 'phone', label: 'Phone', type: 'text', placeholder: '+91 9999999999' }
+                { key: 'name',     label: 'Full Name', type: 'text',     placeholder: 'John Doe'            },
+                { key: 'email',    label: 'Email',     type: 'email',    placeholder: 'john@company.com'    },
+                { key: 'password', label: 'Password',  type: 'password', placeholder: 'Min 6 characters'   },
+                { key: 'phone',    label: 'Phone',     type: 'text',     placeholder: '+91 9999999999'      },
               ].map(({ key, label, type, placeholder }) => (
                 <div key={key}>
-                  <label className="block text-gray-300 text-xs mb-1">{label}</label>
-                  <input
-                    type={type}
-                    required={key !== 'phone'}
-                    value={form[key]}
+                  <label className="block text-textSecondary text-sm font-medium mb-1.5">{label}</label>
+                  <input type={type} required={key !== 'phone'} value={form[key]}
                     onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                     placeholder={placeholder}
-                    className="w-full bg-navy border border-navy rounded-lg px-3 py-2 text-white focus:outline-none focus:border-accent text-sm"
-                  />
+                    className="w-full bg-bg border border-border rounded-xl px-4 py-2.5 text-textPrimary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary placeholder:text-textMuted" />
                 </div>
               ))}
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 border border-gray-600 text-gray-300 py-2 rounded-lg text-sm hover:bg-navy">
+                <button type="button" onClick={() => setShowModal(false)}
+                  className="flex-1 border border-border text-textSecondary py-2.5 rounded-xl text-sm font-medium hover:border-danger hover:text-danger transition-colors">
                   Cancel
                 </button>
-                <button type="submit" disabled={loading} className="flex-1 bg-accent text-white py-2 rounded-lg text-sm hover:bg-red-600 disabled:opacity-60">
+                <button type="submit" disabled={loading}
+                  className="flex-1 bg-primary text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors">
                   {loading ? 'Adding...' : 'Add Employee'}
                 </button>
               </div>

@@ -7,8 +7,10 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   role: { type: String, enum: ['manager', 'employee'], default: 'employee' },
   phone: { type: String },
-  deviceId: { type: String },
-  isActive: { type: Boolean, default: true },
+  deviceId:    { type: String },
+  fcmToken:    { type: String, default: null },
+  dailyTarget: { type: Number, default: 0 },
+  isActive:    { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
 

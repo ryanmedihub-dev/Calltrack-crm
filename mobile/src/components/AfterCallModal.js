@@ -3,6 +3,8 @@ import {
   Modal, View, Text, TextInput, TouchableOpacity,
   StyleSheet, Animated, Keyboard, Platform, ActivityIndicator
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../lib/api';
 import { saveCallLog, syncCallLogs } from '../services/callLogService';
 import { saveNote } from '../utils/callNotes';
 import { Colors, CALL_TYPE } from '../theme/colors';
@@ -110,9 +112,10 @@ export default function AfterCallModal({ call, onClose }) {
 
     const enriched = {
       ...call,
-      status: status || undefined,
-      note:   note.trim() || undefined,
-      tags:   status ? [status] : [],
+      status:      status || undefined,
+      notes:       note.trim() || undefined,  // 'notes' matches CallLog schema field
+      tags:        status ? [status] : [],
+      followUpDate: followUpDate || undefined, // backend persists this to the matched lead
     };
 
     try {
@@ -128,6 +131,29 @@ export default function AfterCallModal({ call, onClose }) {
 
       // 3. Sync to backend
       await syncCallLogs();
+
+      // 4. PATCH notes/tags/status to the matched call record
+      if (note.trim() || status) {
+        try {
+          const stored = await AsyncStorage.getItem('user');
+          const userId = stored ? JSON.parse(stored)._id : null;
+          if (userId) {
+            const feedRes = await api.get(`/api/calls/employee/${userId}`, { params: { page: 1, limit: 10 } });
+            const feedCalls = feedRes.data.data?.calls || [];
+            const matched = feedCalls.find(c =>
+              c.contactNumber === call.contactNumber &&
+              Math.abs(new Date(c.timestamp) - new Date(call.timestamp)) < 60000
+            );
+            if (matched) {
+              await api.patch(`/api/calls/${matched._id}/notes`, {
+                notes:      note.trim() || undefined,
+                callTags:   status ? [status] : [],
+                callStatus: status || null,
+              });
+            }
+          }
+        } catch {}
+      }
     } catch {}
 
     setSaving(false);

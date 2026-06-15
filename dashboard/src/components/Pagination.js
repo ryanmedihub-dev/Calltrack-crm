@@ -5,19 +5,19 @@ export default function Pagination({ page, pages, onPage }) {
       <button
         disabled={page <= 1}
         onClick={() => onPage(page - 1)}
-        className="px-3 py-1 rounded bg-card text-gray-300 disabled:opacity-40 hover:bg-navy text-sm"
+        className="px-4 py-1.5 rounded-lg bg-white border border-border text-textSecondary text-sm font-medium disabled:opacity-40 hover:border-primary hover:text-primary transition-colors"
       >
-        Prev
+        ← Prev
       </button>
-      <span className="text-gray-400 text-sm">
+      <span className="text-textMuted text-sm px-2">
         {page} / {pages}
       </span>
       <button
         disabled={page >= pages}
         onClick={() => onPage(page + 1)}
-        className="px-3 py-1 rounded bg-card text-gray-300 disabled:opacity-40 hover:bg-navy text-sm"
+        className="px-4 py-1.5 rounded-lg bg-white border border-border text-textSecondary text-sm font-medium disabled:opacity-40 hover:border-primary hover:text-primary transition-colors"
       >
-        Next
+        Next →
       </button>
     </div>
   );
