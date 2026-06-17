@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, FlatList, Modal, TouchableOpacity,
   StatusBar, RefreshControl, ActivityIndicator
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -79,6 +79,74 @@ function BarChart({ data, color = Colors.primary }) {
   );
 }
 
+function DrillDownModal({ data, onClose }) {
+  if (!data) return null;
+  const formatTs = (ts) => new Date(ts).toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+  });
+  const typeConf = {
+    incoming:  { color: '#16A34A', icon: '↙' },
+    outgoing:  { color: '#D97706', icon: '↗' },
+    missed:    { color: '#DC2626', icon: '↙' },
+    rejected:  { color: '#DC2626', icon: '✕' },
+  };
+  return (
+    <Modal visible={!!data} animationType="slide" transparent statusBarTranslucent>
+      <View style={dd.overlay}>
+        <View style={dd.sheet}>
+          <View style={dd.topBar}>
+            <Text style={dd.title}>{data.label}</Text>
+            <Text style={dd.count}>{data.calls.length} calls</Text>
+            <TouchableOpacity onPress={onClose} style={dd.closeBtn}>
+              <Text style={dd.closeText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={data.calls}
+            keyExtractor={(_, i) => String(i)}
+            contentContainerStyle={{ padding: 16 }}
+            renderItem={({ item }) => {
+              const tc = typeConf[item.callType] || { color: '#64748B', icon: '↕' };
+              return (
+                <View style={dd.row}>
+                  <View style={[dd.iconDot, { backgroundColor: tc.color + '20' }]}>
+                    <Text style={{ color: tc.color, fontSize: 14 }}>{tc.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={dd.name} numberOfLines={1}>{item.contactName || item.contactNumber}</Text>
+                    <Text style={dd.num}>{item.contactNumber}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={dd.time}>{formatTs(item.timestamp)}</Text>
+                    <Text style={[dd.dur, { color: tc.color }]}>{item.duration ? `${Math.floor(item.duration/60)}m ${item.duration%60}s` : '—'}</Text>
+                  </View>
+                </View>
+              );
+            }}
+            ListEmptyComponent={<Text style={{ textAlign: 'center', color: '#94A3B8', marginTop: 40 }}>No calls</Text>}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const dd = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  sheet:   { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '85%' },
+  topBar:  { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  title:   { fontSize: 16, fontWeight: '700', color: '#0F172A', flex: 1 },
+  count:   { fontSize: 13, color: '#64748B', marginRight: 12 },
+  closeBtn:{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
+  closeText:{ fontSize: 12, color: '#64748B', fontWeight: '700' },
+  row:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F8F9FB' },
+  iconDot: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  name:    { fontSize: 13, fontWeight: '600', color: '#0F172A' },
+  num:     { fontSize: 11, color: '#64748B', marginTop: 1 },
+  time:    { fontSize: 11, color: '#64748B' },
+  dur:     { fontSize: 11, fontWeight: '700', marginTop: 2 },
+});
+
 export default function AnalyticsScreen() {
   const [stats,      setStats]      = useState(null);
   const [calls,      setCalls]      = useState([]);
@@ -87,6 +155,7 @@ export default function AnalyticsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userId,     setUserId]     = useState(null);
   const [loading,    setLoading]    = useState(true);
+  const [drillDown,  setDrillDown]  = useState(null); // { label, calls }
 
   const load = useCallback(async (uid, p) => {
     if (!uid) return;
@@ -138,6 +207,11 @@ export default function AnalyticsScreen() {
     { label: 'Miss', value: stats?.missed   || 0, color: Colors.danger  },
     { label: 'Rej',  value: stats?.rejected || 0, color: Colors.danger  },
   ];
+
+  const handleStatPress = (label, filterFn) => {
+    const filtered = calls.filter(filterFn);
+    setDrillDown({ label, calls: filtered });
+  };
 
   if (loading) {
     return (
@@ -199,17 +273,22 @@ export default function AnalyticsScreen() {
             {/* Stat grid — all figures come from the server aggregation */}
             <View style={s.grid}>
               {[
-                { icon: '📊', label: 'Total Calls',      value: stats?.total,              color: Colors.primary, duration: stats?.totalDuration },
-                { icon: '↙',  label: 'Incoming',         value: stats?.incoming,           color: Colors.success  },
-                { icon: '↗',  label: 'Outgoing',         value: stats?.outgoing,           color: Colors.warning  },
-                { icon: '✕',  label: 'Missed',           value: stats?.missed,             color: Colors.danger   },
-                { icon: '⊘',  label: 'Rejected',         value: stats?.rejected,           color: Colors.danger   },
-                { icon: '👤', label: 'Unique Contacts',  value: stats?.uniqueContacts,     color: Colors.purple   },
-                { icon: '⏱',  label: 'Avg Duration',     value: formatDuration(stats?.avgDuration || 0), color: Colors.primary },
-                { icon: '🔗', label: 'Connection %',     value: `${stats?.connectedRate || 0}%`, color: Colors.success },
-              ].map(({ icon, label, value, color, duration }) => (
+                { icon: '📊', label: 'Total Calls',     value: stats?.total,   color: Colors.primary, duration: stats?.totalDuration, filter: () => true },
+                { icon: '↙',  label: 'Incoming',        value: stats?.incoming, color: Colors.success, filter: (c) => c.callType === 'incoming' },
+                { icon: '↗',  label: 'Outgoing',        value: stats?.outgoing, color: Colors.warning, filter: (c) => c.callType === 'outgoing' },
+                { icon: '✕',  label: 'Missed',          value: stats?.missed,   color: Colors.danger,  filter: (c) => c.callType === 'missed' },
+                { icon: '⊘',  label: 'Rejected',        value: stats?.rejected, color: Colors.danger,  filter: (c) => c.callType === 'rejected' },
+                { icon: '👤', label: 'Unique Contacts', value: stats?.uniqueContacts, color: Colors.purple, filter: (c, _, arr) => {
+                    const seen = new Set(); return arr.filter((x) => { if (seen.has(x.contactNumber)) return false; seen.add(x.contactNumber); return true; }).includes(c);
+                  }},
+                { icon: '⏱',  label: 'Avg Duration',   value: formatDuration(stats?.avgDuration || 0), color: Colors.primary, filter: (c) => (c.duration || 0) > 0 },
+                { icon: '🔗', label: 'Connected',       value: stats?.connectedCalls, color: Colors.success, filter: (c) => (c.duration || 0) > 0 },
+              ].map(({ icon, label, value, color, duration, filter }) => (
                 <View key={label} style={s.halfWrap}>
-                  <StatCard icon={icon} label={label} value={value} color={color} duration={duration} half />
+                  <StatCard
+                    icon={icon} label={label} value={value} color={color} duration={duration} half
+                    onPress={() => handleStatPress(label, filter)}
+                  />
                 </View>
               ))}
             </View>
@@ -290,6 +369,8 @@ export default function AnalyticsScreen() {
           </>
         )}
       </ScrollView>
+
+      <DrillDownModal data={drillDown} onClose={() => setDrillDown(null)} />
     </View>
   );
 }
@@ -297,7 +378,7 @@ export default function AnalyticsScreen() {
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F8F9FB' },
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
-  heading: { fontSize: 24, fontWeight: '700', color: '#0F172A' },
+  heading: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
   periodRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 4, gap: 6 },
   periodBtn:      { flex: 1, paddingVertical: 7, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
   periodBtnActive:{ backgroundColor: Colors.primary, borderColor: Colors.primary },

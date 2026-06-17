@@ -67,7 +67,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
     paddingTop: 6,
-    paddingBottom: 10,
+    paddingBottom: 8,
     elevation: 8,
     shadowColor: '#000',
     shadowOpacity: 0.05,

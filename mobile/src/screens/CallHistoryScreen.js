@@ -25,6 +25,21 @@ const SORTS = [
   { key: 'shortest',label: 'Shortest call' },
 ];
 
+const DATE_FILTERS = [
+  { key: 'all',   label: 'All Time'   },
+  { key: 'today', label: 'Today'      },
+  { key: 'week',  label: 'This Week'  },
+  { key: 'month', label: 'This Month' },
+];
+
+function getDateBoundary(key) {
+  const now = new Date();
+  if (key === 'today') { const d = new Date(now); d.setHours(0,0,0,0); return d; }
+  if (key === 'week')  { const d = new Date(now); d.setDate(d.getDate()-7); return d; }
+  if (key === 'month') { const d = new Date(now); d.setDate(1); d.setHours(0,0,0,0); return d; }
+  return null;
+}
+
 function SortDropdown({ value, onChange, onClose }) {
   return (
     <View style={dd.wrap}>
@@ -56,6 +71,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   const [loading, setLoading]       = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing]       = useState(false);
+  const [dateFilter, setDateFilter] = useState('all');
   const searchRef = useRef(null);
 
   useEffect(() => {
@@ -79,6 +95,9 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   // Apply filter + search + sort
   useEffect(() => {
     let result = filter === 'all' ? [...calls] : calls.filter((c) => c.callType === filter);
+    // Date filter
+    const boundary = getDateBoundary(dateFilter);
+    if (boundary) result = result.filter((c) => new Date(c.timestamp) >= boundary);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) =>
@@ -95,7 +114,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
       }
     });
     setFiltered(result);
-  }, [calls, filter, search, sort]);
+  }, [calls, filter, search, sort, dateFilter]);
 
   const handleDeleteCall = async (call) => {
     if (!call._id) {
@@ -183,6 +202,22 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
         })}
       </ScrollView>
 
+      {/* Date filter chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
+        {DATE_FILTERS.map((df) => {
+          const active = dateFilter === df.key;
+          return (
+            <TouchableOpacity
+              key={df.key}
+              style={[{ borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6, backgroundColor: active ? Colors.primary : '#fff', borderWidth: 1, borderColor: active ? Colors.primary : '#E2E8F0' }]}
+              onPress={() => setDateFilter(df.key)}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : '#64748B' }}>{df.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       {/* Call list */}
       <FlatList
         data={groups}
@@ -235,7 +270,7 @@ const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F8F9FB' },
 
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
-  heading: { fontSize: 24, fontWeight: '700', color: '#0F172A' },
+  heading: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   syncDot: { color: Colors.primary, fontSize: 16, fontWeight: '900' },
   iconBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' },

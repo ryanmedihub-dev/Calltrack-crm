@@ -32,6 +32,14 @@ export const Colors = {
   rejectedBg:  '#FEE2E2',
 
   shadow: 'rgba(15,23,42,0.06)',
+
+  // Neutral tones
+  slate50:  '#F8FAFC',
+  slate100: '#F1F5F9',
+  slate200: '#E2E8F0',
+  slate500: '#64748B',
+  slate700: '#334155',
+  slate900: '#0F172A',
 };
 
 export const CALL_TYPE = {

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Alert, TextInput, Modal, RefreshControl, StatusBar
+  Alert, TextInput, Modal, RefreshControl, StatusBar, ScrollView
 } from 'react-native';
 import api from '../lib/api';
 import { C } from '../theme';
+import { Colors } from '../theme/colors';
 
 const STATUS = {
   new:            { fg: '#2563EB', bg: '#DBEAFE', label: 'New' },
@@ -15,17 +16,36 @@ const STATUS = {
   lost:           { fg: '#6B7280', bg: '#F3F4F6', label: 'Lost' },
 };
 
+const DATE_OPTIONS = [
+  { key: 'all',   label: 'All Time'   },
+  { key: 'today', label: 'Today'      },
+  { key: 'week',  label: 'This Week'  },
+  { key: 'month', label: 'This Month' },
+];
+
+function getLeadDateBoundary(key) {
+  const now = new Date();
+  if (key === 'today') { const d = new Date(now); d.setHours(0,0,0,0); return d; }
+  if (key === 'week')  { const d = new Date(now); d.setDate(d.getDate()-7); return d; }
+  if (key === 'month') { const d = new Date(now); d.setDate(1); d.setHours(0,0,0,0); return d; }
+  return null;
+}
+
 export default function LeadsScreen() {
   const [leads, setLeads]         = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [noteModal, setNoteModal] = useState(null);
   const [noteText, setNoteText]   = useState('');
-  const [saving, setSaving]       = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter,   setDateFilter]   = useState('all');
 
   const fetchLeads = async () => {
     try {
       const res = await api.get('/api/leads/assigned');
-      setLeads(res.data.data || []);
+      // Backend returns { leads: [...], total, page, pages } — extract the array
+      const payload = res.data.data;
+      setLeads(Array.isArray(payload) ? payload : (payload?.leads || []));
     } catch {}
   };
 
@@ -52,6 +72,13 @@ export default function LeadsScreen() {
       setSaving(false);
     }
   };
+
+  const displayLeads = leads.filter((l) => {
+    if (statusFilter !== 'all' && l.status !== statusFilter) return false;
+    const boundary = getLeadDateBoundary(dateFilter);
+    if (boundary && new Date(l.createdAt) < boundary) return false;
+    return true;
+  });
 
   const renderItem = ({ item }) => {
     const st = STATUS[item.status] || { fg: C.textMuted, bg: C.bg, label: item.status };
@@ -103,8 +130,41 @@ export default function LeadsScreen() {
         </View>
       </View>
 
+      {/* Status + Date filter chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+        {['all', ...Object.keys(STATUS)].map((key) => {
+          const active = statusFilter === key;
+          const cfg = STATUS[key] || { label: 'All', fg: '#64748B', bg: '#F1F5F9' };
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[{ borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6, backgroundColor: active ? (key === 'all' ? Colors.primary : cfg.bg) : '#fff', borderWidth: 1, borderColor: active ? (key === 'all' ? Colors.primary : cfg.fg) : '#E2E8F0' }]}
+              onPress={() => setStatusFilter(key)}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: active ? (key === 'all' ? '#fff' : cfg.fg) : '#64748B' }}>
+                {key === 'all' ? 'All Status' : cfg.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+        {DATE_OPTIONS.map((df) => {
+          const active = dateFilter === df.key;
+          return (
+            <TouchableOpacity
+              key={df.key}
+              style={[{ borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, marginRight: 6, backgroundColor: active ? Colors.primary : '#fff', borderWidth: 1, borderColor: active ? Colors.primary : '#E2E8F0' }]}
+              onPress={() => setDateFilter(df.key)}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: active ? '#fff' : '#64748B' }}>{df.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       <FlatList
-        data={leads}
+        data={displayLeads}
         keyExtractor={(item) => item._id}
         renderItem={renderItem}
         contentContainerStyle={s.listContent}
@@ -159,17 +219,17 @@ export default function LeadsScreen() {
 const s = StyleSheet.create({
   root:       { flex: 1, backgroundColor: C.bg },
   topBar:     { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
-  heading:    { color: C.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
+  heading:    { color: C.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.5 },
   countBadge: { backgroundColor: C.primaryLight, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   countText:  { color: C.primary, fontSize: 13, fontWeight: '700' },
   listContent: { paddingHorizontal: 16, paddingBottom: 32 },
 
-  card:       { backgroundColor: C.surface, borderRadius: 16, padding: 14, marginBottom: 12, shadowColor: C.shadow, elevation: 2 },
+  card:       { backgroundColor: C.surface, borderRadius: 12, padding: 12, marginBottom: 12, shadowColor: C.shadow, elevation: 2 },
   cardTop:    { flexDirection: 'row', alignItems: 'center' },
   initials:   { width: 42, height: 42, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
   initialsText: { fontSize: 16, fontWeight: '700' },
-  leadName:   { color: C.text, fontSize: 15, fontWeight: '700' },
-  leadPhone:  { color: C.textSec, fontSize: 12, marginTop: 1 },
+  leadName:   { color: C.text, fontSize: 13, fontWeight: '700' },
+  leadPhone:  { color: C.textSec, fontSize: 11, marginTop: 1 },
   badge:      { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 8 },
   badgeText:  { fontSize: 11, fontWeight: '700' },
 

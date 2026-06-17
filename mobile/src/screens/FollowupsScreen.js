@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   RefreshControl, StatusBar, Linking, Alert
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/api';
 import ContactAvatar from '../components/ContactAvatar';
 import TagChip from '../components/TagChip';
@@ -169,9 +170,13 @@ export default function FollowupsScreen({ onAddNote }) {
           if (item.isLead) {
             try { await api.put(`/api/leads/${item.leadId}`, { followUpDate: null }); } catch {}
           } else {
-            // Update local note
-            const existing = { note: item.note, tags: item.tags, followUp: { ...item.followUp, done: true } };
-            await saveNote({ contactNumber: item.contactNumber, timestamp: item.followUp?.date, callType: 'followup' }, existing);
+            // Use the original key stored in item.key to mark done directly in AsyncStorage
+            const existing = await AsyncStorage.getItem(item.key);
+            if (existing) {
+              const parsed = JSON.parse(existing);
+              parsed.followUp = { ...parsed.followUp, done: true };
+              await AsyncStorage.setItem(item.key, JSON.stringify(parsed));
+            }
           }
           load();
         },
@@ -252,7 +257,7 @@ export default function FollowupsScreen({ onAddNote }) {
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F8F9FB' },
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
-  heading: { fontSize: 24, fontWeight: '700', color: '#0F172A' },
+  heading: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
   overdueChip: { backgroundColor: Colors.dangerBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   overdueText: { fontSize: 12, fontWeight: '700', color: Colors.danger },
 
@@ -266,11 +271,11 @@ const s = StyleSheet.create({
 
   list:        { paddingHorizontal: 16, paddingBottom: 40 },
 
-  card:        { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 12, overflow: 'hidden' },
-  cardTop:     { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  card:        { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 12, overflow: 'hidden' },
+  cardTop:     { flexDirection: 'row', alignItems: 'center', padding: 12 },
   cardMid:     { flex: 1, marginLeft: 12 },
-  cardName:    { fontSize: 15, fontWeight: '700', color: '#0F172A' },
-  cardNumber:  { fontSize: 12, color: '#64748B', marginTop: 1 },
+  cardName:    { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+  cardNumber:  { fontSize: 11, color: '#64748B', marginTop: 1 },
   dateText:    { fontSize: 12, color: '#64748B' },
 
   noteRow:     { borderTopWidth: 1, borderTopColor: '#F1F5F9', marginHorizontal: 14, paddingVertical: 8 },

@@ -165,7 +165,7 @@ const s = StyleSheet.create({
   swipeIcon:   { fontSize: 22 },
   swipeLabel:  { fontSize: 13, fontWeight: '700', marginHorizontal: 6 },
 
-  card:        { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
+  card:        { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
   cardSelected:{ borderColor: Colors.primary, borderWidth: 2 },
   selectedCheck:{ position: 'absolute', right: -4, top: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center' },
 
@@ -173,10 +173,10 @@ const s = StyleSheet.create({
   middleCol:   { flex: 1, marginHorizontal: 10 },
   rightCol:    { alignItems: 'flex-end' },
 
-  name:        { fontSize: 15, fontWeight: '600', color: '#0F172A', marginBottom: 2 },
-  number:      { fontSize: 12, color: '#64748B', marginBottom: 4 },
-  time:        { fontSize: 12, color: '#64748B' },
-  duration:    { fontSize: 13, fontFamily: 'monospace', color: '#0F172A', fontWeight: '600', marginTop: 2 },
+  name:        { fontSize: 13, fontWeight: '600', color: '#0F172A', marginBottom: 2 },
+  number:      { fontSize: 11, color: '#64748B', marginBottom: 4 },
+  time:        { fontSize: 11, color: '#64748B' },
+  duration:    { fontSize: 12, fontFamily: 'monospace', color: '#0F172A', fontWeight: '600', marginTop: 2 },
 
   tagsRow:     { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingBottom: 4 },
 
