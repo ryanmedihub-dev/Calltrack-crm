@@ -172,6 +172,7 @@ export default function LeadsPage() {
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState({ status: '', assignedTo: '', search: '' });
+  const [colSearch, setColSearch] = useState({ name: '', phone: '', company: '', assignedTo: '' });
   const [selected, setSelected] = useState(new Set());
   const [showAdd, setShowAdd] = useState(false);
   const [detailLead, setDetailLead] = useState(null);
@@ -272,6 +273,17 @@ export default function LeadsPage() {
     } catch { toast.error('Failed to update status'); }
   };
 
+  const filteredLeads = leads.filter(l => {
+    const q = (s) => (s || '').toLowerCase();
+    if (colSearch.name   && !q(l.name).includes(q(colSearch.name)))         return false;
+    if (colSearch.phone  && !q(l.phone).includes(q(colSearch.phone)))        return false;
+    if (colSearch.company && !q(l.company).includes(q(colSearch.company)))   return false;
+    if (colSearch.assignedTo && !q(l.assignedTo?.name).includes(q(colSearch.assignedTo))) return false;
+    return true;
+  });
+
+  const hasColSearch = Object.values(colSearch).some(Boolean);
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -354,33 +366,81 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {/* Column search active chips */}
+      {hasColSearch && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-textMuted font-medium">Column filters:</span>
+          {Object.entries(colSearch).filter(([, v]) => v).map(([k, v]) => (
+            <span key={k} className="inline-flex items-center gap-1.5 bg-primaryLt text-primary border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-full">
+              {k}: "{v}"
+              <button onClick={() => setColSearch(s => ({ ...s, [k]: '' }))} className="hover:text-danger transition-colors">✕</button>
+            </span>
+          ))}
+          <button onClick={() => setColSearch({ name: '', phone: '', company: '', assignedTo: '' })}
+            className="text-xs text-textMuted hover:text-danger transition-colors font-medium">Clear all</button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-2xl border border-border shadow-card overflow-x-auto">
         <table className="w-full text-sm" style={{ minWidth: 900 }}>
           <thead>
-            <tr className="border-b border-border text-textMuted text-xs font-semibold uppercase tracking-wide bg-bg">
-              <th className="px-4 py-3 text-left w-10">
+            <tr className="border-b-0 text-textMuted text-xs font-semibold uppercase tracking-wide bg-bg">
+              <th className="px-4 pt-3.5 pb-2 text-left w-10">
                 <input type="checkbox" checked={selected.size === leads.length && leads.length > 0}
                   onChange={toggleAll}
                   className="rounded border-border" />
               </th>
-              <th className="px-4 py-3 text-left">Created</th>
-              <th className="px-4 py-3 text-left">Lead Name</th>
-              <th className="px-4 py-3 text-left">Contact No.</th>
-              <th className="px-4 py-3 text-left">Attempts</th>
-              <th className="px-4 py-3 text-left">Tags</th>
-              <th className="px-4 py-3 text-left">Assign To</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Last Call</th>
-              <th className="px-4 py-3 text-left">Duration</th>
-              <th className="px-4 py-3 text-left">Last Note</th>
-              <th className="px-4 py-3 text-left">Company</th>
-              <th className="px-4 py-3 text-left">Follow-up</th>
-              <th className="px-4 py-3 text-left">Actions</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Created</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Lead Name</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Contact No.</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Attempts</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Tags</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Assign To</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Status</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Last Call</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Duration</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Last Note</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Company</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Follow-up</th>
+              <th className="px-4 pt-3.5 pb-2 text-left">Actions</th>
+            </tr>
+            {/* Column search row */}
+            <tr className="border-b border-border bg-bg">
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2">
+                <input value={colSearch.name} placeholder="Search name…"
+                  onChange={e => setColSearch(s => ({ ...s, name: e.target.value }))}
+                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
+              </td>
+              <td className="px-4 pb-2">
+                <input value={colSearch.phone} placeholder="Search phone…"
+                  onChange={e => setColSearch(s => ({ ...s, phone: e.target.value }))}
+                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
+              </td>
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2">
+                <input value={colSearch.assignedTo} placeholder="Search employee…"
+                  onChange={e => setColSearch(s => ({ ...s, assignedTo: e.target.value }))}
+                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
+              </td>
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2">
+                <input value={colSearch.company} placeholder="Search company…"
+                  onChange={e => setColSearch(s => ({ ...s, company: e.target.value }))}
+                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
+              </td>
+              <td className="px-4 pb-2" />
+              <td className="px-4 pb-2" />
             </tr>
           </thead>
           <tbody>
-            {leads.map((lead) => (
+            {filteredLeads.map((lead) => (
               <tr key={lead._id} className="border-b border-border hover:bg-bg/60 transition-colors">
                 <td className="px-4 py-3">
                   <input type="checkbox" checked={selected.has(lead._id)} onChange={() => toggleSelect(lead._id)}

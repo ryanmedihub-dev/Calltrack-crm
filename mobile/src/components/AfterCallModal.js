@@ -122,12 +122,14 @@ export default function AfterCallModal({ call, onClose }) {
       // 1. Save to local call log (will be synced to backend)
       await saveCallLog(enriched);
 
-      // 2. Save note + tags + follow-up to local notes (shown on CallCard)
-      await saveNote(call, {
-        note:     note.trim(),
-        tags:     status ? [status] : [],
-        followUp: followUpDate ? { date: followUpDate, done: false } : null,
-      });
+      // 2. Save note + tags + follow-up to local notes — only when user entered something
+      if (note.trim() || status || followUpDate) {
+        await saveNote(call, {
+          note:     note.trim(),
+          tags:     status ? [status] : [],
+          followUp: followUpDate ? { date: followUpDate, done: false } : null,
+        });
+      }
 
       // 3. Sync to backend
       await syncCallLogs();

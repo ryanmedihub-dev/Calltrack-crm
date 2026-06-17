@@ -10,7 +10,7 @@ import LoginScreen       from './src/screens/LoginScreen';
 import CallHistoryScreen from './src/screens/CallHistoryScreen';
 import AnalyticsScreen   from './src/screens/AnalyticsScreen';
 import FollowupsScreen   from './src/screens/FollowupsScreen';
-import ContactsScreen    from './src/screens/ContactsScreen';
+import LeadsScreen       from './src/screens/LeadsScreen';
 import MoreScreen        from './src/screens/MoreScreen';
 import TabBar            from './src/components/TabBar';
 import AfterCallModal    from './src/components/AfterCallModal';
@@ -157,7 +157,7 @@ function App() {
           {tab === 'calls'     && <CallHistoryScreen onAddNote={setNoteCall} onFollowUp={setNoteCall} />}
           {tab === 'analytics' && <AnalyticsScreen />}
           {tab === 'followups' && <FollowupsScreen  onAddNote={setNoteCall} />}
-          {tab === 'contacts'  && <ContactsScreen />}
+          {tab === 'leads'     && <LeadsScreen />}
           {tab === 'more'      && <MoreScreen onLogout={handleLogout} />}
         </View>
         <TabBar active={tab} onChange={setTab} badges={badges} />

@@ -183,23 +183,88 @@ router.post('/sync', protect, async (req, res) => {
 
     for (const log of inserted) {
       const lead = phoneToLead[log.contactNumber];
+
       if (lead) {
+        // ── Existing lead: update call stats + push note if present ──────
         await CallLog.findByIdAndUpdate(log._id, { leadId: lead._id });
+
         const updateData = {
           $inc: { attempts: 1 },
           $set: {
-            lastCallAt:           log.timestamp,
-            lastCallType:         log.callType,
-            lastCallDuration:     log.duration || 0,
-            lastCallEmployee:     log.employeeName,
-            lastCallEmployeePhone: log.employeePhone
+            lastCallAt:            log.timestamp,
+            lastCallType:          log.callType,
+            lastCallDuration:      log.duration || 0,
+            lastCallEmployee:      log.employeeName,
+            lastCallEmployeePhone: log.employeePhone,
           }
         };
+
         if ((log.duration || 0) > 0) updateData.$inc.connectedCallCount = 1;
-        // Persist follow-up date to lead if employee set one for this number
+
+        // Follow-up date
         const fuDate = followUpMap[log.contactNumber];
         if (fuDate) updateData.$set.followUpDate = new Date(fuDate);
+
+        // Push note to lead's notes array if employee added one
+        if (log.notes && log.notes.trim()) {
+          updateData.$push = {
+            notes: {
+              text:    log.notes.trim(),
+              addedBy: log.employeeId,
+              addedAt: new Date(log.timestamp)
+            }
+          };
+        }
+
+        // Sync callStatus to lastCallSummary field for quick reference
+        if (log.callStatus) updateData.$set.lastCallSummary = log.callStatus;
+
         await Lead.findByIdAndUpdate(lead._id, updateData);
+
+      } else {
+        // ── New number: auto-create lead ──────────────────────────────────
+        const isConnected = (log.duration || 0) > 0;
+
+        // Only auto-create if connected call or employee explicitly added input
+        const hasEmployeeInput = !!(log.notes?.trim() || log.callStatus || (log.callTags && log.callTags.length));
+
+        if (isConnected || hasEmployeeInput) {
+          try {
+            const fuDate = followUpMap[log.contactNumber];
+            const initialNotes = (log.notes && log.notes.trim())
+              ? [{ text: log.notes.trim(), addedBy: log.employeeId, addedAt: new Date(log.timestamp) }]
+              : [];
+
+            const newLead = await Lead.create({
+              name:                  log.contactName && log.contactName !== 'Unknown'
+                                       ? log.contactName
+                                       : log.contactNumber,
+              phone:                 log.contactNumber,
+              status:                'new',
+              source:                'Call',
+              capturedBy:            log.employeeName,
+              assignedTo:            log.employeeId,
+              attempts:              1,
+              lastCallAt:            log.timestamp,
+              lastCallType:          log.callType,
+              lastCallDuration:      log.duration || 0,
+              lastCallEmployee:      log.employeeName,
+              lastCallEmployeePhone: log.employeePhone,
+              lastCallSummary:       log.callStatus || null,
+              connectedCallCount:    isConnected ? 1 : 0,
+              followUpDate:          fuDate ? new Date(fuDate) : null,
+              notes:                 initialNotes,
+            });
+
+            await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
+
+          } catch (leadErr) {
+            // Duplicate phone (race condition) — silently skip
+            if (leadErr.code !== 11000) {
+              console.error('Auto lead create error:', leadErr.message);
+            }
+          }
+        }
       }
     }
 

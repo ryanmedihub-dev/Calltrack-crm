@@ -6,7 +6,7 @@ const TABS = [
   { key: 'calls',     label: 'Calls',      icon: '📞' },
   { key: 'analytics', label: 'Analytics',  icon: '📊' },
   { key: 'followups', label: 'Follow-ups', icon: '📅' },
-  { key: 'contacts',  label: 'Contacts',   icon: '👥' },
+  { key: 'leads',     label: 'Leads',      icon: '🎯' },
   { key: 'more',      label: 'More',       icon: '⋯'  },
 ];
 

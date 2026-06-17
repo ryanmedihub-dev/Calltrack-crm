@@ -22,7 +22,7 @@ function savePrefs(p){ localStorage.setItem(PREF_KEY, JSON.stringify(p)); }
 function Toggle({ checked, onChange }) {
   return (
     <button type="button" onClick={() => onChange(!checked)}
-      className={`relative w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none ${checked ? 'bg-primary' : 'bg-gray-200'}`}>
+      className={`relative w-10 h-6 rounded-full transition-colors duration-200 focus:outline-none flex-shrink-0 ${checked ? 'bg-primary' : 'bg-gray-200'}`}>
       <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-1'}`} />
     </button>
   );
@@ -32,7 +32,6 @@ function buildNotifications(calls, leads) {
   const now  = Date.now();
   const list = [];
 
-  // Follow-up reminders from leads
   leads
     .filter(l => l.followUpDate && new Date(l.followUpDate) <= new Date(now + 86400000))
     .forEach(l => {
@@ -49,7 +48,6 @@ function buildNotifications(calls, leads) {
       });
     });
 
-  // Recent missed calls from last 24h
   calls
     .filter(c => c.callType === 'missed' && (now - new Date(c.timestamp)) < 86400000)
     .slice(0, 5)
@@ -66,7 +64,6 @@ function buildNotifications(calls, leads) {
       });
     });
 
-  // Recent syncs — outgoing calls in last hour
   const recentSync = calls.filter(c => (now - new Date(c.timestamp)) < 3600000);
   if (recentSync.length > 0) {
     list.push({
@@ -81,12 +78,12 @@ function buildNotifications(calls, leads) {
     });
   }
 
-  // Sort newest first
   return list.sort((a, b) => new Date(b.time) - new Date(a.time));
 }
 
 function timeAgo(ts) {
   const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (diff < 0) return 'Just now';
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -136,7 +133,7 @@ export default function NotificationsPage() {
     const updated = { ...prefs, [key]: val };
     setPrefs(updated);
     savePrefs(updated);
-    toast.success(`${key} notifications ${val ? 'enabled' : 'disabled'}`);
+    toast.success(`${val ? 'Enabled' : 'Disabled'} ${key} notifications`);
   };
 
   const visible = tab === 'all'
@@ -146,9 +143,9 @@ export default function NotificationsPage() {
   const unreadCount = notifications.filter(n => !readSet.has(n.id) && prefs[n.type] !== false).length;
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-textPrimary flex items-center gap-2">
             Notifications
@@ -160,90 +157,104 @@ export default function NotificationsPage() {
         </div>
         {unreadCount > 0 && (
           <button onClick={markAllRead}
-            className="text-xs text-primary hover:text-primaryDk font-semibold transition-colors">
+            className="text-xs text-primary hover:text-primaryDk font-semibold bg-primaryLt border border-blue-200 px-3 py-1.5 rounded-xl transition-colors">
             Mark all read
           </button>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-white border border-border rounded-xl p-1 w-fit shadow-card">
-        {[
-          { key: 'all',    label: 'All' },
-          { key: 'unread', label: `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}` },
-        ].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-primary text-white shadow-sm' : 'text-textMuted hover:text-textSecondary'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Two-column layout */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-start">
 
-      {/* Notification list */}
-      <div className="bg-white border border-border rounded-2xl shadow-card overflow-hidden">
-        {loading ? (
-          <div className="space-y-0 divide-y divide-border">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex items-start gap-4 px-5 py-4">
-                <div className="w-10 h-10 bg-border rounded-xl animate-pulse flex-shrink-0" />
-                <div className="flex-1 space-y-2 pt-1">
-                  <div className="h-3 bg-border rounded animate-pulse w-3/4" />
-                  <div className="h-3 bg-border rounded animate-pulse w-1/2" />
+        {/* Left: Notifications list — 2/3 width */}
+        <div className="xl:col-span-2 space-y-4">
+          {/* Tabs */}
+          <div className="flex gap-1 bg-white border border-border rounded-xl p-1 w-fit shadow-card">
+            {[
+              { key: 'all',    label: 'All' },
+              { key: 'unread', label: `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}` },
+            ].map(t => (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-primary text-white shadow-sm' : 'text-textMuted hover:text-textSecondary'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* List */}
+          <div className="bg-white border border-border rounded-2xl shadow-card overflow-hidden">
+            {loading ? (
+              <div className="divide-y divide-border">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="flex items-start gap-4 px-5 py-4">
+                    <div className="w-10 h-10 bg-border rounded-xl animate-pulse flex-shrink-0" />
+                    <div className="flex-1 space-y-2 pt-1">
+                      <div className="h-3 bg-border rounded animate-pulse w-3/4" />
+                      <div className="h-3 bg-border rounded animate-pulse w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : visible.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-textMuted gap-2">
+                <span className="text-4xl">🔔</span>
+                <p className="text-sm font-medium">{tab === 'unread' ? 'All caught up!' : 'No notifications'}</p>
+                <p className="text-xs">Check back later or adjust your preferences</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {visible.map(n => {
+                  const isRead = readSet.has(n.id);
+                  return (
+                    <div key={n.id}
+                      onClick={() => markRead(n.id)}
+                      className={`flex items-start gap-4 px-5 py-4 cursor-pointer transition-colors ${isRead ? 'hover:bg-bg' : 'bg-blue-50/30 hover:bg-blue-50/60'}`}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ background: n.bg }}>
+                        {n.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm leading-snug ${isRead ? 'text-textSecondary font-normal' : 'text-textPrimary font-semibold'}`}>{n.title}</p>
+                        <p className="text-xs text-textMuted mt-0.5 truncate">{n.body}</p>
+                        <p className="text-xs text-textMuted mt-1">{timeAgo(n.time)}</p>
+                      </div>
+                      {!isRead && <span className="w-2 h-2 bg-primary rounded-full mt-2 flex-shrink-0" />}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Preferences — 1/3 width */}
+        <div className="bg-white border border-border rounded-2xl shadow-card">
+          <div className="px-5 py-4 border-b border-border">
+            <h3 className="font-bold text-textPrimary text-sm">Notification Preferences</h3>
+            <p className="text-xs text-textMuted mt-0.5">Toggle which alerts you receive</p>
+          </div>
+          <div className="divide-y divide-border">
+            {[
+              { key: 'newLead',      label: 'New Lead Assigned',   desc: 'When a lead is assigned to you', icon: '🎯' },
+              { key: 'followUp',     label: 'Follow-up Reminders', desc: 'Upcoming or overdue follow-ups',  icon: '📅' },
+              { key: 'missed',       label: 'Missed Call Alerts',  desc: 'Missed calls in the last 24h',   icon: '📵' },
+              { key: 'callSync',     label: 'Call Sync Events',    desc: 'When call logs sync from mobile', icon: '🔄' },
+              { key: 'weeklyReport', label: 'Weekly Report',       desc: 'Performance summary every week',  icon: '📊' },
+            ].map(({ key, label, desc, icon }) => (
+              <div key={key} className="flex items-center justify-between px-5 py-3.5">
+                <div className="flex items-start gap-3 mr-3 min-w-0">
+                  <span className="text-lg flex-shrink-0 mt-0.5">{icon}</span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-textPrimary leading-none">{label}</p>
+                    <p className="text-xs text-textMuted mt-0.5">{desc}</p>
+                  </div>
                 </div>
+                <Toggle checked={!!prefs[key]} onChange={v => updatePref(key, v)} />
               </div>
             ))}
           </div>
-        ) : visible.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-textMuted gap-2">
-            <span className="text-4xl">🔔</span>
-            <p className="text-sm font-medium">{tab === 'unread' ? 'All caught up!' : 'No notifications'}</p>
+          <div className="px-5 py-3 border-t border-border">
+            <p className="text-xs text-textMuted">Changes are saved automatically to this browser.</p>
           </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {visible.map(n => {
-              const isRead = readSet.has(n.id);
-              return (
-                <div key={n.id}
-                  onClick={() => markRead(n.id)}
-                  className={`flex items-start gap-4 px-5 py-4 cursor-pointer transition-colors ${isRead ? 'hover:bg-bg' : 'bg-blue-50/30 hover:bg-blue-50/50'}`}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{ background: n.bg }}>
-                    {n.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm leading-snug ${isRead ? 'text-textSecondary font-normal' : 'text-textPrimary font-semibold'}`}>{n.title}</p>
-                    <p className="text-xs text-textMuted mt-0.5 truncate">{n.body}</p>
-                    <p className="text-xs text-textMuted mt-1">{timeAgo(n.time)}</p>
-                  </div>
-                  {!isRead && <span className="w-2 h-2 bg-primary rounded-full mt-2 flex-shrink-0" />}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Preferences */}
-      <div className="bg-white border border-border rounded-2xl shadow-card">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="font-bold text-textPrimary">Notification Preferences</h3>
-          <p className="text-xs text-textMuted mt-0.5">Choose which notifications to receive</p>
-        </div>
-        <div className="divide-y divide-border">
-          {[
-            { key: 'newLead',      label: 'New Lead Assigned',   desc: 'When a lead is assigned to you' },
-            { key: 'followUp',     label: 'Follow-up Reminders', desc: 'Leads with upcoming or overdue follow-ups' },
-            { key: 'missed',       label: 'Missed Call Alerts',  desc: 'Missed outgoing calls in the last 24 hours' },
-            { key: 'callSync',     label: 'Call Sync Events',    desc: 'When call logs are synced from mobile' },
-            { key: 'weeklyReport', label: 'Weekly Report',       desc: 'Weekly performance summary' },
-          ].map(({ key, label, desc }) => (
-            <div key={key} className="flex items-center justify-between px-5 py-4">
-              <div className="min-w-0 mr-4">
-                <p className="text-sm font-medium text-textPrimary">{label}</p>
-                <p className="text-xs text-textMuted mt-0.5">{desc}</p>
-              </div>
-              <Toggle checked={!!prefs[key]} onChange={v => updatePref(key, v)} />
-            </div>
-          ))}
         </div>
       </div>
     </div>

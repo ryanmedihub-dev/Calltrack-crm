@@ -103,7 +103,19 @@ export default function CallLogsPage() {
   const [pages, setPages] = useState(1);
   const [page, setPage] = useState(1);
   const [employees, setEmployees] = useState([]);
-  const [filters, setFilters] = useState({ employeeId: '', callType: '', startDate: '', endDate: '', search: '' });
+  const [filters, setFilters] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        employeeId: params.get('employeeId') || '',
+        callType:   params.get('callType')   || '',
+        startDate:  params.get('startDate')  || '',
+        endDate:    params.get('endDate')    || '',
+        search:     params.get('search')     || '',
+      };
+    }
+    return { employeeId: '', callType: '', startDate: '', endDate: '', search: '' };
+  });
   const [expanded, setExpanded] = useState(null);
   const [createLeadCall, setCreateLeadCall] = useState(null);
   const [noteModal, setNoteModal] = useState(null);
@@ -212,7 +224,50 @@ export default function CallLogsPage() {
           className="border border-border text-textMuted text-sm px-4 py-2 rounded-xl hover:border-danger hover:text-danger transition-colors">
           Reset
         </button>
+        <button onClick={() => applyFilter({})}
+          className="bg-primary text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-primaryDk transition-colors">
+          Apply
+        </button>
       </div>
+
+      {/* Active filter chips */}
+      {(() => {
+        const chips = [];
+        if (filters.callType) {
+          chips.push({ key: 'callType', label: `Type: ${CHIP_LABELS[filters.callType]}`, clear: { callType: '' } });
+        }
+        if (filters.search) {
+          chips.push({ key: 'search', label: `Search: "${filters.search}"`, clear: { search: '' } });
+        }
+        if (filters.employeeId) {
+          const emp = employees.find(e => e._id === filters.employeeId);
+          chips.push({ key: 'employeeId', label: `Employee: ${emp?.name || filters.employeeId}`, clear: { employeeId: '' } });
+        }
+        if (filters.startDate) {
+          chips.push({ key: 'startDate', label: `From: ${filters.startDate}`, clear: { startDate: '' } });
+        }
+        if (filters.endDate) {
+          chips.push({ key: 'endDate', label: `To: ${filters.endDate}`, clear: { endDate: '' } });
+        }
+        if (chips.length === 0) return null;
+        return (
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs text-textMuted font-medium">Active filters:</span>
+            {chips.map(chip => (
+              <span key={chip.key}
+                className="inline-flex items-center gap-1.5 bg-primaryLt text-primary border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-full">
+                {chip.label}
+                <button onClick={() => applyFilter(chip.clear)}
+                  className="hover:text-danger transition-colors leading-none">✕</button>
+              </span>
+            ))}
+            <button onClick={() => applyFilter({ employeeId: '', callType: '', startDate: '', endDate: '', search: '' })}
+              className="text-xs text-textMuted hover:text-danger transition-colors font-medium">
+              Clear all
+            </button>
+          </div>
+        );
+      })()}
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-border shadow-card overflow-x-auto">
