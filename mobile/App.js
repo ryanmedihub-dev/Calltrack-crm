@@ -16,7 +16,7 @@ import TabBar            from './src/components/TabBar';
 import AfterCallModal    from './src/components/AfterCallModal';
 import AddNoteModal      from './src/components/AddNoteModal';
 
-import notifee, { TriggerType, AndroidImportance, AndroidCategory } from '@notifee/react-native';
+// import notifee, { TriggerType, AndroidImportance, AndroidCategory } from '@notifee/react-native';
 import { requestCallPermissions, requestOverlayPermission, onCallEnded } from './src/services/phoneStateService';
 import { applyTrackedSim } from './src/services/simService';
 import { getPendingFollowUps } from './src/utils/callNotes';
@@ -118,52 +118,52 @@ function App() {
     scheduleFollowUpNotifications();
   };
 
-  const scheduleFollowUpNotifications = async () => {
-    try {
-      await notifee.createChannel({
-        id:         'followups',
-        name:       'Follow-up Reminders',
-        importance: AndroidImportance.HIGH,
-        sound:      'default',
-      });
+  // const scheduleFollowUpNotifications = async () => {
+  //   try {
+  //     await notifee.createChannel({
+  //       id:         'followups',
+  //       name:       'Follow-up Reminders',
+  //       importance: AndroidImportance.HIGH,
+  //       sound:      'default',
+  //     });
 
-      const pending = await notifee.getTriggerNotifications();
-      for (const n of pending) {
-        if (n.notification?.data?.type === 'followup') {
-          await notifee.cancelTriggerNotification(n.notification.id);
-        }
-      }
+  //     const pending = await notifee.getTriggerNotifications();
+  //     for (const n of pending) {
+  //       if (n.notification?.data?.type === 'followup') {
+  //         await notifee.cancelTriggerNotification(n.notification.id);
+  //       }
+  //     }
 
-      const followUps = await getPendingFollowUps();
-      for (const fu of followUps) {
-        if (!fu.followUp?.date) continue;
-        const fireAt = new Date(fu.followUp.date).getTime();
-        if (fireAt <= Date.now()) continue;
+  //     const followUps = await getPendingFollowUps();
+  //     for (const fu of followUps) {
+  //       if (!fu.followUp?.date) continue;
+  //       const fireAt = new Date(fu.followUp.date).getTime();
+  //       if (fireAt <= Date.now()) continue;
 
-        await notifee.createTriggerNotification(
-          {
-            id:    `followup_${fu.key}`,
-            title: `📅 Follow-up: ${fu.contactName || fu.contactNumber || 'Contact'}`,
-            body:  fu.note ? `Note: ${fu.note}` : `Time to follow up with ${fu.contactNumber}`,
-            android: {
-              channelId:   'followups',
-              importance:  AndroidImportance.HIGH,
-              category:    AndroidCategory.REMINDER,
-              smallIcon:   'ic_notification',
-              pressAction: { id: 'default' },
-            },
-            data: { type: 'followup', key: fu.key },
-          },
-          {
-            type:      TriggerType.TIMESTAMP,
-            timestamp: fireAt,
-          }
-        );
-      }
-    } catch (err) {
-      console.warn('Notification schedule error:', err);
-    }
-  };
+  //       await notifee.createTriggerNotification(
+  //         {
+  //           id:    `followup_${fu.key}`,
+  //           title: `📅 Follow-up: ${fu.contactName || fu.contactNumber || 'Contact'}`,
+  //           body:  fu.note ? `Note: ${fu.note}` : `Time to follow up with ${fu.contactNumber}`,
+  //           android: {
+  //             channelId:   'followups',
+  //             importance:  AndroidImportance.HIGH,
+  //             category:    AndroidCategory.REMINDER,
+  //             smallIcon:   'ic_notification',
+  //             pressAction: { id: 'default' },
+  //           },
+  //           data: { type: 'followup', key: fu.key },
+  //         },
+  //         {
+  //           type:      TriggerType.TIMESTAMP,
+  //           timestamp: fireAt,
+  //         }
+  //       );
+  //     }
+  //   } catch (err) {
+  //     console.warn('Notification schedule error:', err);
+  //   }
+  // };
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (screen === null) {

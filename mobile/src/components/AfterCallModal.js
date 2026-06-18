@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal, View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Animated, Keyboard, Platform, ActivityIndicator, ScrollView
+  StyleSheet, Animated, Keyboard, StatusBar,
+  ActivityIndicator, ScrollView, Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/api';
 import { saveCallLog, syncCallLogs } from '../services/callLogService';
 import { saveNote } from '../utils/callNotes';
-import { Colors, CALL_TYPE } from '../theme/colors';
+import { Colors } from '../theme/colors';
 import ContactAvatar from './ContactAvatar';
 
 const STATUSES = [
@@ -28,14 +29,6 @@ const FOLLOWUP_SLOTS = [
   { label: '1 Week',   ms: 7 * 24 * 60 * 60 * 1000 },
 ];
 
-const AUTO_DISMISS_SEC = 30;
-
-function formatDur(sec) {
-  if (!sec || sec < 1) return '0s';
-  const m = Math.floor(sec / 60), s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
-}
-
 const TYPE_CONFIG = {
   incoming:  { color: '#16A34A', bg: '#DCFCE7', label: 'Incoming',  icon: '↙' },
   outgoing:  { color: '#D97706', bg: '#FEF3C7', label: 'Outgoing',  icon: '↗' },
@@ -43,16 +36,28 @@ const TYPE_CONFIG = {
   rejected:  { color: '#DC2626', bg: '#FEE2E2', label: 'Rejected',  icon: '✕' },
 };
 
-export default function AfterCallModal({ call, onClose }) {
-  const [status,       setStatus]      = useState(null);
-  const [note,         setNote]        = useState('');
-  const [followUpDate, setFollowDate]  = useState(null);
-  const [showSlots,    setShowSlots]   = useState(false);
-  const [saving,       setSaving]      = useState(false);
-  const [countdown,    setCountdown]   = useState(AUTO_DISMISS_SEC);
-  const [interacted,   setInteracted]  = useState(false);
+const AUTO_DISMISS_SEC = 30;
 
-  const slideY   = useRef(new Animated.Value(700)).current;
+function fmtDur(sec) {
+  if (!sec || sec < 1) return '0s';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// Strips all non-digit chars for a phone-number comparison that ignores formatting
+function digitsOnly(str) {
+  return (str || '').replace(/\D/g, '');
+}
+
+export default function AfterCallModal({ call, onClose }) {
+  const [status,       setStatus]     = useState(null);
+  const [note,         setNote]       = useState('');
+  const [followUpDate, setFollowDate] = useState(null);
+  const [showSlots,    setShowSlots]  = useState(false);
+  const [saving,       setSaving]     = useState(false);
+  const [countdown,    setCountdown]  = useState(AUTO_DISMISS_SEC);
+  const [interacted,   setInteracted] = useState(false);
+
   const timerRef = useRef(null);
   const progAnim = useRef(new Animated.Value(1)).current;
 
@@ -61,10 +66,6 @@ export default function AfterCallModal({ call, onClose }) {
     setStatus(null); setNote(''); setFollowDate(null);
     setShowSlots(false); setInteracted(false); setCountdown(AUTO_DISMISS_SEC);
     progAnim.setValue(1);
-
-    Animated.spring(slideY, {
-      toValue: 0, useNativeDriver: true, tension: 80, friction: 12,
-    }).start();
 
     Animated.timing(progAnim, {
       toValue: 0, duration: AUTO_DISMISS_SEC * 1000, useNativeDriver: false,
@@ -88,12 +89,9 @@ export default function AfterCallModal({ call, onClose }) {
     }
   };
 
-  const slideDown = (cb) =>
-    Animated.timing(slideY, { toValue: 700, duration: 240, useNativeDriver: true }).start(cb);
-
   const handleDismiss = () => {
     clearInterval(timerRef.current);
-    slideDown(() => { onClose?.(); slideY.setValue(700); });
+    onClose?.();
   };
 
   const handleSave = async () => {
@@ -104,9 +102,9 @@ export default function AfterCallModal({ call, onClose }) {
 
     const enriched = {
       ...call,
-      status:      status || undefined,
-      notes:       note.trim() || undefined,
-      tags:        status ? [status] : [],
+      status:       status || undefined,
+      notes:        note.trim() || undefined,
+      tags:         status ? [status] : [],
       followUpDate: followUpDate || undefined,
     };
 
@@ -120,17 +118,29 @@ export default function AfterCallModal({ call, onClose }) {
         });
       }
       await syncCallLogs();
+
+      // PATCH the call record directly — needed when the call already existed
+      // before the user added status/notes (background sync ran first)
       if (note.trim() || status) {
         try {
           const stored = await AsyncStorage.getItem('user');
           const userId = stored ? JSON.parse(stored)._id : null;
           if (userId) {
-            const feedRes = await api.get(`/api/calls/employee/${userId}`, { params: { page: 1, limit: 10 } });
+            // Use a generous limit and normalize phone numbers for matching
+            const feedRes = await api.get(`/api/calls/employee/${userId}`, {
+              params: { page: 1, limit: 100 },
+            });
             const feedCalls = feedRes.data.data?.calls || [];
-            const matched = feedCalls.find((c) =>
-              c.contactNumber === call.contactNumber &&
-              Math.abs(new Date(c.timestamp) - new Date(call.timestamp)) < 60000
-            );
+            const callDigits = digitsOnly(call.contactNumber);
+            const callTs     = new Date(call.timestamp).getTime();
+
+            const matched = feedCalls.find((c) => {
+              const samePhone = digitsOnly(c.contactNumber).endsWith(callDigits) ||
+                                callDigits.endsWith(digitsOnly(c.contactNumber));
+              const timeDiff  = Math.abs(new Date(c.timestamp).getTime() - callTs);
+              return samePhone && timeDiff < 120_000; // within 2 minutes
+            });
+
             if (matched) {
               await api.patch(`/api/calls/${matched._id}/notes`, {
                 notes:      note.trim() || undefined,
@@ -144,7 +154,7 @@ export default function AfterCallModal({ call, onClose }) {
     } catch {}
 
     setSaving(false);
-    slideDown(() => { onClose?.(); slideY.setValue(700); });
+    onClose?.();
   };
 
   if (!call) return null;
@@ -153,57 +163,53 @@ export default function AfterCallModal({ call, onClose }) {
 
   return (
     <Modal
-      transparent animationType="none"
+      animationType="slide"
       visible={!!call}
       onRequestClose={handleDismiss}
       statusBarTranslucent
     >
-      {/* Backdrop */}
-      <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={handleDismiss} />
+      <View style={s.root}>
+        <StatusBar barStyle="light-content" backgroundColor={typeConf.color} />
 
-      <Animated.View style={[s.sheet, { transform: [{ translateY: slideY }] }]}>
+        {/* ── Header ── */}
+        <View style={[s.header, { backgroundColor: typeConf.color }]}>
+          <View style={s.headerTop}>
+            <ContactAvatar name={call.contactName} number={call.contactNumber} size={44} />
+            <View style={s.headerInfo}>
+              <Text style={s.contactName} numberOfLines={1}>
+                {call.contactName || 'Unknown'}
+              </Text>
+              <Text style={s.contactNum}>{call.contactNumber}</Text>
+            </View>
+            <View style={[s.typePill, { backgroundColor: 'rgba(0,0,0,0.15)' }]}>
+              <Text style={s.typePillText}>{typeConf.icon} {typeConf.label}</Text>
+              <Text style={s.durText}>{fmtDur(call.duration)}</Text>
+            </View>
+          </View>
 
-        {/* Progress bar */}
-        {!interacted && (
-          <Animated.View style={[s.progressBar, {
-            width: progAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
-            backgroundColor: typeConf.color,
-          }]} />
-        )}
+          {/* Auto-dismiss progress bar */}
+          {!interacted && (
+            <View style={s.progressTrack}>
+              <Animated.View style={[s.progressBar, {
+                width: progAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+              }]} />
+            </View>
+          )}
+        </View>
 
-        {/* Handle */}
-        <View style={s.handle} />
-
+        {/* ── Body ── */}
         <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={s.body}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={s.inner}
         >
           <TouchableOpacity activeOpacity={1} onPress={touch}>
 
-            {/* ── Header row ── */}
-            <View style={s.headerRow}>
-              <ContactAvatar name={call.contactName} number={call.contactNumber} size={48} />
-              <View style={s.headerMid}>
-                <Text style={s.contactName} numberOfLines={1}>
-                  {call.contactName || 'Unknown'}
-                </Text>
-                <Text style={s.contactNum}>{call.contactNumber}</Text>
-              </View>
-              <View style={[s.typePill, { backgroundColor: typeConf.bg }]}>
-                <Text style={[s.typePillText, { color: typeConf.color }]}>
-                  {typeConf.icon}  {typeConf.label}
-                </Text>
-                <Text style={[s.durText, { color: typeConf.color }]}>· {formatDur(call.duration)}</Text>
-              </View>
-            </View>
-
-            {/* Countdown hint */}
             {!interacted && (
-              <Text style={s.dismissHint}>Auto-dismissing in {countdown}s · Tap to keep</Text>
+              <Text style={s.dismissHint}>Auto-dismissing in {countdown}s · Tap to keep open</Text>
             )}
 
-            {/* ── Status chips ── */}
             <Text style={s.sectionLabel}>How did the call go?</Text>
             <View style={s.chipGrid}>
               {STATUSES.map((item) => {
@@ -224,7 +230,7 @@ export default function AfterCallModal({ call, onClose }) {
               })}
             </View>
 
-            {/* ── Note input ── */}
+            <Text style={s.sectionLabel}>Remarks</Text>
             <TextInput
               style={s.noteInput}
               placeholder="Add a remark… (optional)"
@@ -236,7 +242,6 @@ export default function AfterCallModal({ call, onClose }) {
               textAlignVertical="top"
             />
 
-            {/* ── Follow-up ── */}
             <TouchableOpacity
               style={[s.fuBtn, followUpDate && { borderColor: '#7C3AED', backgroundColor: '#EDE9FE' }]}
               onPress={() => { touch(); setShowSlots(!showSlots); }}
@@ -268,76 +273,60 @@ export default function AfterCallModal({ call, onClose }) {
               </View>
             )}
 
-            {/* ── Action buttons ── */}
-            <View style={s.actions}>
-              <TouchableOpacity style={s.skipBtn} onPress={handleDismiss} disabled={saving}>
-                <Text style={s.skipText}>Skip</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.saveBtn, { backgroundColor: status ? '#1A6BFF' : '#0F172A' }, saving && { opacity: 0.6 }]}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                {saving
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={s.saveBtnText}>{status ? `Save — ${status}` : 'Save & Sync'}</Text>}
-              </TouchableOpacity>
-            </View>
-
           </TouchableOpacity>
         </ScrollView>
-      </Animated.View>
+
+        {/* ── Footer ── */}
+        <View style={s.footer}>
+          <TouchableOpacity style={s.skipBtn} onPress={handleDismiss} disabled={saving}>
+            <Text style={s.skipText}>Skip</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.saveBtn, { backgroundColor: status ? Colors.primary : '#0F172A' }, saving && { opacity: 0.6 }]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={s.saveBtnText}>{status ? `Save — ${status}` : 'Save & Sync'}</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
     </Modal>
   );
 }
 
 const s = StyleSheet.create({
-  backdrop: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  sheet: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    maxHeight: '90%',
-    elevation: 24,
-    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 20, shadowOffset: { width: 0, height: -4 },
-  },
-  progressBar: {
-    height: 3, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    position: 'absolute', top: 0, left: 0,
-  },
-  handle: {
-    width: 36, height: 4, backgroundColor: '#E2E8F0', borderRadius: 2,
-    alignSelf: 'center', marginTop: 14, marginBottom: 4,
-  },
-  inner: { paddingHorizontal: 18, paddingBottom: Platform.OS === 'ios' ? 36 : 24 },
+  root: { flex: 1, backgroundColor: '#F8F9FB' },
 
-  headerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
-  headerMid: { flex: 1 },
-  contactName:{ fontSize: 18, fontWeight: '700', color: '#0F172A' },
-  contactNum: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  header:    { paddingTop: Platform.OS === 'android' ? 36 : 52, paddingBottom: 12, paddingHorizontal: 16 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerInfo:{ flex: 1 },
+  contactName:{ fontSize: 17, fontWeight: '700', color: '#fff' },
+  contactNum: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
   typePill:   { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, alignItems: 'center' },
-  typePillText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  durText:    { fontSize: 11, fontWeight: '600', marginTop: 2 },
+  typePillText: { fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
+  durText:    { fontSize: 11, color: 'rgba(255,255,255,0.85)', fontWeight: '600', marginTop: 2 },
 
-  dismissHint: { fontSize: 11, color: '#94A3B8', textAlign: 'center', marginBottom: 12 },
+  progressTrack: { height: 3, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 2, marginTop: 12, overflow: 'hidden' },
+  progressBar:   { height: 3, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 2 },
 
+  body:         { padding: 18, paddingBottom: 8 },
+  dismissHint:  { fontSize: 11, color: '#94A3B8', textAlign: 'center', marginBottom: 14 },
   sectionLabel: { fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 },
 
-  chipGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 14 },
+  chipGrid:   { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 18 },
   chip:       { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: '#F8F9FB', borderWidth: 1, borderColor: '#E2E8F0' },
   chipIcon:   { fontSize: 13 },
   chipLabel:  { fontSize: 12, fontWeight: '600', color: '#64748B' },
 
   noteInput: {
-    backgroundColor: '#F8F9FB', borderRadius: 10, padding: 12,
-    fontSize: 13, color: '#0F172A', minHeight: 60, marginBottom: 10,
+    backgroundColor: '#fff', borderRadius: 10, padding: 12,
+    fontSize: 13, color: '#0F172A', minHeight: 70, marginBottom: 12,
     borderWidth: 1, borderColor: '#E2E8F0',
   },
 
-  fuBtn:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F8F9FB', borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  fuBtn:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
   fuBtnText:{ flex: 1, fontSize: 13, color: '#64748B', fontWeight: '500' },
   fuClear:  { color: '#94A3B8', fontSize: 14, paddingHorizontal: 4 },
   fuArrow:  { color: '#94A3B8', fontSize: 20, lineHeight: 22 },
@@ -346,9 +335,9 @@ const s = StyleSheet.create({
   slotBtn:  { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
   slotText: { fontSize: 12, fontWeight: '600', color: '#334155' },
 
-  actions: { flexDirection: 'row', gap: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F1F5F9', marginTop: 4 },
-  skipBtn: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  skipText:{ fontSize: 14, fontWeight: '600', color: '#64748B' },
-  saveBtn: { flex: 2, borderRadius: 12, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
+  footer:   { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#fff', paddingBottom: Platform.OS === 'ios' ? 32 : 16 },
+  skipBtn:  { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  skipText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  saveBtn:  { flex: 2, borderRadius: 12, paddingVertical: 13, alignItems: 'center', justifyContent: 'center' },
   saveBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });

@@ -237,7 +237,7 @@ export default function AnalyticsScreen() {
             style={[s.periodBtn, period === p.key && s.periodBtnActive]}
             onPress={() => setPeriod(p.key)}
           >
-            <Text style={[s.periodText, period === p.key && s.periodTextActive]}>{p.label}</Text>
+            <Text style={[s.periodText, period === p.key && s.periodTextActive]} numberOfLines={1}>{p.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -281,7 +281,7 @@ export default function AnalyticsScreen() {
                 { icon: '👤', label: 'Unique Contacts', value: stats?.uniqueContacts, color: Colors.purple, filter: (c, _, arr) => {
                     const seen = new Set(); return arr.filter((x) => { if (seen.has(x.contactNumber)) return false; seen.add(x.contactNumber); return true; }).includes(c);
                   }},
-                { icon: '⏱',  label: 'Avg Duration',   value: formatDuration(stats?.avgDuration || 0), color: Colors.primary, filter: (c) => (c.duration || 0) > 0 },
+                { icon: '⏱',  label: 'Working Hours',  value: stats?.totalDurationFmt || formatDuration(stats?.totalDuration || 0), color: Colors.primary, filter: (c) => (c.duration || 0) > 0 },
                 { icon: '🔗', label: 'Connected',       value: stats?.connectedCalls, color: Colors.success, filter: (c) => (c.duration || 0) > 0 },
               ].map(({ icon, label, value, color, duration, filter }) => (
                 <View key={label} style={s.halfWrap}>
@@ -379,8 +379,8 @@ const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: '#F8F9FB' },
   header:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   heading: { fontSize: 20, fontWeight: '700', color: '#0F172A' },
-  periodRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 4, gap: 6 },
-  periodBtn:      { flex: 1, paddingVertical: 7, borderRadius: 10, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
+  periodRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 10, gap: 6 },
+  periodBtn:      { flex: 1, paddingVertical: 5, borderRadius: 20, backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
   periodBtnActive:{ backgroundColor: Colors.primary, borderColor: Colors.primary },
   periodText:     { fontSize: 11, fontWeight: '600', color: '#64748B' },
   periodTextActive: { color: '#fff' },

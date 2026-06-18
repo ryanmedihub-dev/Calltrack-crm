@@ -173,6 +173,31 @@ router.post('/sync', protect, async (req, res) => {
       }
     }
 
+    // For docs that already existed (skipped by insertMany), update their
+    // enriched fields (notes, callStatus, callTags) if the employee just added them.
+    const insertedKeys = new Set(
+      inserted.map((d) => `${d.contactNumber}_${Math.floor(new Date(d.timestamp).getTime() / 60000)}`)
+    );
+    for (const doc of docs) {
+      if (!doc.notes && !doc.callStatus && (!doc.callTags || !doc.callTags.length)) continue;
+      const docKey = `${doc.contactNumber}_${Math.floor(new Date(doc.timestamp).getTime() / 60000)}`;
+      if (insertedKeys.has(docKey)) continue; // newly inserted — already has enriched data
+      const enrichedSet = {};
+      if (doc.notes)                       enrichedSet.notes       = doc.notes;
+      if (doc.callStatus)                  enrichedSet.callStatus  = doc.callStatus;
+      if (doc.callTags && doc.callTags.length) enrichedSet.callTags = doc.callTags;
+      if (!Object.keys(enrichedSet).length) continue;
+      const ts = new Date(doc.timestamp).getTime();
+      await CallLog.updateOne(
+        {
+          employeeId:    req.user._id,
+          contactNumber: doc.contactNumber,
+          timestamp:     { $gte: new Date(ts - 90000), $lte: new Date(ts + 90000) },
+        },
+        { $set: enrichedSet }
+      ).catch(() => {});
+    }
+
     // Auto-link to lead if phone number matches and update lead call stats
     const phoneToLead = {};
     const phones = inserted.map((l) => l.contactNumber).filter(Boolean);
