@@ -5,3 +5,6 @@ dist/
 *.log
 android/
 ios/
+*.zip
+*.apk
+*.aab
