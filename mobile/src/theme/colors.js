@@ -1,57 +1,64 @@
 export const Colors = {
-  primary:      '#1A6BFF',
-  primaryLight: '#EBF2FF',
-  primaryDark:  '#0050CC',
+  // Brand
+  primary:       '#1A6BFF',
+  primaryLight:  '#EBF2FF',
+  primaryDark:   '#0050CC',
+  primaryMid:    '#3B82F6',
 
+  // Semantic
   success:    '#16A34A',
   successBg:  '#DCFCE7',
+  successMid: '#22C55E',
   warning:    '#D97706',
   warningBg:  '#FEF3C7',
   danger:     '#DC2626',
   dangerBg:   '#FEE2E2',
   purple:     '#7C3AED',
   purpleBg:   '#EDE9FE',
+  teal:       '#0891B2',
+  tealBg:     '#E0F2FE',
 
-  bg:       '#F8F9FB',
-  surface:  '#FFFFFF',
-  border:   '#E2E8F0',
-  divider:  '#F1F5F9',
+  // Backgrounds
+  bg:         '#F4F7FF',
+  bgAlt:      '#EEF2FF',
+  surface:    '#FFFFFF',
+  surfaceAlt: '#F8FAFF',
+  overlay:    'rgba(15,23,42,0.55)',
 
-  text:      '#0F172A',
-  textSec:   '#64748B',
-  textMuted: '#94A3B8',
+  // Borders
+  border:      '#E2E8F0',
+  borderFocus: '#1A6BFF',
+  divider:     '#F1F5F9',
 
-  // Call type semantics
-  incoming:    '#16A34A',
-  incomingBg:  '#DCFCE7',
-  outgoing:    '#D97706',
-  outgoingBg:  '#FEF3C7',
-  missed:      '#DC2626',
-  missedBg:    '#FEE2E2',
-  rejected:    '#DC2626',
-  rejectedBg:  '#FEE2E2',
+  // Text
+  text:        '#0F172A',
+  textSec:     '#475569',
+  textMuted:   '#94A3B8',
+  textInverse: '#FFFFFF',
 
-  shadow: 'rgba(15,23,42,0.06)',
+  // Call type colors
+  incoming:   '#16A34A',
+  incomingBg: '#DCFCE7',
+  outgoing:   '#D97706',
+  outgoingBg: '#FEF3C7',
+  missed:     '#DC2626',
+  missedBg:   '#FFF1F1',
+  rejected:   '#7C3AED',
+  rejectedBg: '#F3F0FF',
 
-  // Neutral tones
-  slate50:  '#F8FAFC',
-  slate100: '#F1F5F9',
-  slate200: '#E2E8F0',
-  slate500: '#64748B',
-  slate700: '#334155',
-  slate900: '#0F172A',
+  // Shadows
+  shadowSm: 'rgba(15,23,42,0.04)',
+  shadowMd: 'rgba(15,23,42,0.08)',
+  shadowLg: 'rgba(15,23,42,0.14)',
 };
 
 export const CALL_TYPE = {
-  incoming:      { fg: '#16A34A', bg: '#DCFCE7', label: 'Incoming',  icon: '↙' },
-  outgoing:      { fg: '#D97706', bg: '#FEF3C7', label: 'Outgoing',  icon: '↗' },
-  missed:        { fg: '#DC2626', bg: '#FEE2E2', label: 'Missed',    icon: '↙' },
-  rejected:      { fg: '#DC2626', bg: '#FEE2E2', label: 'Rejected',  icon: '✕' },
-  never_attended:{ fg: '#DC2626', bg: '#FEE2E2', label: 'Never Att.', icon: '⊗' },
-  not_pickup:    { fg: '#7C3AED', bg: '#EDE9FE', label: 'Not Pickup', icon: '⊘' },
+  incoming:  { fg: '#16A34A', bg: '#DCFCE7', label: 'Incoming',  icon: '↙', emoji: '📲' },
+  outgoing:  { fg: '#D97706', bg: '#FEF3C7', label: 'Outgoing',  icon: '↗', emoji: '📤' },
+  missed:    { fg: '#DC2626', bg: '#FFF1F1', label: 'Missed',    icon: '↙', emoji: '📵' },
+  rejected:  { fg: '#7C3AED', bg: '#F3F0FF', label: 'Rejected',  icon: '✕', emoji: '🚫' },
 };
 
-// Avatar background pool (seeded by name)
 export const AVATAR_COLORS = [
   '#1A6BFF','#16A34A','#D97706','#7C3AED','#0891B2',
   '#DB2777','#EA580C','#65A30D','#2563EB','#9333EA',

@@ -132,6 +132,60 @@ router.post('/from-call', protect, isManager, async (req, res) => {
   }
 });
 
+// GET /api/leads/export — streaming CSV export (manager)
+router.get('/export', protect, isManager, async (req, res) => {
+  try {
+    const { status, assignedTo, startDate, endDate, search, tags } = req.query;
+    const filter = {};
+    if (status)     filter.status     = status;
+    if (assignedTo) filter.assignedTo = assignedTo;
+    if (tags)       filter.tags = { $in: tags.split(',') };
+    if (search) {
+      filter.$or = [
+        { name:  { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ];
+    }
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const ed = new Date(endDate); ed.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = ed;
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
+    res.write('Name,Phone,Email,Company,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n');
+
+    const cursor = Lead.find(filter).populate('assignedTo', 'name').sort({ createdAt: -1 }).lean().cursor();
+    const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+    for await (const doc of cursor) {
+      res.write([
+        esc(doc.name),
+        doc.phone || '',
+        doc.email || '',
+        esc(doc.company),
+        doc.status || '',
+        esc(doc.assignedTo?.name),
+        esc(doc.source),
+        esc((doc.tags || []).join('; ')),
+        doc.attempts || 0,
+        doc.connectedCallCount || 0,
+        doc.lastCallAt ? new Date(doc.lastCallAt).toLocaleDateString('en-IN') : '',
+        doc.followUpDate ? new Date(doc.followUpDate).toLocaleDateString('en-IN') : '',
+        new Date(doc.createdAt).toLocaleDateString('en-IN')
+      ].join(',') + '\n');
+    }
+
+    res.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/leads/:id — single lead with call history
 router.get('/:id', protect, async (req, res) => {
   try {
@@ -205,60 +259,6 @@ router.post('/:id/note', protect, async (req, res) => {
     return res.json({ success: true, data: lead, message: 'Note added' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/leads/export — streaming CSV export (manager)
-router.get('/export', protect, isManager, async (req, res) => {
-  try {
-    const { status, assignedTo, startDate, endDate, search, tags } = req.query;
-    const filter = {};
-    if (status)     filter.status     = status;
-    if (assignedTo) filter.assignedTo = assignedTo;
-    if (tags)       filter.tags = { $in: tags.split(',') };
-    if (search) {
-      filter.$or = [
-        { name:  { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-      ];
-    }
-    if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) {
-        const ed = new Date(endDate); ed.setHours(23, 59, 59, 999);
-        filter.createdAt.$lte = ed;
-      }
-    }
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
-    res.write('Name,Phone,Email,Company,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n');
-
-    const cursor = Lead.find(filter).populate('assignedTo', 'name').sort({ createdAt: -1 }).lean().cursor();
-    const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
-    for await (const doc of cursor) {
-      res.write([
-        esc(doc.name),
-        doc.phone || '',
-        doc.email || '',
-        esc(doc.company),
-        doc.status || '',
-        esc(doc.assignedTo?.name),
-        esc(doc.source),
-        esc((doc.tags || []).join('; ')),
-        doc.attempts || 0,
-        doc.connectedCallCount || 0,
-        doc.lastCallAt ? new Date(doc.lastCallAt).toLocaleDateString('en-IN') : '',
-        doc.followUpDate ? new Date(doc.followUpDate).toLocaleDateString('en-IN') : '',
-        new Date(doc.createdAt).toLocaleDateString('en-IN')
-      ].join(',') + '\n');
-    }
-
-    res.end();
-  } catch (err) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 });
 

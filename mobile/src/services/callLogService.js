@@ -97,26 +97,23 @@ export async function syncCallLogs() {
   if (nativeLogs.length === 0) nativeLogs = await readLocalCallLogs_fallback(lastSync);
   if (nativeLogs.length === 0) return { synced: 0, message: 'No new calls to sync' };
 
-  // Build a lookup map from local_call_logs (which has notes/status/followUp saved by AfterCallModal)
-  // Key = phone digits + timestamp truncated to the minute → tolerates small timestamp drift
-  let enrichedMap = {};
+  // Build list of local logs enriched by AfterCallModal (notes/status/followUp).
+  // Use fuzzy phone+timestamp matching (±3 min) instead of exact-minute key to handle
+  // native call log timestamp drift (Android ContentResolver can be 30s–2min off).
+  let localLogs = [];
   try {
     const raw = await AsyncStorage.getItem('local_call_logs');
-    const localLogs = raw ? JSON.parse(raw) : [];
-    localLogs.forEach((local) => {
-      const key = `${(local.contactNumber || '').replace(/\D/g, '')}_${
-        new Date(local.timestamp).toISOString().slice(0, 16)
-      }`;
-      enrichedMap[key] = local;
-    });
+    localLogs = raw ? JSON.parse(raw) : [];
   } catch {}
 
-  // For each native log, attach enriched fields if a matching local entry exists
   const mergedLogs = nativeLogs.map((log) => {
-    const key = `${(log.contactNumber || '').replace(/\D/g, '')}_${
-      new Date(log.timestamp).toISOString().slice(0, 16)
-    }`;
-    const enriched = enrichedMap[key];
+    const logPhone = (log.contactNumber || '').replace(/\D/g, '');
+    const logTs    = new Date(log.timestamp).getTime();
+    const enriched = localLogs.find((local) => {
+      const localPhone = (local.contactNumber || '').replace(/\D/g, '');
+      const samePhone  = localPhone.endsWith(logPhone) || logPhone.endsWith(localPhone);
+      return samePhone && Math.abs(new Date(local.timestamp).getTime() - logTs) < 180_000;
+    });
     if (!enriched) return log;
     return {
       ...log,
@@ -140,4 +137,48 @@ export async function syncCallLogs() {
 export async function getLastSyncTime() {
   const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
   return raw ? new Date(parseInt(raw, 10)) : null;
+}
+
+// Retry mechanism: flush any pending enrich entries saved by AfterCallModal before sync.
+// Each key holds { contactNumber, timestampApprox, notes, status, tags }.
+// On successful PATCH the key is deleted; on failure it stays for the next flush attempt.
+export async function flushPendingEnriches() {
+  try {
+    const allKeys    = await AsyncStorage.getAllKeys();
+    const enrichKeys = allKeys.filter((k) => k.startsWith('calltrack_pending_enrich_'));
+    if (!enrichKeys.length) return;
+
+    const userRaw = await AsyncStorage.getItem('user');
+    const userId  = userRaw ? JSON.parse(userRaw)._id : null;
+    if (!userId) return;
+
+    const feedRes   = await api.get(`/api/calls/employee/${userId}`, { params: { page: 1, limit: 200 } });
+    const feedCalls = feedRes.data.data?.calls || [];
+
+    for (const key of enrichKeys) {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (!raw) { await AsyncStorage.removeItem(key); continue; }
+        const enrich = JSON.parse(raw);
+
+        const callDigits = (enrich.contactNumber || '').replace(/\D/g, '');
+        const callTs     = new Date(enrich.timestampApprox).getTime();
+
+        const matched = feedCalls.find((c) => {
+          const cDigits   = (c.contactNumber || '').replace(/\D/g, '');
+          const samePhone = cDigits.endsWith(callDigits) || callDigits.endsWith(cDigits);
+          return samePhone && Math.abs(new Date(c.timestamp).getTime() - callTs) < 180_000;
+        });
+
+        if (matched) {
+          await api.patch(`/api/calls/${matched._id}/notes`, {
+            notes:      enrich.notes || undefined,
+            callTags:   enrich.tags?.length ? enrich.tags : undefined,
+            callStatus: enrich.status || undefined,
+          });
+          await AsyncStorage.removeItem(key);
+        }
+      } catch {}
+    }
+  } catch {}
 }

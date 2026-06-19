@@ -16,6 +16,18 @@ function fmtDuration(seconds) {
   return `${s}s`;
 }
 
+// Returns UTC start/end of a calendar day in IST (UTC+5:30).
+// offsetDays=0 → today IST, -1 → yesterday IST, etc.
+function getISTDateBounds(offsetDays = 0) {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  nowIST.setUTCHours(0, 0, 0, 0);
+  nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
+  const start = new Date(nowIST.getTime() - IST_OFFSET_MS);
+  const end   = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
 // Aggregation-based period stats — no full doc loads
 async function computePeriodStats(start, end) {
   const match = { timestamp: { $gte: start, $lt: end } };
@@ -192,7 +204,7 @@ router.post('/sync', protect, async (req, res) => {
         {
           employeeId:    req.user._id,
           contactNumber: doc.contactNumber,
-          timestamp:     { $gte: new Date(ts - 90000), $lte: new Date(ts + 90000) },
+          timestamp:     { $gte: new Date(ts - 180000), $lte: new Date(ts + 180000) },
         },
         { $set: enrichedSet }
       ).catch(() => {});
@@ -366,13 +378,10 @@ router.get('/', protect, isManager, async (req, res) => {
 // GET /api/calls/stats — full dashboard stats (today/yesterday/lastWeek)
 router.get('/stats', protect, isManager, async (req, res) => {
   try {
-    const now = new Date();
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd   = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-    const ystStart   = new Date(todayStart); ystStart.setDate(ystStart.getDate() - 1);
-    const ystEnd     = new Date(todayStart);
-    const lw7Start   = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
-    const lw7End     = new Date(ystEnd);
+    const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
+    const { start: ystStart,   end: ystEnd   } = getISTDateBounds(-1);
+    const lw7Start = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
+    const lw7End   = new Date(ystEnd);
 
     const [todayStats, yesterdayStats, lastWeekStats] = await Promise.all([
       computePeriodStats(todayStart, todayEnd),
@@ -600,17 +609,6 @@ router.get('/employee/:id', protect, async (req, res) => {
       success: true,
       data: { calls, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)), stats }
     });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// DELETE /api/calls/:id — manager only
-router.delete('/:id', protect, isManager, async (req, res) => {
-  try {
-    const call = await CallLog.findByIdAndDelete(req.params.id);
-    if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
-    return res.json({ success: true, message: 'Call deleted' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

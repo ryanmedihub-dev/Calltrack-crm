@@ -89,4 +89,16 @@ router.patch('/profile', protect, async (req, res) => {
   }
 });
 
+// POST /api/auth/fcm-token
+router.post('/fcm-token', protect, async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    if (!fcmToken) return res.status(400).json({ success: false, error: 'fcmToken required' });
+    await User.findByIdAndUpdate(req.user._id, { fcmToken });
+    return res.json({ success: true, message: 'FCM token saved' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;

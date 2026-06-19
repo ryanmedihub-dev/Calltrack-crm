@@ -1,5 +1,5 @@
 import {
-  NativeModules, DeviceEventEmitter,
+  NativeModules, DeviceEventEmitter, AppState,
   PermissionsAndroid, Platform, Alert
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,7 +15,7 @@ export async function requestCallPermissions() {
     ]);
     return (
       result[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE] === PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.READ_CALL_LOG] === PermissionsAndroid.RESULTS.GRANTED
+      result[PermissionsAndroid.PERMISSIONS.READ_CALL_LOG]    === PermissionsAndroid.RESULTS.GRANTED
     );
   } catch {
     return false;
@@ -37,10 +37,7 @@ export async function requestOverlayPermission() {
       'Allow Pop-up Overlay',
       'To show the call notes popup even when the app is closed, please enable "Display over other apps" for CallTrack in the next screen.',
       [
-        {
-          text: 'Enable Now',
-          onPress: () => CallLogModule?.openOverlaySettings?.(),
-        },
+        { text: 'Enable Now', onPress: () => CallLogModule?.openOverlaySettings?.() },
         { text: 'Later', style: 'cancel' },
       ]
     );
@@ -50,8 +47,16 @@ export async function requestOverlayPermission() {
   }
 }
 
-// Returns an unsubscribe function
+// Wraps the DeviceEventEmitter listener.
+// When the native 'onCallEnded' fires and the app is not in the foreground,
+// immediately bring the app forward so the modal is visible to the user.
 export function onCallEnded(callback) {
-  const sub = DeviceEventEmitter.addListener('onCallEnded', callback);
+  const sub = DeviceEventEmitter.addListener('onCallEnded', (data) => {
+    if (AppState.currentState !== 'active') {
+      // App is in background — bring it to front before handing data to JS
+      CallLogModule?.bringAppToForeground?.();
+    }
+    callback(data);
+  });
   return () => sub.remove();
 }

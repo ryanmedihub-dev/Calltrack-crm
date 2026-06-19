@@ -1,32 +1,32 @@
 export const C = {
-  bg:           '#F4F6FB',
+  bg:           '#F4F7FF',
   surface:      '#FFFFFF',
-  surfaceAlt:   '#F0F4FF',
+  surfaceAlt:   '#F8FAFF',
 
-  primary:      '#4F46E5',
-  primaryLight: '#EEF2FF',
-  primaryDark:  '#3730A3',
+  primary:      '#1A6BFF',
+  primaryLight: '#EBF2FF',
+  primaryDark:  '#0050CC',
 
   incoming:     '#16A34A',
   incomingBg:   '#DCFCE7',
-  outgoing:     '#2563EB',
-  outgoingBg:   '#DBEAFE',
+  outgoing:     '#D97706',
+  outgoingBg:   '#FEF3C7',
   missed:       '#DC2626',
-  missedBg:     '#FEE2E2',
-  rejected:     '#D97706',
-  rejectedBg:   '#FEF3C7',
+  missedBg:     '#FFF1F1',
+  rejected:     '#7C3AED',
+  rejectedBg:   '#F3F0FF',
 
-  text:         '#111827',
-  textSec:      '#6B7280',
-  textMuted:    '#9CA3AF',
+  text:         '#0F172A',
+  textSec:      '#475569',
+  textMuted:    '#94A3B8',
 
-  border:       '#E5E7EB',
-  shadow:       'rgba(0,0,0,0.06)',
+  border:       '#E2E8F0',
+  shadow:       'rgba(15,23,42,0.06)',
 };
 
 export const TYPE = {
-  incoming: { fg: C.incoming, bg: C.incomingBg, label: 'Incoming' },
-  outgoing: { fg: C.outgoing, bg: C.outgoingBg, label: 'Outgoing' },
-  missed:   { fg: C.missed,   bg: C.missedBg,   label: 'Missed'   },
-  rejected: { fg: C.rejected, bg: C.rejectedBg, label: 'Rejected' },
+  incoming: { fg: C.incoming, bg: C.incomingBg, label: 'Incoming', icon: '↙' },
+  outgoing: { fg: C.outgoing, bg: C.outgoingBg, label: 'Outgoing', icon: '↗' },
+  missed:   { fg: C.missed,   bg: C.missedBg,   label: 'Missed',   icon: '↙' },
+  rejected: { fg: C.rejected, bg: C.rejectedBg, label: 'Rejected', icon: '✕' },
 };

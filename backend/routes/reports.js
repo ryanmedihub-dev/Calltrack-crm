@@ -15,6 +15,15 @@ function fmtDuration(seconds) {
   return `${s}s`;
 }
 
+// Returns the UTC timestamp of IST midnight for today (offsetDays=0) or any offset.
+function istDayStart(offsetDays = 0) {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  nowIST.setUTCHours(0, 0, 0, 0);
+  nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
+  return new Date(nowIST.getTime() - IST_OFFSET_MS);
+}
+
 // GET /api/reports/periodic — full periodic report
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
@@ -25,7 +34,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 
     const start = startDate
       ? (() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; })()
-      : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+      : istDayStart(0);
     const end = endDate
       ? (() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; })()
       : new Date();

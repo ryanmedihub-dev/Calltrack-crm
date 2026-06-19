@@ -49,7 +49,8 @@ function CallRow({ call }) {
 
 export default function HomeScreen({ onLogout }) {
   const [user, setUser]         = useState(null);
-  const [calls, setCalls]       = useState([]);
+  const [myStats, setMyStats]   = useState(null);
+  const [recentCalls, setRecentCalls] = useState([]);
   const [leads, setLeads]       = useState([]);
   const [lastSync, setLastSync] = useState(null);
   const [syncing, setSyncing]   = useState(false);
@@ -61,14 +62,16 @@ export default function HomeScreen({ onLogout }) {
       const u = userStr ? JSON.parse(userStr) : null;
       if (u) setUser(u);
 
-      const [callsRes, leadsRes] = await Promise.all([
+      const [statsRes, callsRes, leadsRes] = await Promise.all([
+        api.get('/api/calls/my-stats', { params: { period: 'today' } }).catch(() => null),
         u?._id
-          ? api.get(`/api/calls/employee/${u._id}`, { params: { limit: 20, page: 1 } }).catch(() => null)
+          ? api.get(`/api/calls/employee/${u._id}`, { params: { limit: 8, page: 1 } }).catch(() => null)
           : Promise.resolve(null),
         api.get('/api/leads/assigned').catch(() => null),
       ]);
 
-      if (callsRes) setCalls(callsRes.data.data.calls || []);
+      if (statsRes) setMyStats(statsRes.data.data);
+      if (callsRes) setRecentCalls(callsRes.data.data.calls || []);
       if (leadsRes) setLeads(leadsRes.data.data || []);
       setLastSync(await getLastSyncTime());
     } catch {}
@@ -100,10 +103,6 @@ export default function HomeScreen({ onLogout }) {
     setRefreshing(false);
   }, []);
 
-  const todayCalls    = calls.filter((c) => new Date(c.timestamp).toDateString() === new Date().toDateString());
-  const todayMissed   = todayCalls.filter((c) => c.callType === 'missed').length;
-  const todayOutgoing = todayCalls.filter((c) => c.callType === 'outgoing').length;
-  const todayIncoming = todayCalls.filter((c) => c.callType === 'incoming').length;
 
   return (
     <ScrollView
@@ -133,10 +132,10 @@ export default function HomeScreen({ onLogout }) {
 
       {/* Stats */}
       <View style={s.statsRow}>
-        <StatCard label="Total"    value={todayCalls.length} color={C.primary}   bg={C.primaryLight} />
-        <StatCard label="Incoming" value={todayIncoming}      color={C.incoming}  bg={C.incomingBg}   />
-        <StatCard label="Missed"   value={todayMissed}        color={C.missed}    bg={C.missedBg}     />
-        <StatCard label="Outgoing" value={todayOutgoing}      color={C.outgoing}  bg={C.outgoingBg}   />
+        <StatCard label="Total"    value={myStats?.total    || 0} color={C.primary}  bg={C.primaryLight} />
+        <StatCard label="Incoming" value={myStats?.incoming || 0} color={C.incoming} bg={C.incomingBg}   />
+        <StatCard label="Missed"   value={myStats?.missed   || 0} color={C.missed}   bg={C.missedBg}     />
+        <StatCard label="Outgoing" value={myStats?.outgoing || 0} color={C.outgoing} bg={C.outgoingBg}   />
       </View>
 
       {/* Sync card */}
@@ -158,21 +157,38 @@ export default function HomeScreen({ onLogout }) {
 
       {/* Recent calls */}
       <Text style={s.sectionTitle}>Today's Calls</Text>
-      {todayCalls.slice(0, 8).map((c) => <CallRow key={c._id} call={c} />)}
-      {todayCalls.length === 0 && <Text style={s.empty}>No calls today yet</Text>}
+      {myStats?.total > 0 && (
+        <Text style={s.statsSub}>Today: {myStats.total} total call{myStats.total !== 1 ? 's' : ''}</Text>
+      )}
+      {recentCalls.map((c) => <CallRow key={c._id} call={c} />)}
+      {recentCalls.length === 0 && <Text style={s.empty}>No calls today yet</Text>}
 
       {/* Leads */}
       <Text style={[s.sectionTitle, { marginTop: 28 }]}>My Leads</Text>
-      {leads.slice(0, 5).map((lead) => (
-        <View key={lead._id} style={s.leadRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.leadName}>{lead.name}</Text>
-            <Text style={s.leadPhone}>{lead.phone}</Text>
-          </View>
-          <LeadBadge status={lead.status} />
-        </View>
-      ))}
-      {leads.length === 0 && <Text style={s.empty}>No leads assigned</Text>}
+      {leads.length > 0
+        ? leads.slice(0, 5).map((lead) => (
+            <View key={lead._id} style={s.leadRow}>
+              <View style={s.leadAvatar}>
+                <Text style={s.leadAvatarText}>{(lead.name?.[0] || '?').toUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.leadName}>{lead.name}</Text>
+                <Text style={s.leadPhone}>{lead.phone}</Text>
+              </View>
+              <LeadBadge status={lead.status} />
+            </View>
+          ))
+        : [1, 2, 3].map((i) => (
+            <View key={i} style={[s.leadRow, s.leadRowEmpty]}>
+              <View style={[s.leadAvatar, { backgroundColor: C.border }]} />
+              <View style={{ flex: 1, gap: 6 }}>
+                <View style={s.placeholderLine} />
+                <View style={[s.placeholderLine, { width: '50%' }]} />
+              </View>
+              <View style={[s.statusBadge, { backgroundColor: C.border, width: 60 }]} />
+            </View>
+          ))
+      }
     </ScrollView>
   );
 }
@@ -232,11 +248,16 @@ const s = StyleSheet.create({
   typePillText: { fontSize: 10, fontWeight: '600', textTransform: 'capitalize' },
   callDur:      { color: C.textMuted, fontSize: 11 },
 
-  leadRow:      { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 12, padding: 12, marginBottom: 8, shadowColor: C.shadow, elevation: 1 },
-  leadName:     { color: C.text, fontSize: 14, fontWeight: '600' },
-  leadPhone:    { color: C.textSec, fontSize: 12, marginTop: 1 },
-  statusBadge:  { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  statusText:   { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
+  leadRow:       { flexDirection: 'row', alignItems: 'center', backgroundColor: C.surface, borderRadius: 12, padding: 12, marginBottom: 8, shadowColor: C.shadow, elevation: 1, minHeight: 64, gap: 10 },
+  leadRowEmpty:  { opacity: 0.45 },
+  leadAvatar:    { width: 38, height: 38, borderRadius: 19, backgroundColor: C.primaryLight, justifyContent: 'center', alignItems: 'center' },
+  leadAvatarText:{ color: C.primary, fontSize: 15, fontWeight: '700' },
+  leadName:      { color: C.text, fontSize: 14, fontWeight: '600' },
+  leadPhone:     { color: C.textSec, fontSize: 12, marginTop: 2 },
+  placeholderLine: { height: 10, borderRadius: 5, backgroundColor: C.border, width: '75%' },
+  statusBadge:   { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  statusText:    { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
 
+  statsSub:     { color: C.textSec, fontSize: 12, marginBottom: 8, marginTop: -4 },
   empty:        { color: C.textMuted, textAlign: 'center', fontSize: 13, paddingVertical: 16 },
 });
