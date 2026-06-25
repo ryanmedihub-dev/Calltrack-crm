@@ -7,13 +7,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import LoginScreen       from './src/screens/LoginScreen';
+import SimSetupScreen    from './src/screens/SimSetupScreen';
+import PostCallScreen    from './src/screens/PostCallScreen';
 import CallHistoryScreen from './src/screens/CallHistoryScreen';
 import AnalyticsScreen   from './src/screens/AnalyticsScreen';
 import FollowupsScreen   from './src/screens/FollowupsScreen';
 import LeadsScreen       from './src/screens/LeadsScreen';
 import MoreScreen        from './src/screens/MoreScreen';
 import TabBar            from './src/components/TabBar';
-import AfterCallModal    from './src/components/AfterCallModal';
 import AddNoteModal      from './src/components/AddNoteModal';
 
 import * as Notifications from 'expo-notifications';
@@ -45,10 +46,8 @@ async function scheduleFollowUpNotifications() {
     for (const fu of followUps) {
       if (!fu.followUp?.date) continue;
 
-      // Use local date parts so the trigger is always on the correct calendar
-      // day in the device timezone, never the night before due to UTC offset.
       const d = new Date(fu.followUp.date);
-      const hour = d.getHours() || 9; // default to 9 AM if stored as midnight
+      const hour = d.getHours() || 9;
       const fireAt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0);
 
       if (fireAt.getTime() <= Date.now()) continue;
@@ -73,23 +72,25 @@ async function requestNotificationPermission() {
   if (Platform.OS !== 'android') return;
   try {
     if (Platform.Version >= 33) {
-      await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-      );
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
     }
   } catch {}
   try { await Notifications.requestPermissionsAsync(); } catch {}
 }
 
 function App() {
-  const [screen, setScreen]               = useState(null);
-  const [tab, setTab]                     = useState('calls');
-  const [pendingCall, setPendingCall]     = useState(null);
-  const [noteCall, setNoteCall]           = useState(null);
+  // screen: null | "login" | "sim_select" | "main" | "postcall"
+  const [screen, setScreen]           = useState(null);
+  const [tab, setTab]                 = useState('calls');
+  const [pendingCall, setPendingCall] = useState(null);
+  const [noteCall, setNoteCall]       = useState(null);
   const [followUpBadge, setFollowUpBadge] = useState(0);
   const [pendingCount, setPendingCount]   = useState(0);
-  const appState  = useRef(AppState.currentState);
-  const syncTimer = useRef(null);
+  const appState       = useRef(AppState.currentState);
+  const syncTimer      = useRef(null);
+  const pollTimer      = useRef(null);
+  // Ref mirrors pendingCall state — avoids stale closure inside setInterval
+  const pendingCallRef = useRef(null);
 
   // ── Auth restore ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -98,15 +99,21 @@ function App() {
       .catch(() => setScreen('login'));
   }, []);
 
-  // ── Register logout callback so api.js 401 interceptor can navigate to login ─
+  // ── Register logout callback ──────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'main') return;
     setLogoutCallback(() => {
       clearInterval(syncTimer.current);
+      clearInterval(pollTimer.current);
       setScreen('login');
       setTab('calls');
     });
   }, [screen]);
+
+  // ── Keep pendingCallRef in sync with state ───────────────────────────────
+  useEffect(() => {
+    pendingCallRef.current = pendingCall;
+  }, [pendingCall]);
 
   // ── Main setup once logged in ─────────────────────────────────────────────
   useEffect(() => {
@@ -117,52 +124,53 @@ function App() {
     requestOverlayPermission();
     applyTrackedSim();
 
-    // Listen for calls that end while app is open
-    const unsub = onCallEnded((data) => setPendingCall(data));
+    // Helper: show post-call screen only when no call is already being handled
+    const showPostCall = (data) => {
+      if (pendingCallRef.current) return; // already showing one
+      setPendingCall(data);
+      setScreen('postcall');
+    };
 
-    // Flush any calls that failed to sync while offline
+    // Real-time event from PhoneStateReceiver via DeviceEventEmitter
+    const unsub = onCallEnded((data) => {
+      showPostCall(data);
+    });
+
     processPendingQueue().then(() => getPendingCount().then(setPendingCount));
-
-    // Check for call that happened while app was closed
-    checkPendingCallWithRetry(3, 50);
-
-    // Refresh follow-up badge
     refreshFollowUpBadge();
 
-    // Live sync: when app comes back to foreground
+    // When app returns from background, immediately check for any missed call event
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        checkPendingCallWithRetry(3, 50);
         doSync();
         refreshFollowUpBadge();
+        // Check SharedPreferences for a call that was missed while backgrounded
+        CallLogModule?.getPendingCall?.().then((pending) => {
+          if (pending?.callType) showPostCall(pending);
+        }).catch(() => {});
       }
       appState.current = nextState;
     });
 
-    // Polling sync every 60 seconds while app is open
     syncTimer.current = setInterval(doSync, 60_000);
+
+    // Poll every 3 seconds as a safety net for devices where
+    // DeviceEventEmitter delivery is unreliable (Xiaomi / MIUI).
+    // Does NOT call setScreen inside a state-updater — uses the ref instead.
+    pollTimer.current = setInterval(async () => {
+      try {
+        const pending = await CallLogModule?.getPendingCall?.();
+        if (pending?.callType) showPostCall(pending);
+      } catch {}
+    }, 3000);
 
     return () => {
       unsub();
       appStateSub.remove();
       clearInterval(syncTimer.current);
+      clearInterval(pollTimer.current);
     };
   }, [screen]);
-
-  const checkPendingCallWithRetry = async (maxRetries, delayMs) => {
-    for (let i = 0; i < maxRetries; i++) {
-      await new Promise((r) => setTimeout(r, delayMs));
-      try {
-        const pending = await CallLogModule?.getPendingCall?.();
-        if (pending?.callType) {
-          // Bring app to foreground before showing modal
-          CallLogModule?.bringAppToForeground?.();
-          setPendingCall(pending);
-          return;
-        }
-      } catch {}
-    }
-  };
 
   const doSync = async () => {
     try { await syncCallLogs(); } catch {}
@@ -188,13 +196,41 @@ function App() {
   if (screen === 'login') {
     return (
       <SafeAreaProvider>
-        <LoginScreen onLogin={() => setScreen('main')} />
+        <LoginScreen onLogin={() => setScreen('sim_select')} />
       </SafeAreaProvider>
     );
   }
 
+  // ── SIM setup (shown once on every login so user confirms tracked SIM) ────────
+  if (screen === 'sim_select') {
+    return (
+      <SafeAreaProvider>
+        <SimSetupScreen onDone={() => setScreen('main')} />
+      </SafeAreaProvider>
+    );
+  }
+
+  // ── Post-call full-screen ─────────────────────────────────────────────────
+  if (screen === 'postcall' && pendingCall) {
+    return (
+      <SafeAreaProvider>
+        <PostCallScreen
+          call={pendingCall}
+          onDone={() => {
+            pendingCallRef.current = null; // clear ref immediately so poll doesn't re-trigger
+            CallLogModule?.clearPendingCall?.();
+            setPendingCall(null);
+            setScreen('main');
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  // ── Main app ──────────────────────────────────────────────────────────────
   const handleLogout = () => {
     clearInterval(syncTimer.current);
+    clearInterval(pollTimer.current);
     setScreen('login');
     setTab('calls');
   };
@@ -225,12 +261,6 @@ function App() {
         </View>
         <TabBar active={tab} onChange={setTab} badges={badges} />
       </View>
-
-      <AfterCallModal
-        call={pendingCall}
-        onClose={() => setPendingCall(null)}
-        compulsory={!!(pendingCall?.duration > 0)}
-      />
 
       <AddNoteModal
         call={noteCall}

@@ -29,15 +29,17 @@ const SORTS = [
 ];
 
 const DATE_FILTERS = [
-  { key: 'all',    label: 'All Time'   },
-  { key: 'today',  label: 'Today'      },
-  { key: 'week',   label: 'This Week'  },
-  { key: 'month',  label: 'This Month' },
-  { key: 'custom', label: 'Custom'     },
+  { key: '2days', label: 'Today & Yesterday' },
+  { key: 'today', label: 'Today'             },
+  { key: 'week',  label: 'This Week'         },
+  { key: 'month', label: 'This Month'        },
+  { key: 'all',   label: 'All Time'          },
+  { key: 'custom',label: 'Custom'            },
 ];
 
 function getDateBoundary(key) {
   const now = new Date();
+  if (key === '2days') { const d = new Date(now); d.setDate(d.getDate() - 1); d.setHours(0, 0, 0, 0); return d; }
   if (key === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
   if (key === 'week')  { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
   if (key === 'month') { const d = new Date(now); d.setDate(1); d.setHours(0, 0, 0, 0); return d; }
@@ -87,14 +89,14 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   const [loading, setLoading]       = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing]       = useState(false);
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('2days');
   const [customFrom, setCustomFrom] = useState(null);
   const [customTo, setCustomTo]     = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
 
   // Filter sheet state (date + sort only)
   const [showFilter, setShowFilter]   = useState(false);
-  const [pendingDate, setPendingDate] = useState('all');
+  const [pendingDate, setPendingDate] = useState('2days');
   const [pendingSort, setPendingSort] = useState('newest');
   const [pendingFrom, setPendingFrom] = useState(null);
   const [pendingTo, setPendingTo]     = useState(null);
@@ -187,12 +189,12 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   }, [userId]);
 
   const activeCount = [
-    dateFilter !== 'all',
+    dateFilter !== '2days',
     sort !== 'newest',
   ].filter(Boolean).length;
 
   const pendingActiveCount = [
-    pendingDate !== 'all',
+    pendingDate !== '2days',
     pendingSort !== 'newest',
   ].filter(Boolean).length;
 
@@ -214,7 +216,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   };
 
   const resetFilter = () => {
-    setPendingDate('all');
+    setPendingDate('2days');
     setPendingSort('newest');
     setPendingFrom(null);
     setPendingTo(null);
@@ -243,7 +245,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       {/* Header */}
       {showSearch ? (
@@ -345,7 +347,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
               {activeCount > 0 && (
                 <TouchableOpacity
                   style={s.clearFilterBtn}
-                  onPress={() => { setDateFilter('all'); setSort('newest'); setCustomFrom(null); setCustomTo(null); }}
+                  onPress={() => { setDateFilter('2days'); setSort('newest'); setCustomFrom(null); setCustomTo(null); }}
                 >
                   <Text style={s.clearFilterText}>Clear filters</Text>
                 </TouchableOpacity>
@@ -428,7 +430,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
               onPress={() => {
                 setPendingFrom(null);
                 setPendingTo(null);
-                setPendingDate('all');
+                setPendingDate('2days');
                 setShowDateSheet(false);
               }}
             >
@@ -525,6 +527,7 @@ const s = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14,
+    backgroundColor: '#fff',
   },
   greeting: { fontSize: 12, fontWeight: '500', color: Colors.textMuted, letterSpacing: 0.3 },
   heading:  { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
@@ -544,7 +547,7 @@ const s = StyleSheet.create({
   pendingText:   { fontSize: 12, fontWeight: '600', color: '#92400E', textAlign: 'center' },
 
   // Chip row
-  chipRow:       { paddingHorizontal: 16, paddingBottom: 10, gap: 7, flexDirection: 'row' },
+  chipRow:       { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, gap: 7, flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
   chip:          { flexDirection: 'row', alignItems: 'center', height: 34, gap: 5, borderRadius: 999, paddingHorizontal: 11, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border },
   chipDot:       { width: 7, height: 7, borderRadius: 4 },
   chipText:      { fontSize: 12, fontWeight: '500', color: Colors.textSec },

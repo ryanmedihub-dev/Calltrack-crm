@@ -22,22 +22,29 @@ export async function requestCallPermissions() {
   }
 }
 
-// Request SYSTEM_ALERT_WINDOW permission — opens settings once if not granted
+// Request SYSTEM_ALERT_WINDOW permission — re-prompts if permission still not granted
 export async function requestOverlayPermission() {
   if (Platform.OS !== 'android') return true;
   try {
     const hasPermission = await CallLogModule?.checkOverlayPermission?.();
-    if (hasPermission) return true;
+    if (hasPermission) {
+      // Permission now granted — clear the "asked" flag so future installs work cleanly
+      await AsyncStorage.removeItem('overlay_perm_asked');
+      return true;
+    }
 
     const alreadyAsked = await AsyncStorage.getItem('overlay_perm_asked');
-    if (alreadyAsked) return false;
+    // On Xiaomi / MIUI / HyperOS canDrawOverlays can return false even after granting.
+    // Always re-show the dialog when the permission is still reported as missing so the
+    // user can retry; the flag only suppresses it for a single session.
+    if (alreadyAsked === 'session') return false;
 
-    await AsyncStorage.setItem('overlay_perm_asked', '1');
+    await AsyncStorage.setItem('overlay_perm_asked', 'session');
     Alert.alert(
       'Allow Pop-up Overlay',
-      'To show the call notes popup even when the app is closed, please enable "Display over other apps" for CallTrack in the next screen.',
+      'To show the after-call popup, please enable "Display over other apps" for CallTrack.\n\nOn Xiaomi / Redmi: Settings → Apps → Manage Apps → CallTrack → Other permissions → Display over other apps.',
       [
-        { text: 'Enable Now', onPress: () => CallLogModule?.openOverlaySettings?.() },
+        { text: 'Open Settings', onPress: () => CallLogModule?.openOverlaySettings?.() },
         { text: 'Later', style: 'cancel' },
       ]
     );

@@ -206,7 +206,7 @@ export default function AnalyticsScreen() {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       {/* Header with period pills */}
       <View style={s.header}>
@@ -351,7 +351,7 @@ export default function AnalyticsScreen() {
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: Colors.bg },
 
-  header:  { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14 },
+  header:  { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
   preLabel:{ fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   heading: { fontSize: 24, fontWeight: '800', color: Colors.text, letterSpacing: -0.5, marginBottom: 14 },
 
@@ -361,7 +361,7 @@ const s = StyleSheet.create({
   periodText:      { fontSize: 12, fontWeight: '600', color: Colors.textSec },
   periodTextActive:{ color: '#fff', fontWeight: '700' },
 
-  tabRow:      { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, marginHorizontal: 20 },
+  tabRow:      { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Colors.border, paddingHorizontal: 20, backgroundColor: '#fff' },
   tabBtn:      { marginRight: 24, paddingBottom: 10, position: 'relative' },
   tabText:     { fontSize: 14, color: Colors.textSec, fontWeight: '500' },
   tabTextActive:{ color: Colors.primary, fontWeight: '700' },

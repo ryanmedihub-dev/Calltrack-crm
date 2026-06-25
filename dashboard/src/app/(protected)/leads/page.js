@@ -4,15 +4,28 @@ import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import Pagination from '../../../components/Pagination';
 
-const STATUSES = ['new', 'contacted', 'interested', 'not_interested', 'converted', 'lost'];
-const STATUS_LABELS = { new: 'New', contacted: 'Contacted', interested: 'Interested', not_interested: 'Not Interested', converted: 'Converted', lost: 'Lost' };
-const STATUS_COLOR = {
-  new: 'bg-blue-50 text-primary border-blue-200',
-  contacted: 'bg-purple-50 text-purple border-purple-200',
-  interested: 'bg-orange-50 text-warning border-orange-200',
-  not_interested: 'bg-red-50 text-danger border-red-200',
-  converted: 'bg-green-50 text-success border-green-200',
-  lost: 'bg-gray-50 text-textMuted border-gray-200'
+const STATUSES = ['new', 'contacted', 'not_connected', 'interested', 'not_interested', 'follow_up', 'booking_done', 'converted', 'lost'];
+const STATUS_LABELS = {
+  new:           'New',
+  contacted:     'Contacted',
+  not_connected: 'Not Connected',
+  interested:    'Interested',
+  not_interested:'Not Interested',
+  follow_up:     'Follow Up',
+  booking_done:  'Booking Done',
+  converted:     'Converted',
+  lost:          'Lost',
+};
+const STATUS_STYLE = {
+  new:           { background: '#EEF2FF',                color: '#6366F1', border: '1px solid #C7D2FE' },
+  contacted:     { background: 'rgba(139,92,246,0.10)',  color: '#7C3AED', border: '1px solid rgba(139,92,246,0.22)' },
+  not_connected: { background: 'rgba(148,163,184,0.10)', color: '#64748B', border: '1px solid rgba(148,163,184,0.22)' },
+  interested:    { background: 'rgba(245,158,11,0.10)',  color: '#D97706', border: '1px solid rgba(245,158,11,0.22)' },
+  not_interested:{ background: 'rgba(239,68,68,0.10)',   color: '#DC2626', border: '1px solid rgba(239,68,68,0.22)' },
+  follow_up:     { background: 'rgba(124,58,237,0.10)',  color: '#7C3AED', border: '1px solid rgba(124,58,237,0.22)' },
+  booking_done:  { background: 'rgba(16,185,129,0.10)',  color: '#059669', border: '1px solid rgba(16,185,129,0.22)' },
+  converted:     { background: 'rgba(16,185,129,0.12)',  color: '#16A34A', border: '1px solid rgba(16,185,129,0.30)' },
+  lost:          { background: 'rgba(148,163,184,0.10)', color: '#64748B', border: '1px solid rgba(148,163,184,0.22)' },
 };
 
 function fmtDuration(sec) {
@@ -20,24 +33,43 @@ function fmtDuration(sec) {
   const m = Math.floor(sec / 60), s = sec % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
-
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function CallTypePill({ type }) {
-  const cfg = {
-    incoming: 'bg-green-50 text-success border border-green-200',
-    outgoing: 'bg-orange-50 text-warning border border-orange-200',
-    missed: 'bg-red-50 text-danger border border-red-200',
-    rejected: 'bg-purple-50 text-purple border border-purple-200'
-  };
-  const icons = { incoming: '↙', outgoing: '↗', missed: '↩', rejected: '✗' };
+const inputStyle = { background: '#F8FAFF', border: '1px solid #E2E8F4', color: '#0F172A', outline: 'none', fontSize: '13px', borderRadius: '10px', padding: '8px 12px' };
+
+function CloseIco() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+}
+
+function ModalWrap({ children, onClose }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${cfg[type] || 'bg-gray-50 text-textMuted'}`}>
-      {icons[type]} {type}
-    </span>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay"
+      style={{ background: 'rgba(12,10,30,0.55)', backdropFilter: 'blur(6px)' }}>
+      <div className="modal-content w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl"
+        style={{ background: '#fff', border: '1px solid #E2E8F4', boxShadow: '0 25px 80px rgba(0,0,0,0.18)' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalHeader({ title, sub, onClose }) {
+  return (
+    <div className="flex items-center justify-between p-5 flex-shrink-0" style={{ borderBottom: '1px solid #F1F5F9' }}>
+      <div>
+        <h3 className="font-bold" style={{ color: '#0F172A' }}>{title}</h3>
+        {sub && <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>{sub}</p>}
+      </div>
+      <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+        style={{ color: '#94A3B8' }}
+        onMouseEnter={e=>{ e.currentTarget.style.background='#FFF1F2'; e.currentTarget.style.color='#EF4444'; }}
+        onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#94A3B8'; }}>
+        <CloseIco />
+      </button>
+    </div>
   );
 }
 
@@ -48,7 +80,7 @@ function LeadDetailModal({ lead, employees, onClose, onUpdate }) {
     city: lead.city || '', state: lead.state || '', country: lead.country || '',
     status: lead.status, assignedTo: lead.assignedTo?._id || '',
     followUpDate: lead.followUpDate ? new Date(lead.followUpDate).toISOString().slice(0, 10) : '',
-    tags: (lead.tags || []).join(', '), source: lead.source || ''
+    tags: (lead.tags || []).join(', '), source: lead.source || '',
   });
   const [noteText, setNoteText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -56,11 +88,10 @@ function LeadDetailModal({ lead, employees, onClose, onUpdate }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const payload = { ...form, tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [] };
+      const payload = { ...form, tags: form.tags ? form.tags.split(',').map(t=>t.trim()).filter(Boolean) : [] };
       await api.put(`/api/leads/${lead._id}`, payload);
       toast.success('Lead updated');
-      onUpdate();
-      onClose();
+      onUpdate(); onClose();
     } catch { toast.error('Failed to update'); }
     finally { setSaving(false); }
   };
@@ -69,124 +100,111 @@ function LeadDetailModal({ lead, employees, onClose, onUpdate }) {
     if (!noteText.trim()) return;
     try {
       await api.post(`/api/leads/${lead._id}/note`, { text: noteText });
-      toast.success('Note added');
-      setNoteText('');
-      onUpdate();
+      toast.success('Note added'); setNoteText(''); onUpdate();
     } catch { toast.error('Failed to add note'); }
   };
 
+  const fields = [
+    { key:'name',    label:'Full Name' }, { key:'phone',    label:'Phone'     },
+    { key:'email',   label:'Email'     }, { key:'company',  label:'Company'   },
+    { key:'address1',label:'Address'  }, { key:'city',     label:'City'      },
+    { key:'state',   label:'State'    }, { key:'country',  label:'Country'   },
+    { key:'source',  label:'Source'   }, { key:'tags',     label:'Tags (comma-separated)' },
+  ];
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl border border-border shadow-modal w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="p-5 border-b border-border flex items-center justify-between">
+    <ModalWrap onClose={onClose}>
+      <ModalHeader title={lead.name} sub={lead.phone} onClose={onClose} />
+      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map(({ key, label }) => (
+            <div key={key}>
+              <label className="block text-xs font-medium mb-1.5" style={{ color: '#475569' }}>{label}</label>
+              <input value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})}
+                className="w-full transition-all input-ring" style={inputStyle} />
+            </div>
+          ))}
           <div>
-            <h3 className="font-bold text-textPrimary text-lg">{lead.name}</h3>
-            <p className="text-textMuted text-xs mt-0.5">{lead.phone}</p>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#475569' }}>Status</label>
+            <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}
+              className="w-full transition-all input-ring" style={inputStyle}>
+              {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+            </select>
           </div>
-          <button onClick={onClose} className="text-textMuted hover:text-danger text-xl leading-none">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: 'name', label: 'Full Name' },
-              { key: 'phone', label: 'Phone' },
-              { key: 'email', label: 'Email' },
-              { key: 'company', label: 'Company' },
-              { key: 'address1', label: 'Address' },
-              { key: 'city', label: 'City' },
-              { key: 'state', label: 'State' },
-              { key: 'country', label: 'Country' },
-              { key: 'source', label: 'Source' },
-              { key: 'tags', label: 'Tags (comma separated)' }
-            ].map(({ key, label }) => (
-              <div key={key}>
-                <label className="block text-xs font-medium text-textSecondary mb-1">{label}</label>
-                <input value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                  className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-              </div>
-            ))}
-            <div>
-              <label className="block text-xs font-medium text-textSecondary mb-1">Status</label>
-              <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
-                {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-textSecondary mb-1">Assign To</label>
-              <select value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-                className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
-                <option value="">Unassigned</option>
-                {employees.map(e => <option key={e._id} value={e._id}>{e.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-textSecondary mb-1">Follow-up Date</label>
-              <input type="date" value={form.followUpDate} onChange={(e) => setForm({ ...form, followUpDate: e.target.value })}
-                className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-            </div>
-          </div>
-          {/* Notes */}
           <div>
-            <label className="block text-xs font-medium text-textSecondary mb-1">Add Note</label>
-            <div className="flex gap-2">
-              <input value={noteText} onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Add a note…"
-                className="flex-1 bg-bg border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
-              <button onClick={handleNote}
-                className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors">
-                Add
-              </button>
-            </div>
-            {(lead.notes || []).length > 0 && (
-              <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
-                {lead.notes.slice().reverse().map((n, i) => (
-                  <div key={i} className="bg-bg rounded-lg px-3 py-2 text-xs text-textSecondary">
-                    <p>{n.text}</p>
-                    <p className="text-textMuted mt-0.5">{new Date(n.addedAt).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            )}
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#475569' }}>Assign To</label>
+            <select value={form.assignedTo} onChange={e=>setForm({...form,assignedTo:e.target.value})}
+              className="w-full transition-all input-ring" style={inputStyle}>
+              <option value="">Unassigned</option>
+              {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1.5" style={{ color: '#475569' }}>Follow-up Date</label>
+            <input type="date" value={form.followUpDate} onChange={e=>setForm({...form,followUpDate:e.target.value})}
+              className="w-full transition-all input-ring" style={inputStyle} />
           </div>
         </div>
-        <div className="p-5 border-t border-border flex gap-3">
-          <button onClick={onClose}
-            className="flex-1 border border-border text-textSecondary py-2.5 rounded-xl text-sm font-medium hover:border-danger hover:text-danger transition-colors">
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex-1 bg-primary text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors">
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+        <div>
+          <label className="block text-xs font-medium mb-1.5" style={{ color: '#475569' }}>Add Note</label>
+          <div className="flex gap-2">
+            <input value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="Add a note…"
+              className="flex-1 transition-all input-ring" style={inputStyle} />
+            <button onClick={handleNote}
+              className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+              style={{ background: 'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+              Add
+            </button>
+          </div>
+          {(lead.notes||[]).length > 0 && (
+            <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
+              {lead.notes.slice().reverse().map((n,i)=>(
+                <div key={i} className="rounded-xl px-3 py-2.5 text-xs"
+                  style={{ background: '#F8FAFF', border: '1px solid #E2E8F4' }}>
+                  <p style={{ color: '#475569' }}>{n.text}</p>
+                  <p className="mt-0.5" style={{ color: '#94A3B8' }}>{new Date(n.addedAt).toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-    </div>
+      <div className="p-5 flex gap-3 flex-shrink-0" style={{ borderTop: '1px solid #F1F5F9' }}>
+        <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors"
+          style={{ border:'1px solid #E2E8F4', color:'#64748B' }}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor='#FECACA';e.currentTarget.style.color='#EF4444';}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor='#E2E8F4';e.currentTarget.style.color='#64748B';}}>
+          Cancel
+        </button>
+        <button onClick={handleSave} disabled={saving}
+          className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+          style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)', opacity:saving?0.7:1 }}>
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </div>
+    </ModalWrap>
   );
 }
 
 export default function LeadsPage() {
-  const [leads, setLeads] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [filters, setFilters] = useState({ status: '', assignedTo: '', search: '' });
-  const [colSearch, setColSearch] = useState({ name: '', phone: '', company: '', assignedTo: '' });
-  const [selected, setSelected] = useState(new Set());
-  const [showAdd, setShowAdd] = useState(false);
-  const [detailLead, setDetailLead] = useState(null);
-  const [bulkModal, setBulkModal] = useState(null);
-  const [bulkEmployee, setBulkEmployee] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: '', phone: '', email: '', company: '', source: '',
-    status: 'new', assignedTo: '', followUpDate: '', tags: ''
-  });
+  const [leads,       setLeads]       = useState([]);
+  const [employees,   setEmployees]   = useState([]);
+  const [page,        setPage]        = useState(1);
+  const [pages,       setPages]       = useState(1);
+  const [total,       setTotal]       = useState(0);
+  const [filters,     setFilters]     = useState({ status:'', assignedTo:'', search:'' });
+  const [colSearch,   setColSearch]   = useState({ name:'', phone:'', company:'', assignedTo:'' });
+  const [selected,    setSelected]    = useState(new Set());
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [detailLead,  setDetailLead]  = useState(null);
+  const [bulkModal,   setBulkModal]   = useState(null);
+  const [bulkEmployee,setBulkEmployee]= useState('');
+  const [loading,     setLoading]     = useState(false);
+  const [form, setForm] = useState({ name:'',phone:'',email:'',company:'',source:'',status:'new',assignedTo:'',followUpDate:'',tags:'' });
 
-  const fetchLeads = useCallback(async (p = page, f = filters) => {
+  const fetchLeads = useCallback(async (p=page, f=filters) => {
     try {
-      const params = { page: p, limit: 20, ...Object.fromEntries(Object.entries(f).filter(([, v]) => v)) };
+      const params = { page:p, limit:20, ...Object.fromEntries(Object.entries(f).filter(([,v])=>v)) };
       const res = await api.get('/api/leads', { params });
       setLeads(res.data.data.leads);
       setTotal(res.data.data.total);
@@ -194,90 +212,57 @@ export default function LeadsPage() {
     } catch {}
   }, [page, filters]);
 
-  useEffect(() => {
-    api.get('/api/employees').then((r) => setEmployees(r.data.data)).catch(() => {});
-  }, []);
-
+  useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data.data)).catch(()=>{}); }, []);
   useEffect(() => { fetchLeads(page, filters); }, [page]);
 
-  const applyFilters = (newFilters) => {
-    setFilters(newFilters);
-    setPage(1);
-    setSelected(new Set());
-    fetchLeads(1, newFilters);
-  };
-
-  const toggleSelect = (id) => {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setSelected(next);
-  };
-
-  const toggleAll = () => {
-    if (selected.size === leads.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(leads.map(l => l._id)));
-    }
-  };
+  const applyFilters = (f) => { setFilters(f); setPage(1); setSelected(new Set()); fetchLeads(1, f); };
+  const toggleSelect  = (id) => { const n=new Set(selected); n.has(id)?n.delete(id):n.add(id); setSelected(n); };
+  const toggleAll     = () => setSelected(selected.size===leads.length ? new Set() : new Set(leads.map(l=>l._id)));
 
   const handleAddLead = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+    e.preventDefault(); setLoading(true);
     try {
-      const payload = { ...form, tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [] };
+      const payload = { ...form, tags: form.tags ? form.tags.split(',').map(t=>t.trim()).filter(Boolean) : [] };
       await api.post('/api/leads', payload);
-      toast.success('Lead created');
-      setShowAdd(false);
-      setForm({ name: '', phone: '', email: '', company: '', source: '', status: 'new', assignedTo: '', followUpDate: '', tags: '' });
+      toast.success('Lead created'); setShowAdd(false);
+      setForm({ name:'',phone:'',email:'',company:'',source:'',status:'new',assignedTo:'',followUpDate:'',tags:'' });
       fetchLeads(1, filters);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to create lead');
-    } finally { setLoading(false); }
+    } catch (err) { toast.error(err.response?.data?.error||'Failed to create lead'); }
+    finally { setLoading(false); }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this lead?')) return;
-    try {
-      await api.delete(`/api/leads/${id}`);
-      toast.success('Lead deleted');
-      fetchLeads(page, filters);
-    } catch { toast.error('Failed to delete'); }
+    try { await api.delete(`/api/leads/${id}`); toast.success('Lead deleted'); fetchLeads(page,filters); }
+    catch { toast.error('Failed to delete'); }
   };
 
   const handleBulkAction = async () => {
     if (!selected.size) return;
     const ids = [...selected];
     try {
-      if (bulkModal === 'assign' || bulkModal === 'transfer') {
-        await api.post(`/api/leads/bulk-${bulkModal === 'assign' ? 'assign' : 'transfer'}`, {
-          leadIds: ids, employeeId: bulkEmployee, toEmployeeId: bulkEmployee
-        });
-        toast.success(`${ids.length} leads ${bulkModal === 'assign' ? 'assigned' : 'transferred'}`);
-      } else if (bulkModal === 'delete') {
-        if (!confirm(`Delete ${ids.length} leads? This cannot be undone.`)) return;
-        await api.delete('/api/leads/bulk-delete', { data: { leadIds: ids } });
+      if (bulkModal==='assign'||bulkModal==='transfer') {
+        await api.post(`/api/leads/bulk-${bulkModal==='assign'?'assign':'transfer'}`, { leadIds:ids, employeeId:bulkEmployee, toEmployeeId:bulkEmployee });
+        toast.success(`${ids.length} leads ${bulkModal==='assign'?'assigned':'transferred'}`);
+      } else if (bulkModal==='delete') {
+        if (!confirm(`Delete ${ids.length} leads?`)) return;
+        await api.delete('/api/leads/bulk-delete', { data:{ leadIds:ids } });
         toast.success(`${ids.length} leads deleted`);
       }
-      setBulkModal(null); setBulkEmployee(''); setSelected(new Set());
-      fetchLeads(page, filters);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Bulk action failed');
-    }
+      setBulkModal(null); setBulkEmployee(''); setSelected(new Set()); fetchLeads(page,filters);
+    } catch (err) { toast.error(err.response?.data?.error||'Bulk action failed'); }
   };
 
   const handleStatusChange = async (id, status) => {
-    try {
-      await api.put(`/api/leads/${id}`, { status });
-      setLeads(prev => prev.map(l => l._id === id ? { ...l, status } : l));
-    } catch { toast.error('Failed to update status'); }
+    try { await api.put(`/api/leads/${id}`, { status }); setLeads(prev=>prev.map(l=>l._id===id?{...l,status}:l)); }
+    catch { toast.error('Failed to update status'); }
   };
 
   const filteredLeads = leads.filter(l => {
-    const q = (s) => (s || '').toLowerCase();
-    if (colSearch.name   && !q(l.name).includes(q(colSearch.name)))         return false;
-    if (colSearch.phone  && !q(l.phone).includes(q(colSearch.phone)))        return false;
-    if (colSearch.company && !q(l.company).includes(q(colSearch.company)))   return false;
+    const q = s => (s||'').toLowerCase();
+    if (colSearch.name       && !q(l.name).includes(q(colSearch.name)))               return false;
+    if (colSearch.phone      && !q(l.phone).includes(q(colSearch.phone)))             return false;
+    if (colSearch.company    && !q(l.company).includes(q(colSearch.company)))         return false;
     if (colSearch.assignedTo && !q(l.assignedTo?.name).includes(q(colSearch.assignedTo))) return false;
     return true;
   });
@@ -285,313 +270,324 @@ export default function LeadsPage() {
   const hasColSearch = Object.values(colSearch).some(Boolean);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in-up">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-textPrimary">My Leads</h2>
-          <p className="text-textMuted text-sm">{total} total leads</p>
+          <h2 className="text-xl font-extrabold leading-none" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>My Leads</h2>
+          <p className="text-sm mt-1" style={{ color:'#94A3B8' }}>{total.toLocaleString()} total leads</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => setShowAdd(true)}
-            className="bg-primary hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
-            + Add Lead
-          </button>
-        </div>
+        <button onClick={()=>setShowAdd(true)}
+          className="flex items-center gap-2 text-sm font-semibold px-4 py-2.5 rounded-xl text-white"
+          style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)', boxShadow:'0 4px 12px rgba(99,102,241,0.30)' }}>
+          + Add Lead
+        </button>
       </div>
 
-      {/* Status filter chips */}
+      {/* Status chips */}
       <div className="flex gap-2 flex-wrap">
-        {['', ...STATUSES].map((s) => (
-          <button key={s} onClick={() => applyFilters({ ...filters, status: s })}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-              filters.status === s
-                ? 'bg-textPrimary text-white border-textPrimary'
-                : 'bg-white text-textSecondary border-border hover:border-primary hover:text-primary'
-            }`}>
-            {s === '' ? `All (${total})` : STATUS_LABELS[s]}
-          </button>
-        ))}
+        {['', ...STATUSES].map(s => {
+          const active = filters.status === s;
+          const style  = active ? { background:'#0F172A', color:'#fff', border:'1px solid #0F172A' }
+                                : { background:'#fff', color:'#475569', border:'1px solid #E2E8F4' };
+          return (
+            <button key={s} onClick={()=>applyFilters({...filters,status:s})}
+              className="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all" style={style}>
+              {s===''?`All (${total})`:STATUS_LABELS[s]}
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters bar */}
-      <div className="bg-white rounded-2xl border border-border shadow-card p-4 flex flex-wrap gap-3 items-end">
+      <div className="rounded-2xl p-4 flex flex-wrap gap-3 items-end"
+        style={{ background:'#fff', border:'1px solid #E2E8F4', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
         <div className="flex-1 min-w-48">
-          <label className="block text-textMuted text-xs font-medium mb-1">Search</label>
+          <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color:'#64748B' }}>Search</label>
           <input value={filters.search} placeholder="Name, phone, company…"
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-            onKeyDown={(e) => e.key === 'Enter' && applyFilters(filters)}
-            className="w-full bg-bg border border-border text-textPrimary text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary placeholder:text-textMuted" />
+            onChange={e=>setFilters({...filters,search:e.target.value})}
+            onKeyDown={e=>e.key==='Enter'&&applyFilters(filters)}
+            className="w-full transition-all input-ring" style={inputStyle} />
         </div>
-        <div>
-          <label className="block text-textMuted text-xs font-medium mb-1">Assigned To</label>
-          <select value={filters.assignedTo} onChange={(e) => applyFilters({ ...filters, assignedTo: e.target.value })}
-            className="bg-bg border border-border text-textPrimary text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+        <div className="min-w-40">
+          <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color:'#64748B' }}>Assigned To</label>
+          <select value={filters.assignedTo} onChange={e=>applyFilters({...filters,assignedTo:e.target.value})}
+            className="w-full transition-all input-ring" style={inputStyle}>
             <option value="">All Employees</option>
-            {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
+            {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
           </select>
         </div>
-        <button onClick={() => applyFilters({ status: '', assignedTo: '', search: '' })}
-          className="border border-border text-textMuted text-sm px-4 py-2 rounded-xl hover:border-danger hover:text-danger transition-colors">
-          Reset
-        </button>
-        <button onClick={() => applyFilters(filters)}
-          className="bg-primary text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors">
-          Apply
-        </button>
+        <div className="flex gap-2">
+          <button onClick={()=>applyFilters({status:'',assignedTo:'',search:''})}
+            className="px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+            style={{ border:'1px solid #E2E8F4', color:'#64748B' }}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='#FECACA';e.currentTarget.style.color='#EF4444';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='#E2E8F4';e.currentTarget.style.color='#64748B';}}>
+            Reset
+          </button>
+          <button onClick={()=>applyFilters(filters)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+            style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+            Apply
+          </button>
+        </div>
       </div>
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="bg-primaryLt border border-blue-200 rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
-          <span className="text-primary text-sm font-semibold">{selected.size} selected</span>
+        <div className="rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap animate-slide-down"
+          style={{ background:'#EEF2FF', border:'1px solid #C7D2FE' }}>
+          <span className="text-sm font-semibold" style={{ color:'#6366F1' }}>{selected.size} selected</span>
           <div className="flex gap-2 ml-auto flex-wrap">
-            <button onClick={() => setBulkModal('assign')}
-              className="text-xs border border-primary text-primary px-3 py-1.5 rounded-xl font-semibold hover:bg-primary hover:text-white transition-colors">
-              Assign
-            </button>
-            <button onClick={() => setBulkModal('transfer')}
-              className="text-xs border border-warning text-warning px-3 py-1.5 rounded-xl font-semibold hover:bg-warning hover:text-white transition-colors">
-              Transfer
-            </button>
-            <button onClick={() => setBulkModal('delete')}
-              className="text-xs border border-danger text-danger px-3 py-1.5 rounded-xl font-semibold hover:bg-danger hover:text-white transition-colors">
-              Delete
-            </button>
-            <button onClick={() => setSelected(new Set())}
-              className="text-xs text-textMuted hover:text-danger transition-colors px-2">
+            {[
+              { action:'assign',   label:'Assign',   col:'#6366F1', bg:'rgba(99,102,241,0.10)' },
+              { action:'transfer', label:'Transfer', col:'#D97706', bg:'rgba(245,158,11,0.10)' },
+              { action:'delete',   label:'Delete',   col:'#DC2626', bg:'rgba(239,68,68,0.10)'  },
+            ].map(({action,label,col,bg})=>(
+              <button key={action} onClick={()=>setBulkModal(action)}
+                className="text-xs px-3 py-1.5 rounded-xl font-semibold transition-all"
+                style={{ border:`1px solid ${col}`, color:col, background:'transparent' }}
+                onMouseEnter={e=>{e.currentTarget.style.background=bg;}}
+                onMouseLeave={e=>{e.currentTarget.style.background='transparent';}}>
+                {label}
+              </button>
+            ))}
+            <button onClick={()=>setSelected(new Set())} className="text-xs font-medium transition-colors px-2"
+              style={{ color:'#94A3B8' }}
+              onMouseEnter={e=>e.currentTarget.style.color='#EF4444'}
+              onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>
               Clear
             </button>
           </div>
         </div>
       )}
 
-      {/* Column search active chips */}
+      {/* Column search chips */}
       {hasColSearch && (
-        <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-textMuted font-medium">Column filters:</span>
-          {Object.entries(colSearch).filter(([, v]) => v).map(([k, v]) => (
-            <span key={k} className="inline-flex items-center gap-1.5 bg-primaryLt text-primary border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-full">
+        <div className="flex flex-wrap gap-2 items-center animate-slide-down">
+          <span className="text-xs font-medium" style={{ color:'#94A3B8' }}>Column filters:</span>
+          {Object.entries(colSearch).filter(([,v])=>v).map(([k,v])=>(
+            <span key={k} className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+              style={{ background:'#EEF2FF', color:'#6366F1', border:'1px solid #C7D2FE' }}>
               {k}: "{v}"
-              <button onClick={() => setColSearch(s => ({ ...s, [k]: '' }))} className="hover:text-danger transition-colors">✕</button>
+              <button onClick={()=>setColSearch(s=>({...s,[k]:''}))}
+                onMouseEnter={e=>e.currentTarget.style.opacity='0.6'}
+                onMouseLeave={e=>e.currentTarget.style.opacity='1'}><CloseIco /></button>
             </span>
           ))}
-          <button onClick={() => setColSearch({ name: '', phone: '', company: '', assignedTo: '' })}
-            className="text-xs text-textMuted hover:text-danger transition-colors font-medium">Clear all</button>
+          <button onClick={()=>setColSearch({name:'',phone:'',company:'',assignedTo:''})}
+            className="text-xs font-medium transition-colors"
+            style={{ color:'#94A3B8' }}
+            onMouseEnter={e=>e.currentTarget.style.color='#EF4444'}
+            onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>
+            Clear all
+          </button>
         </div>
       )}
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-border shadow-card overflow-x-auto">
-        <table className="w-full text-sm" style={{ minWidth: 900 }}>
-          <thead>
-            <tr className="border-b-0 text-textMuted text-xs font-semibold uppercase tracking-wide bg-bg">
-              <th className="px-4 pt-3.5 pb-2 text-left w-10">
-                <input type="checkbox" checked={selected.size === leads.length && leads.length > 0}
-                  onChange={toggleAll}
-                  className="rounded border-border" />
-              </th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Created</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Lead Name</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Contact No.</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Attempts</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Tags</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Assign To</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Status</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Last Call</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Duration</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Last Note</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Company</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Follow-up</th>
-              <th className="px-4 pt-3.5 pb-2 text-left">Actions</th>
-            </tr>
-            {/* Column search row */}
-            <tr className="border-b border-border bg-bg">
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2">
-                <input value={colSearch.name} placeholder="Search name…"
-                  onChange={e => setColSearch(s => ({ ...s, name: e.target.value }))}
-                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
-              </td>
-              <td className="px-4 pb-2">
-                <input value={colSearch.phone} placeholder="Search phone…"
-                  onChange={e => setColSearch(s => ({ ...s, phone: e.target.value }))}
-                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
-              </td>
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2">
-                <input value={colSearch.assignedTo} placeholder="Search employee…"
-                  onChange={e => setColSearch(s => ({ ...s, assignedTo: e.target.value }))}
-                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
-              </td>
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2">
-                <input value={colSearch.company} placeholder="Search company…"
-                  onChange={e => setColSearch(s => ({ ...s, company: e.target.value }))}
-                  className="w-full bg-white border border-border rounded-lg px-2 py-1 text-xs text-textPrimary focus:outline-none focus:ring-1 focus:ring-primary/40 placeholder:text-textMuted" />
-              </td>
-              <td className="px-4 pb-2" />
-              <td className="px-4 pb-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {filteredLeads.map((lead) => (
-              <tr key={lead._id} className="border-b border-border hover:bg-bg/60 transition-colors">
-                <td className="px-4 py-3">
-                  <input type="checkbox" checked={selected.has(lead._id)} onChange={() => toggleSelect(lead._id)}
-                    className="rounded border-border" />
-                </td>
-                <td className="px-4 py-3 text-textMuted text-xs whitespace-nowrap">{fmtDate(lead.createdAt)}</td>
-                <td className="px-4 py-3">
-                  <button onClick={() => setDetailLead(lead)} className="flex items-center gap-2 text-left hover:text-primary transition-colors">
-                    <div className="w-7 h-7 rounded-xl bg-primaryLt text-primary text-xs font-bold flex items-center justify-center flex-shrink-0">
-                      {lead.name[0]?.toUpperCase()}
-                    </div>
-                    <span className="text-textPrimary font-semibold hover:text-primary">{lead.name}</span>
-                  </button>
-                </td>
-                <td className="px-4 py-3">
-                  <span className="text-primary font-medium text-xs">{lead.phone}</span>
-                </td>
-                <td className="px-4 py-3 text-center">
-                  <span className="bg-primaryLt text-primary text-xs px-2 py-0.5 rounded-full font-bold">
-                    {lead.attempts || 0}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  {(lead.tags || []).length > 0 ? (
-                    <div className="flex gap-1 flex-wrap">
-                      {lead.tags.slice(0, 2).map((t) => (
-                        <span key={t} className="bg-purple-50 text-purple border border-purple-200 text-xs px-1.5 py-0.5 rounded-full">{t}</span>
-                      ))}
-                      {lead.tags.length > 2 && <span className="text-textMuted text-xs">+{lead.tags.length - 2}</span>}
-                    </div>
-                  ) : <span className="text-textMuted text-xs">—</span>}
-                </td>
-                <td className="px-4 py-3">
-                  {lead.assignedTo ? (
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-5 h-5 rounded-full bg-primaryLt text-primary text-xs font-bold flex items-center justify-center flex-shrink-0">
-                        {lead.assignedTo.name[0]?.toUpperCase()}
-                      </div>
-                      <span className="text-textSecondary text-xs truncate max-w-24">{lead.assignedTo.name}</span>
-                    </div>
-                  ) : <span className="text-textMuted text-xs">Unassigned</span>}
-                </td>
-                <td className="px-4 py-3">
-                  <select value={lead.status} onChange={(e) => handleStatusChange(lead._id, e.target.value)}
-                    className={`text-xs rounded-full px-2 py-1 border font-medium focus:outline-none ${STATUS_COLOR[lead.status] || 'bg-gray-50 text-textMuted border-gray-200'}`}>
-                    {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-                  </select>
-                </td>
-                <td className="px-4 py-3">
-                  {lead.lastCallAt ? (
-                    <div>
-                      <p className="text-xs text-textSecondary">{fmtDate(lead.lastCallAt)}</p>
-                      {lead.lastCallType && <CallTypePill type={lead.lastCallType} />}
-                    </div>
-                  ) : <span className="text-textMuted text-xs">—</span>}
-                </td>
-                <td className="px-4 py-3 text-textSecondary text-xs">{fmtDuration(lead.lastCallDuration)}</td>
-                <td className="px-4 py-3 max-w-32">
-                  {lead.lastCallNote ? (
-                    <p className="text-xs text-textSecondary truncate">{lead.lastCallNote}</p>
-                  ) : (lead.notes?.length > 0 ? (
-                    <p className="text-xs text-textSecondary truncate">{lead.notes[lead.notes.length - 1].text}</p>
-                  ) : <span className="text-textMuted text-xs">—</span>)}
-                </td>
-                <td className="px-4 py-3 text-textSecondary text-xs">{lead.company || '—'}</td>
-                <td className="px-4 py-3">
-                  {lead.followUpDate ? (
-                    <span className="bg-orange-50 text-warning border border-orange-200 text-xs px-2 py-0.5 rounded-full font-medium">
-                      {fmtDate(lead.followUpDate)}
-                    </span>
-                  ) : <span className="text-textMuted text-xs">—</span>}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex gap-2">
-                    <button onClick={() => setDetailLead(lead)}
-                      className="text-xs text-primary font-semibold hover:underline">
-                      Edit
-                    </button>
-                    <button onClick={() => handleDelete(lead._id)}
-                      className="text-xs text-danger font-semibold hover:underline">
-                      Del
-                    </button>
-                  </div>
-                </td>
+      <div className="rounded-2xl overflow-hidden"
+        style={{ background:'#fff', border:'1px solid #E2E8F4', boxShadow:'0 1px 3px rgba(0,0,0,0.04)' }}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{ minWidth:920 }}>
+            <thead>
+              <tr style={{ borderBottom:'1px solid #F1F5F9', background:'#F8FAFF' }}>
+                <th className="px-4 pt-3.5 pb-2 w-10">
+                  <input type="checkbox" checked={selected.size===leads.length&&leads.length>0} onChange={toggleAll}
+                    className="rounded" style={{ accentColor:'#6366F1' }} />
+                </th>
+                {['Created','Lead','Contact','Attempts','Tags','Assigned To','Status','Last Call','Duration','Note','Company','Follow-up','Actions'].map(h=>(
+                  <th key={h} className="px-4 pt-3.5 pb-2 text-left text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                    style={{ color:'#94A3B8' }}>{h}</th>
+                ))}
               </tr>
-            ))}
-            {leads.length === 0 && (
-              <tr><td colSpan={14} className="px-5 py-10 text-center">
-                <span className="text-4xl block mb-2">🎯</span>
-                <span className="text-textMuted text-sm">No leads found</span>
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+              {/* Column search */}
+              <tr style={{ borderBottom:'1px solid #F1F5F9', background:'#F8FAFF' }}>
+                <td className="px-4 pb-2" />
+                <td className="px-4 pb-2" />
+                <td className="px-4 pb-2">
+                  <input value={colSearch.name} placeholder="Search…" onChange={e=>setColSearch(s=>({...s,name:e.target.value}))}
+                    className="w-full rounded-lg text-xs transition-all input-ring" style={{ ...inputStyle,padding:'5px 8px',fontSize:'11px' }} />
+                </td>
+                <td className="px-4 pb-2">
+                  <input value={colSearch.phone} placeholder="Search…" onChange={e=>setColSearch(s=>({...s,phone:e.target.value}))}
+                    className="w-full rounded-lg text-xs transition-all input-ring" style={{ ...inputStyle,padding:'5px 8px',fontSize:'11px' }} />
+                </td>
+                <td className="px-4 pb-2" /><td className="px-4 pb-2" />
+                <td className="px-4 pb-2">
+                  <input value={colSearch.assignedTo} placeholder="Search…" onChange={e=>setColSearch(s=>({...s,assignedTo:e.target.value}))}
+                    className="w-full rounded-lg text-xs transition-all input-ring" style={{ ...inputStyle,padding:'5px 8px',fontSize:'11px' }} />
+                </td>
+                <td className="px-4 pb-2" /><td className="px-4 pb-2" /><td className="px-4 pb-2" /><td className="px-4 pb-2" />
+                <td className="px-4 pb-2">
+                  <input value={colSearch.company} placeholder="Search…" onChange={e=>setColSearch(s=>({...s,company:e.target.value}))}
+                    className="w-full rounded-lg text-xs transition-all input-ring" style={{ ...inputStyle,padding:'5px 8px',fontSize:'11px' }} />
+                </td>
+                <td className="px-4 pb-2" /><td className="px-4 pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredLeads.map(lead=>(
+                <tr key={lead._id} className="table-row-hover transition-colors" style={{ borderBottom:'1px solid #F8FAFF' }}>
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selected.has(lead._id)} onChange={()=>toggleSelect(lead._id)}
+                      style={{ accentColor:'#6366F1' }} />
+                  </td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>{fmtDate(lead.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    <button onClick={()=>setDetailLead(lead)} className="flex items-center gap-2 text-left">
+                      <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                        style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+                        {lead.name[0]?.toUpperCase()}
+                      </div>
+                      <span className="text-xs font-semibold transition-colors" style={{ color:'#0F172A' }}
+                        onMouseEnter={e=>e.currentTarget.style.color='#6366F1'}
+                        onMouseLeave={e=>e.currentTarget.style.color='#0F172A'}>
+                        {lead.name}
+                      </span>
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-xs font-medium" style={{ color:'#6366F1' }}>{lead.phone}</td>
+                  <td className="px-4 py-3 text-center">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{ background:'#EEF2FF', color:'#6366F1' }}>{lead.attempts||0}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {(lead.tags||[]).length>0 ? (
+                      <div className="flex gap-1 flex-wrap">
+                        {lead.tags.slice(0,2).map(t=>(
+                          <span key={t} className="text-xs px-1.5 py-0.5 rounded-full"
+                            style={{ background:'rgba(139,92,246,0.10)', color:'#7C3AED', border:'1px solid rgba(139,92,246,0.22)' }}>
+                            {t}
+                          </span>
+                        ))}
+                        {lead.tags.length>2&&<span className="text-xs" style={{ color:'#94A3B8' }}>+{lead.tags.length-2}</span>}
+                      </div>
+                    ) : <span className="text-xs" style={{ color:'#CBD5E1' }}>—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {lead.assignedTo ? (
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded-lg flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+                          style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)' }}>
+                          {lead.assignedTo.name[0]?.toUpperCase()}
+                        </div>
+                        <span className="text-xs truncate max-w-24" style={{ color:'#475569' }}>{lead.assignedTo.name}</span>
+                      </div>
+                    ) : <span className="text-xs" style={{ color:'#CBD5E1' }}>Unassigned</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <select value={lead.status} onChange={e=>handleStatusChange(lead._id,e.target.value)}
+                      className="text-xs rounded-full px-2 py-1 font-semibold focus:outline-none cursor-pointer"
+                      style={STATUS_STYLE[lead.status]||STATUS_STYLE.lost}>
+                      {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    {lead.lastCallAt ? (
+                      <p className="text-xs whitespace-nowrap" style={{ color:'#475569' }}>{fmtDate(lead.lastCallAt)}</p>
+                    ) : <span className="text-xs" style={{ color:'#CBD5E1' }}>—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-xs font-medium whitespace-nowrap" style={{ color:'#475569' }}>{fmtDuration(lead.lastCallDuration)}</td>
+                  <td className="px-4 py-3 max-w-[110px]">
+                    <p className="text-xs truncate" style={{ color: lead.lastCallNote||(lead.notes?.length>0) ? '#475569' : '#CBD5E1' }}>
+                      {lead.lastCallNote || lead.notes?.[lead.notes.length-1]?.text || '—'}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-xs" style={{ color:'#475569' }}>{lead.company||'—'}</td>
+                  <td className="px-4 py-3">
+                    {lead.followUpDate ? (
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap"
+                        style={{ background:'rgba(245,158,11,0.10)', color:'#D97706', border:'1px solid rgba(245,158,11,0.22)' }}>
+                        {fmtDate(lead.followUpDate)}
+                      </span>
+                    ) : <span className="text-xs" style={{ color:'#CBD5E1' }}>—</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <button onClick={()=>setDetailLead(lead)} className="text-xs font-semibold transition-colors" style={{ color:'#6366F1' }}
+                        onMouseEnter={e=>e.currentTarget.style.opacity='0.7'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>Edit</button>
+                      <button onClick={()=>handleDelete(lead._id)} className="text-xs font-semibold transition-colors" style={{ color:'#EF4444' }}
+                        onMouseEnter={e=>e.currentTarget.style.opacity='0.7'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>Del</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {leads.length===0&&(
+                <tr><td colSpan={14} className="px-5 py-16 text-center">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background:'#EEF2FF', color:'#818CF8' }}>
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/><line x1="20" y1="8" x2="20" y2="14"/></svg>
+                    </div>
+                    <p className="text-sm font-medium" style={{ color:'#94A3B8' }}>No leads found</p>
+                  </div>
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
       <Pagination page={page} pages={pages} onPage={setPage} />
 
       {/* Add Lead Modal */}
       {showAdd && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-border shadow-modal w-full max-w-lg max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b border-border flex items-center justify-between">
-              <h3 className="text-textPrimary font-bold text-lg">Add New Lead</h3>
-              <button onClick={() => setShowAdd(false)} className="text-textMuted hover:text-danger text-xl leading-none">✕</button>
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay"
+          style={{ background:'rgba(12,10,30,0.55)', backdropFilter:'blur(6px)' }}>
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl modal-content"
+            style={{ background:'#fff', border:'1px solid #E2E8F4', boxShadow:'0 25px 80px rgba(0,0,0,0.18)' }}>
+            <div className="flex items-center justify-between p-5 flex-shrink-0" style={{ borderBottom:'1px solid #F1F5F9' }}>
+              <div>
+                <h3 className="font-bold" style={{ color:'#0F172A' }}>Add New Lead</h3>
+                <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Fill in contact details</p>
+              </div>
+              <button onClick={()=>setShowAdd(false)} className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors"
+                style={{ color:'#94A3B8' }}
+                onMouseEnter={e=>{e.currentTarget.style.background='#FFF1F2';e.currentTarget.style.color='#EF4444';}}
+                onMouseLeave={e=>{e.currentTarget.style.background='';e.currentTarget.style.color='#94A3B8';}}>
+                <CloseIco />
+              </button>
             </div>
-            <form onSubmit={handleAddLead} className="p-5 overflow-y-auto space-y-3">
+            <form onSubmit={handleAddLead} className="p-5 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: 'name', label: 'Full Name', req: true },
-                  { key: 'phone', label: 'Phone', req: true },
-                  { key: 'email', label: 'Email', req: false },
-                  { key: 'company', label: 'Company', req: false },
-                  { key: 'source', label: 'Source', req: false },
-                  { key: 'tags', label: 'Tags (comma separated)', req: false }
-                ].map(({ key, label, req }) => (
-                  <div key={key}>
-                    <label className="block text-textSecondary text-xs font-medium mb-1">{label}</label>
-                    <input type="text" required={req} value={form[key]}
-                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                      className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-textPrimary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary placeholder:text-textMuted" />
+                {[{k:'name',l:'Full Name',req:true},{k:'phone',l:'Phone',req:true},{k:'email',l:'Email'},{k:'company',l:'Company'},{k:'source',l:'Source'},{k:'tags',l:'Tags (comma-separated)'}]
+                  .map(({k,l,req})=>(
+                  <div key={k}>
+                    <label className="block text-xs font-medium mb-1.5" style={{ color:'#475569' }}>{l}</label>
+                    <input type="text" required={!!req} value={form[k]} onChange={e=>setForm({...form,[k]:e.target.value})}
+                      className="w-full transition-all input-ring" style={inputStyle} />
                   </div>
                 ))}
                 <div>
-                  <label className="block text-textSecondary text-xs font-medium mb-1">Status</label>
-                  <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                    className="w-full bg-bg border border-border text-textPrimary text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30">
-                    {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                  <label className="block text-xs font-medium mb-1.5" style={{ color:'#475569' }}>Status</label>
+                  <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}
+                    className="w-full transition-all input-ring" style={inputStyle}>
+                    {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-textSecondary text-xs font-medium mb-1">Assign To</label>
-                  <select value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-                    className="w-full bg-bg border border-border text-textPrimary text-sm rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/30">
+                  <label className="block text-xs font-medium mb-1.5" style={{ color:'#475569' }}>Assign To</label>
+                  <select value={form.assignedTo} onChange={e=>setForm({...form,assignedTo:e.target.value})}
+                    className="w-full transition-all input-ring" style={inputStyle}>
                     <option value="">Unassigned</option>
-                    {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
+                    {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-textSecondary text-xs font-medium mb-1">Follow-up Date</label>
-                  <input type="date" value={form.followUpDate} onChange={(e) => setForm({ ...form, followUpDate: e.target.value })}
-                    className="w-full bg-bg border border-border rounded-xl px-3 py-2 text-textPrimary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  <label className="block text-xs font-medium mb-1.5" style={{ color:'#475569' }}>Follow-up Date</label>
+                  <input type="date" value={form.followUpDate} onChange={e=>setForm({...form,followUpDate:e.target.value})}
+                    className="w-full transition-all input-ring" style={inputStyle} />
                 </div>
               </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowAdd(false)}
-                  className="flex-1 border border-border text-textSecondary py-2.5 rounded-xl text-sm font-medium hover:border-danger hover:text-danger transition-colors">
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={()=>setShowAdd(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                  style={{ border:'1px solid #E2E8F4', color:'#64748B' }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor='#FECACA';e.currentTarget.style.color='#EF4444';}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor='#E2E8F4';e.currentTarget.style.color='#64748B';}}>
                   Cancel
                 </button>
-                <button type="submit" disabled={loading}
-                  className="flex-1 bg-primary text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors">
-                  {loading ? 'Creating…' : 'Create Lead'}
+                <button type="submit" disabled={loading} className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)', opacity:loading?0.7:1 }}>
+                  {loading?'Creating…':'Create Lead'}
                 </button>
               </div>
             </form>
@@ -599,29 +595,30 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {/* Bulk Action Modal (assign/transfer) */}
-      {(bulkModal === 'assign' || bulkModal === 'transfer') && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-border shadow-modal w-full max-w-sm">
-            <div className="p-5 border-b border-border">
-              <h3 className="font-bold text-textPrimary capitalize">{bulkModal} {selected.size} Leads</h3>
+      {/* Bulk Action Modal */}
+      {(bulkModal==='assign'||bulkModal==='transfer') && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay"
+          style={{ background:'rgba(12,10,30,0.55)', backdropFilter:'blur(6px)' }}>
+          <div className="w-full max-w-sm rounded-2xl modal-content"
+            style={{ background:'#fff', border:'1px solid #E2E8F4', boxShadow:'0 25px 80px rgba(0,0,0,0.18)' }}>
+            <div className="p-5" style={{ borderBottom:'1px solid #F1F5F9' }}>
+              <h3 className="font-bold capitalize" style={{ color:'#0F172A' }}>{bulkModal} {selected.size} Leads</h3>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-textSecondary mb-1">Select Employee</label>
-                <select value={bulkEmployee} onChange={(e) => setBulkEmployee(e.target.value)}
-                  className="w-full bg-bg border border-border text-textPrimary text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <label className="block text-xs font-medium mb-1.5" style={{ color:'#475569' }}>Select Employee</label>
+                <select value={bulkEmployee} onChange={e=>setBulkEmployee(e.target.value)}
+                  className="w-full transition-all input-ring" style={inputStyle}>
                   <option value="">— Select —</option>
-                  {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
+                  {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
                 </select>
               </div>
               <div className="flex gap-3">
-                <button onClick={() => { setBulkModal(null); setBulkEmployee(''); }}
-                  className="flex-1 border border-border text-textSecondary py-2.5 rounded-xl text-sm font-medium hover:border-danger hover:text-danger transition-colors">
-                  Cancel
-                </button>
+                <button onClick={()=>{setBulkModal(null);setBulkEmployee('');}} className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                  style={{ border:'1px solid #E2E8F4', color:'#64748B' }}>Cancel</button>
                 <button onClick={handleBulkAction} disabled={!bulkEmployee}
-                  className="flex-1 bg-primary text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 transition-colors">
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style={{ background:'linear-gradient(135deg,#6366F1,#8B5CF6)', opacity:bulkEmployee?1:0.4 }}>
                   Confirm
                 </button>
               </div>
@@ -630,14 +627,10 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {/* Lead Detail Modal */}
       {detailLead && (
-        <LeadDetailModal
-          lead={detailLead}
-          employees={employees}
-          onClose={() => setDetailLead(null)}
-          onUpdate={() => { fetchLeads(page, filters); setDetailLead(null); }}
-        />
+        <LeadDetailModal lead={detailLead} employees={employees}
+          onClose={()=>setDetailLead(null)}
+          onUpdate={()=>{ fetchLeads(page,filters); setDetailLead(null); }} />
       )}
     </div>
   );

@@ -2,10 +2,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-function Svg({ children, size = 18 }) {
+function Svg({ children, size = 17 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       {children}
     </svg>
   );
@@ -23,17 +23,18 @@ const CalendarIcon  = () => <Svg><rect x="3" y="4" width="18" height="18" rx="2"
 const ClientIcon    = () => <Svg><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></Svg>;
 const ExportIcon    = () => <Svg><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Svg>;
 const BellIcon      = () => <Svg><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></Svg>;
-const ScriptsIcon   = () => <Svg><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Svg>;
+const ScriptsIcon   = () => <Svg><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></Svg>;
 const ActivityIcon  = () => <Svg><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></Svg>;
 const SettingsIcon  = () => <Svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></Svg>;
 const LogoutIcon    = () => <Svg size={15}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></Svg>;
 const CloseIcon     = () => <Svg size={18}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Svg>;
+const LeaderIcon    = () => <Svg><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></Svg>;
 
 const navGroups = [
   {
     label: 'Overview',
     items: [
-      { href: '/dashboard', label: 'Dashboard', Icon: DashboardIcon },
+      { href: '/dashboard', label: 'Dashboard',  Icon: DashboardIcon },
       { href: '/analytics',  label: 'Analytics',  Icon: AnalyticsIcon },
     ]
   },
@@ -48,9 +49,10 @@ const navGroups = [
   {
     label: 'Management',
     items: [
-      { href: '/employees',      label: 'Employees', Icon: EmployeesIcon },
-      { href: '/leads',          label: 'Leads',     Icon: LeadsIcon },
-      { href: '/leads/pipeline', label: 'Pipeline',  Icon: PipelineIcon },
+      { href: '/employees',             label: 'Employees',  Icon: EmployeesIcon },
+      { href: '/employees/leaderboard', label: 'Leaderboard',Icon: LeaderIcon },
+      { href: '/leads',                 label: 'Leads',      Icon: LeadsIcon },
+      { href: '/leads/pipeline',        label: 'Pipeline',   Icon: PipelineIcon },
     ]
   },
   {
@@ -91,47 +93,50 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose, user, on
 
   return (
     <aside className={[
-      // sizing — always full on mobile, desktop-responsive
       'w-60',
-      collapsed ? 'lg:w-[68px]' : 'lg:w-60',
-      // base styles
-      'bg-sidebar border-r border-sidebarBorder',
+      collapsed ? 'lg:w-[66px]' : 'lg:w-60',
       'flex flex-col fixed left-0 top-0 bottom-0 z-40',
       'transition-all duration-300 ease-in-out overflow-hidden',
-      // mobile slide behaviour — hidden off-screen, shown when mobileOpen
-      mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full',
-      // desktop always visible
-      'lg:translate-x-0 lg:shadow-sidebar',
-    ].join(' ')}>
+      mobileOpen ? 'translate-x-0' : '-translate-x-full',
+      'lg:translate-x-0',
+    ].join(' ')}
+    style={{ background: 'linear-gradient(180deg, #0C0A1E 0%, #100E28 100%)', boxShadow: '4px 0 32px rgba(0,0,0,0.28)' }}>
 
-      {/* Brand header */}
-      <div className={`h-16 border-b border-sidebarBorder flex items-center flex-shrink-0 ${collapsed ? 'lg:justify-center px-4 lg:px-3' : 'px-4'}`}>
-        <div className={`flex items-center gap-2.5 min-w-0 flex-1 ${collapsed ? 'lg:justify-center' : ''}`}>
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary to-blue-400 flex items-center justify-center flex-shrink-0 shadow-sm select-none">
+      {/* ── Brand header ─────────────────────────────── */}
+      <div className={`h-16 border-b flex items-center flex-shrink-0 ${collapsed ? 'lg:justify-center px-4 lg:px-0' : 'px-4'}`}
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className={`flex items-center gap-3 min-w-0 flex-1 ${collapsed ? 'lg:justify-center' : ''}`}>
+          {/* Logo mark */}
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 select-none"
+            style={{ background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)', boxShadow: '0 4px 12px rgba(99,102,241,0.40)' }}>
             <span className="text-white text-[10px] font-black tracking-tight">CT</span>
           </div>
+          {/* Brand name */}
           <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
-            <p className="text-white text-sm font-bold leading-none truncate">CallTrack</p>
-            <p className="text-sidebarMuted text-[10px] mt-0.5 tracking-wide">CRM Panel</p>
+            <p className="text-white text-[13px] font-bold leading-none tracking-tight">CallTrack</p>
+            <p className="text-[10px] mt-0.5 font-medium tracking-widest uppercase" style={{ color: '#6B6894' }}>CRM Panel</p>
           </div>
         </div>
-        {/* Mobile close button */}
-        <button
-          onClick={onMobileClose}
-          className="lg:hidden ml-auto p-1.5 text-sidebarMuted hover:text-white rounded-lg hover:bg-sidebarHov transition-colors flex-shrink-0">
+        {/* Mobile close */}
+        <button onClick={onMobileClose}
+          className="lg:hidden ml-auto p-1.5 rounded-lg transition-colors"
+          style={{ color: '#6B6894' }}
+          onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+          onMouseLeave={e => e.currentTarget.style.color = '#6B6894'}>
           <CloseIcon />
         </button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2">
+      {/* ── Nav ──────────────────────────────────────── */}
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3" style={{ scrollbarWidth: 'none' }}>
         {navGroups.map((group) => (
-          <div key={group.label} className="mb-0.5">
-            {/* Group header */}
+          <div key={group.label} className="mb-1">
+            {/* Group label */}
             {collapsed ? (
-              <div className="hidden lg:block mx-3 my-2 border-t border-white/10" />
+              <div className="hidden lg:block mx-4 my-2" style={{ height: '1px', background: 'rgba(255,255,255,0.06)' }} />
             ) : (
-              <p className="px-4 pt-3.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-sidebarMuted/70 select-none">
+              <p className="px-4 pt-4 pb-1.5 text-[9.5px] font-bold uppercase tracking-[0.12em] select-none"
+                style={{ color: '#4A476B' }}>
                 {group.label}
               </p>
             )}
@@ -139,47 +144,56 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose, user, on
             {group.items.map(({ href, label, Icon, badge }) => {
               const active = isActive(href);
               return (
-                <div key={href} className="relative px-2 my-0.5">
-                  {/* Active left accent — placed outside Link to avoid clipping */}
-                  {active && (
-                    <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-blue-400 rounded-r-full ${collapsed ? 'lg:hidden' : ''}`} />
-                  )}
+                <div key={href} className={`relative mx-2 my-0.5 ${collapsed ? 'lg:mx-1.5' : ''}`}>
                   <Link
                     href={href}
                     onClick={onMobileClose}
                     title={collapsed ? label : undefined}
                     className={[
-                      'relative flex items-center gap-3 px-2.5 py-2.5 rounded-xl text-sm font-medium',
-                      'transition-colors duration-150 group select-none',
-                      collapsed ? 'lg:justify-center lg:px-0 lg:py-2.5' : '',
+                      'group relative flex items-center rounded-xl text-sm font-medium',
+                      'transition-all duration-150 select-none',
+                      collapsed ? 'lg:justify-center lg:p-2.5 px-2.5 py-2.5 gap-3' : 'gap-3 px-3 py-2.5',
                       active
-                        ? 'bg-blue-600/20 text-white'
-                        : 'text-sidebarText hover:bg-white/[0.06] hover:text-white',
-                    ].join(' ')}>
+                        ? 'text-white'
+                        : 'hover:text-white',
+                    ].join(' ')}
+                    style={active ? {
+                      background: 'rgba(99,102,241,0.18)',
+                      boxShadow: 'inset 0 0 0 1px rgba(99,102,241,0.25)',
+                    } : {}}
+                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; }}
+                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = ''; }}
+                  >
+                    {/* Active left bar */}
+                    {active && (
+                      <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 rounded-r-full ${collapsed ? 'lg:hidden' : ''}`}
+                        style={{ background: 'linear-gradient(180deg, #818CF8, #6366F1)' }} />
+                    )}
 
                     {/* Icon */}
-                    <span className={[
-                      'flex-shrink-0 transition-colors',
-                      active ? 'text-blue-300' : 'text-sidebarMuted group-hover:text-slate-300',
-                    ].join(' ')}>
+                    <span className={`flex-shrink-0 transition-colors ${active ? 'text-indigo-300' : 'text-sidebarMuted group-hover:text-slate-300'}`}>
                       <Icon />
                     </span>
 
                     {/* Label */}
-                    <span className={`truncate flex-1 leading-none ${collapsed ? 'lg:hidden' : ''}`}>
+                    <span className={`truncate flex-1 leading-none text-[13px] ${collapsed ? 'lg:hidden' : ''} ${active ? 'text-white' : 'text-sidebarText'}`}>
                       {label}
                     </span>
 
                     {/* Live badge */}
-                    {badge === 'live' && (
-                      <span className={`flex-shrink-0 w-2 h-2 bg-green-400 rounded-full animate-pulse ${collapsed ? 'lg:hidden' : ''}`} />
+                    {badge === 'live' && !collapsed && (
+                      <span className="flex-shrink-0 flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                        style={{ background: 'rgba(16,185,129,0.15)', color: '#34D399', border: '1px solid rgba(16,185,129,0.25)' }}>
+                        <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                        LIVE
+                      </span>
                     )}
 
-                    {/* Collapsed tooltip */}
+                    {/* Tooltip for collapsed state */}
                     {collapsed && (
-                      <span className="pointer-events-none hidden lg:block absolute left-full ml-3 px-2.5 py-1.5 bg-slate-800 border border-sidebarBorder text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 shadow-xl transition-opacity duration-150">
+                      <span className="tooltip pointer-events-none hidden lg:block">
                         {label}
-                        {badge === 'live' && <span className="ml-1.5 w-1.5 h-1.5 bg-green-400 rounded-full inline-block" />}
+                        {badge === 'live' && <span className="ml-1.5 w-1.5 h-1.5 bg-emerald-400 rounded-full inline-block" />}
                       </span>
                     )}
                   </Link>
@@ -190,29 +204,37 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose, user, on
         ))}
       </nav>
 
-      {/* User + Logout */}
-      <div className={`border-t border-sidebarBorder flex-shrink-0 ${collapsed ? 'p-2 lg:py-3 lg:px-2 flex flex-row lg:flex-col items-center gap-2' : 'p-3'}`}>
+      {/* ── User + Logout ─────────────────────────────── */}
+      <div className="flex-shrink-0 p-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
         {collapsed ? (
-          <>
-            <div className="flex-1 lg:flex-none w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold select-none flex-shrink-0">
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 select-none"
+              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)' }}>
               {initials}
             </div>
             <button onClick={onLogout} title="Logout"
-              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-sidebarMuted hover:text-red-400 hover:bg-red-500/10 transition-colors">
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
+              style={{ color: '#6B6894' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = '#F87171'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#6B6894'; }}>
               <LogoutIcon />
             </button>
-          </>
+          </div>
         ) : (
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 select-none">
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0 select-none"
+              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)', boxShadow: '0 2px 8px rgba(99,102,241,0.35)' }}>
               {initials}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-white text-xs font-semibold leading-none truncate">{user?.name || 'User'}</p>
-              <p className="text-sidebarMuted text-[11px] mt-0.5 capitalize truncate">{user?.role || ''}</p>
+              <p className="text-[11px] mt-0.5 capitalize truncate" style={{ color: '#6B6894' }}>{user?.role || ''}</p>
             </div>
             <button onClick={onLogout} title="Logout"
-              className="flex-shrink-0 p-1.5 rounded-lg text-sidebarMuted hover:text-red-400 hover:bg-red-500/10 transition-colors">
+              className="flex-shrink-0 p-2 rounded-lg transition-all"
+              style={{ color: '#6B6894' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.12)'; e.currentTarget.style.color = '#F87171'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#6B6894'; }}>
               <LogoutIcon />
             </button>
           </div>
@@ -221,8 +243,8 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose, user, on
 
       {/* Version */}
       {!collapsed && (
-        <div className="border-t border-sidebarBorder py-2 text-center flex-shrink-0">
-          <span className="text-sidebarMuted/50 text-[10px]">v2.0.0</span>
+        <div className="pb-2 text-center flex-shrink-0">
+          <span className="text-[9px] font-medium" style={{ color: '#2E2B4A' }}>v2.0.0</span>
         </div>
       )}
     </aside>

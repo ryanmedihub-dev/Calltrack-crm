@@ -340,7 +340,7 @@ export default function FollowupsScreen({ onAddNote }) {
 
   return (
     <View style={s.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={Colors.bg} />
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       <View style={s.header}>
         <View>
@@ -521,24 +521,26 @@ export default function FollowupsScreen({ onAddNote }) {
 
 const s = StyleSheet.create({
   root:    { flex: 1, backgroundColor: Colors.bg },
-  header:  { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  header:  { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 14, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
   preLabel:{ fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
   heading: { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
 
   summaryBanner: {
     flexDirection: 'row',
     marginHorizontal: 16,
-    marginBottom: 12,
+    marginTop: 12,
+    marginBottom: 4,
     backgroundColor: '#fff',
     borderRadius: 14,
     overflow: 'hidden',
-    ...Shadows.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   summaryItem:  { flex: 1, alignItems: 'center', paddingVertical: 12, borderRightWidth: 1, borderRightColor: Colors.divider },
   summaryCount: { fontSize: 20, fontWeight: '800' },
   summaryLabel: { fontSize: 10, color: Colors.textMuted, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 },
 
-  chipRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingBottom: 10, gap: 6 },
+  chipRow:      { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, gap: 6, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
   chip:         { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 6, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border },
   chipActive:   { backgroundColor: Colors.primary, borderColor: Colors.primary },
   chipText:     { fontSize: 12, fontWeight: '600', color: Colors.textSec },
@@ -560,9 +562,9 @@ const s = StyleSheet.create({
   tagsRow:      { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 14, paddingBottom: 8 },
 
   actions:      { flexDirection: 'row', gap: 6, padding: 10, borderTopWidth: 1, borderTopColor: Colors.divider },
-  actionCall:   { flex: 1, backgroundColor: Colors.primary, borderRadius: 9, paddingVertical: 8, alignItems: 'center', ...Shadows.sm },
+  actionCall:   { flex: 1, backgroundColor: Colors.primary, borderRadius: 9, height: 36, alignItems: 'center', justifyContent: 'center' },
   actionCallText:{ color: '#fff', fontSize: 12, fontWeight: '700' },
-  actionBtn:    { flex: 1, backgroundColor: '#fff', borderRadius: 9, paddingVertical: 8, alignItems: 'center', borderWidth: 1, borderColor: Colors.border },
+  actionBtn:    { flex: 1, backgroundColor: '#fff', borderRadius: 9, height: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
   actionBtnText:{ color: Colors.textSec, fontSize: 12, fontWeight: '600' },
 
   emptyWrap:  { alignItems: 'center', paddingTop: 80 },
