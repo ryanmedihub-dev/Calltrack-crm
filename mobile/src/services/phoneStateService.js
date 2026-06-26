@@ -59,6 +59,13 @@ export async function requestOverlayPermission() {
 // immediately bring the app forward so the modal is visible to the user.
 export function onCallEnded(callback) {
   const sub = DeviceEventEmitter.addListener('onCallEnded', (data) => {
+    if (__DEV__ && console.tron) {
+      console.tron.display({
+        name: '📞 Call Ended Event',
+        value: data,
+        important: true,
+      });
+    }
     if (AppState.currentState !== 'active') {
       // App is in background — bring it to front before handing data to JS
       CallLogModule?.bringAppToForeground?.();

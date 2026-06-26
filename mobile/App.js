@@ -1,13 +1,15 @@
+import './src/config/ReactotronConfig';
 import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, ActivityIndicator, AppRegistry, AppState,
-  NativeModules, PermissionsAndroid, Platform
+  NativeModules, PermissionsAndroid, Platform, DeviceEventEmitter
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import LoginScreen       from './src/screens/LoginScreen';
 import SimSetupScreen    from './src/screens/SimSetupScreen';
+import MiuiSetupScreen   from './src/screens/MiuiSetupScreen';
 import PostCallScreen    from './src/screens/PostCallScreen';
 import CallHistoryScreen from './src/screens/CallHistoryScreen';
 import AnalyticsScreen   from './src/screens/AnalyticsScreen';
@@ -15,6 +17,7 @@ import FollowupsScreen   from './src/screens/FollowupsScreen';
 import LeadsScreen       from './src/screens/LeadsScreen';
 import MoreScreen        from './src/screens/MoreScreen';
 import TabBar            from './src/components/TabBar';
+import ErrorBoundary     from './src/components/ErrorBoundary';
 import AddNoteModal      from './src/components/AddNoteModal';
 
 import * as Notifications from 'expo-notifications';
@@ -45,13 +48,10 @@ async function scheduleFollowUpNotifications() {
     const followUps = await getPendingFollowUps();
     for (const fu of followUps) {
       if (!fu.followUp?.date) continue;
-
       const d = new Date(fu.followUp.date);
       const hour = d.getHours() || 9;
       const fireAt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0);
-
       if (fireAt.getTime() <= Date.now()) continue;
-
       await Notifications.scheduleNotificationAsync({
         identifier: `followup_${fu.key}`,
         content: {
@@ -79,18 +79,23 @@ async function requestNotificationPermission() {
 }
 
 function App() {
-  // screen: null | "login" | "sim_select" | "main" | "postcall"
-  const [screen, setScreen]           = useState(null);
-  const [tab, setTab]                 = useState('calls');
-  const [pendingCall, setPendingCall] = useState(null);
-  const [noteCall, setNoteCall]       = useState(null);
+  const [screen, setScreen]               = useState(null);
+  const [tab, setTab]                     = useState('calls');
+  const [pendingCall, setPendingCall]     = useState(null);
+  const [noteCall, setNoteCall]           = useState(null);
   const [followUpBadge, setFollowUpBadge] = useState(0);
   const [pendingCount, setPendingCount]   = useState(0);
+
   const appState       = useRef(AppState.currentState);
   const syncTimer      = useRef(null);
   const pollTimer      = useRef(null);
-  // Ref mirrors pendingCall state — avoids stale closure inside setInterval
   const pendingCallRef = useRef(null);
+  const screenRef      = useRef(null);
+  const isHandlingRef  = useRef(false);
+  const setupDoneRef   = useRef(false);
+
+  useEffect(() => { pendingCallRef.current = pendingCall; }, [pendingCall]);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
 
   // ── Auth restore ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -99,73 +104,88 @@ function App() {
       .catch(() => setScreen('login'));
   }, []);
 
-  // ── Register logout callback ──────────────────────────────────────────────
+  // ── Main setup ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'main') return;
-    setLogoutCallback(() => {
-      clearInterval(syncTimer.current);
-      clearInterval(pollTimer.current);
-      setScreen('login');
-      setTab('calls');
-    });
-  }, [screen]);
-
-  // ── Keep pendingCallRef in sync with state ───────────────────────────────
-  useEffect(() => {
-    pendingCallRef.current = pendingCall;
-  }, [pendingCall]);
-
-  // ── Main setup once logged in ─────────────────────────────────────────────
-  useEffect(() => {
-    if (screen !== 'main') return;
+    if (setupDoneRef.current) return;
+    setupDoneRef.current = true;
 
     requestCallPermissions();
     requestNotificationPermission();
     requestOverlayPermission();
     applyTrackedSim();
+    CallLogModule?.startCallTrackService?.();
 
-    // Helper: show post-call screen only when no call is already being handled
+    setLogoutCallback(() => {
+      clearInterval(syncTimer.current);
+      clearInterval(pollTimer.current);
+      setupDoneRef.current = false;
+      setScreen('login');
+      setTab('calls');
+    });
+
+    // ── SINGLE GATE — sab paths yahan se jaate hain ───────────────────────
     const showPostCall = (data) => {
-      if (pendingCallRef.current) return; // already showing one
+      if (pendingCallRef.current) return;
+      if (isHandlingRef.current) return;
+      isHandlingRef.current = true;
+
       setPendingCall(data);
       setScreen('postcall');
+
+      if (AppState.currentState !== 'active') {
+        CallLogModule?.bringAppToForeground?.();
+      }
+
+      setTimeout(() => { isHandlingRef.current = false; }, 2000);
     };
 
-    // Real-time event from PhoneStateReceiver via DeviceEventEmitter
-    const unsub = onCallEnded((data) => {
-      showPostCall(data);
-    });
-
-    processPendingQueue().then(() => getPendingCount().then(setPendingCount));
-    refreshFollowUpBadge();
-
-    // When app returns from background, immediately check for any missed call event
-    const appStateSub = AppState.addEventListener('change', (nextState) => {
-      if (appState.current.match(/inactive|background/) && nextState === 'active') {
-        doSync();
-        refreshFollowUpBadge();
-        // Check SharedPreferences for a call that was missed while backgrounded
-        CallLogModule?.getPendingCall?.().then((pending) => {
-          if (pending?.callType) showPostCall(pending);
-        }).catch(() => {});
-      }
-      appState.current = nextState;
-    });
-
-    syncTimer.current = setInterval(doSync, 60_000);
-
-    // Poll every 3 seconds as a safety net for devices where
-    // DeviceEventEmitter delivery is unreliable (Xiaomi / MIUI).
-    // Does NOT call setScreen inside a state-updater — uses the ref instead.
-    pollTimer.current = setInterval(async () => {
+    // SharedPreferences se pending call fetch karke show karo
+    const checkAndShowPending = async () => {
+      if (screenRef.current === 'postcall') return;
+      if (pendingCallRef.current) return;
+      if (isHandlingRef.current) return;
       try {
         const pending = await CallLogModule?.getPendingCall?.();
         if (pending?.callType) showPostCall(pending);
       } catch {}
-    }, 3000);
+    };
+
+    // ── Path 1: DeviceEventEmitter (app foreground mein thi) ─────────────
+    const unsub = onCallEnded((data) => showPostCall(data));
+
+    // ── Path 2: MainActivity.onResume ne fire kiya ────────────────────────
+    // MIUI ne app kill ki → PhoneStateReceiver ne SharedPreferences mein
+    // pending save kiya → app restart hui → onResume ne yeh event fire kiya
+    const pendingSub = DeviceEventEmitter.addListener(
+      'onPendingCallAvailable',
+      () => checkAndShowPending()
+    );
+
+    // ── Path 3: AppState resume (background se foreground aaya) ──────────
+    const appStateSub = AppState.addEventListener('change', (nextState) => {
+      if (appState.current.match(/inactive|background/) && nextState === 'active') {
+        doSync();
+        refreshFollowUpBadge();
+        checkAndShowPending();
+      }
+      appState.current = nextState;
+    });
+
+    // ── Path 4: Poll every 2s (final safety net) ──────────────────────────
+    pollTimer.current = setInterval(checkAndShowPending, 2000);
+
+    syncTimer.current = setInterval(doSync, 60_000);
+
+    processPendingQueue().then(() => getPendingCount().then(setPendingCount));
+    refreshFollowUpBadge();
+
+    // Startup check — already pending tha toh turant dikha do
+    checkAndShowPending();
 
     return () => {
       unsub();
+      pendingSub.remove();
       appStateSub.remove();
       clearInterval(syncTimer.current);
       clearInterval(pollTimer.current);
@@ -182,7 +202,6 @@ function App() {
     scheduleFollowUpNotifications();
   };
 
-  // ── Loading ───────────────────────────────────────────────────────────────
   if (screen === null) {
     return (
       <SafeAreaProvider>
@@ -201,25 +220,35 @@ function App() {
     );
   }
 
-  // ── SIM setup (shown once on every login so user confirms tracked SIM) ────────
   if (screen === 'sim_select') {
     return (
       <SafeAreaProvider>
-        <SimSetupScreen onDone={() => setScreen('main')} />
+        <SimSetupScreen onDone={async () => {
+          const done = await AsyncStorage.getItem('miui_setup_done');
+          setScreen(done ? 'main' : 'miui_setup');
+        }} />
       </SafeAreaProvider>
     );
   }
 
-  // ── Post-call full-screen ─────────────────────────────────────────────────
+  if (screen === 'miui_setup') {
+    return (
+      <SafeAreaProvider>
+        <MiuiSetupScreen onDone={() => setScreen('main')} />
+      </SafeAreaProvider>
+    );
+  }
+
   if (screen === 'postcall' && pendingCall) {
     return (
       <SafeAreaProvider>
         <PostCallScreen
           call={pendingCall}
           onDone={() => {
-            pendingCallRef.current = null; // clear ref immediately so poll doesn't re-trigger
-            CallLogModule?.clearPendingCall?.();
+            pendingCallRef.current = null;
+            isHandlingRef.current  = false;
             setPendingCall(null);
+            CallLogModule?.clearPendingCall?.();
             setScreen('main');
           }}
         />
@@ -227,10 +256,11 @@ function App() {
     );
   }
 
-  // ── Main app ──────────────────────────────────────────────────────────────
   const handleLogout = () => {
     clearInterval(syncTimer.current);
     clearInterval(pollTimer.current);
+    setupDoneRef.current = false;
+    CallLogModule?.stopCallTrackService?.();
     setScreen('login');
     setTab('calls');
   };
@@ -248,7 +278,7 @@ function App() {
         {pendingCount > 0 && (
           <View style={{ backgroundColor: '#F59E0B', paddingHorizontal: 16, paddingVertical: 6 }}>
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
-              {pendingCount} call{pendingCount !== 1 ? 's' : ''} pending sync — will retry when online
+              {pendingCount} call{pendingCount !== 1 ? 's' : ''} pending sync
             </Text>
           </View>
         )}
@@ -271,5 +301,14 @@ function App() {
   );
 }
 
-AppRegistry.registerComponent('main', () => App);
-export default App;
+AppRegistry.registerComponent('main', () => AppWithErrorBoundary);
+
+function AppWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+export default AppWithErrorBoundary;

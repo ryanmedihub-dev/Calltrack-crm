@@ -85,6 +85,9 @@ export async function getPendingCount() {
 // ── Main sync ─────────────────────────────────────────────────────
 
 export async function syncCallLogs() {
+  if (__DEV__ && console.tron) {
+    console.tron.log('🔄 syncCallLogs triggered');
+  }
   const lastSyncRaw = await AsyncStorage.getItem(LAST_SYNC_KEY);
   let lastSync      = lastSyncRaw ? parseInt(lastSyncRaw, 10) : 0;
 
@@ -127,7 +130,15 @@ export async function syncCallLogs() {
   try {
     const res = await api.post('/api/calls/sync', { calls: mergedLogs });
     await AsyncStorage.setItem(LAST_SYNC_KEY, Date.now().toString());
-    return { synced: res.data.data?.synced || 0, message: res.data.message };
+    const result = { synced: res.data.data?.synced || 0, message: res.data.message };
+    if (__DEV__ && console.tron) {
+      console.tron.display({
+        name: '✅ Sync Complete',
+        value: { synced: result.synced },
+        important: false,
+      });
+    }
+    return result;
   } catch (err) {
     await addToPendingQueue(mergedLogs);
     throw err;
