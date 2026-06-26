@@ -97,14 +97,12 @@ function App() {
   useEffect(() => { pendingCallRef.current = pendingCall; }, [pendingCall]);
   useEffect(() => { screenRef.current = screen; }, [screen]);
 
-  // ── Auth restore ──────────────────────────────────────────────────────────
   useEffect(() => {
     AsyncStorage.getItem('token')
       .then((t) => setScreen(t ? 'main' : 'login'))
       .catch(() => setScreen('login'));
   }, []);
 
-  // ── Main setup ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'main') return;
     if (setupDoneRef.current) return;
@@ -124,23 +122,15 @@ function App() {
       setTab('calls');
     });
 
-    // ── SINGLE GATE — sab paths yahan se jaate hain ───────────────────────
     const showPostCall = (data) => {
       if (pendingCallRef.current) return;
       if (isHandlingRef.current) return;
       isHandlingRef.current = true;
-
       setPendingCall(data);
       setScreen('postcall');
-
-      if (AppState.currentState !== 'active') {
-        CallLogModule?.bringAppToForeground?.();
-      }
-
       setTimeout(() => { isHandlingRef.current = false; }, 2000);
     };
 
-    // SharedPreferences se pending call fetch karke show karo
     const checkAndShowPending = async () => {
       if (screenRef.current === 'postcall') return;
       if (pendingCallRef.current) return;
@@ -151,18 +141,17 @@ function App() {
       } catch {}
     };
 
-    // ── Path 1: DeviceEventEmitter (app foreground mein thi) ─────────────
-    const unsub = onCallEnded((data) => showPostCall(data));
+    // Path 1: Direct event from ContentObserver (app is alive)
+    const callEndedSub = DeviceEventEmitter.addListener('onCallEnded', (data) => {
+      showPostCall(data);
+    });
 
-    // ── Path 2: MainActivity.onResume ne fire kiya ────────────────────────
-    // MIUI ne app kill ki → PhoneStateReceiver ne SharedPreferences mein
-    // pending save kiya → app restart hui → onResume ne yeh event fire kiya
-    const pendingSub = DeviceEventEmitter.addListener(
-      'onPendingCallAvailable',
-      () => checkAndShowPending()
-    );
+    // Path 2: Native onResume signal (app was killed and restarted)
+    const pendingSub = DeviceEventEmitter.addListener('onPendingCallAvailable', () => {
+      checkAndShowPending();
+    });
 
-    // ── Path 3: AppState resume (background se foreground aaya) ──────────
+    // Path 3: AppState resume
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (appState.current.match(/inactive|background/) && nextState === 'active') {
         doSync();
@@ -172,19 +161,16 @@ function App() {
       appState.current = nextState;
     });
 
-    // ── Path 4: Poll every 2s (final safety net) ──────────────────────────
+    // Path 4: Poll every 2s (final safety net)
     pollTimer.current = setInterval(checkAndShowPending, 2000);
-
     syncTimer.current = setInterval(doSync, 60_000);
 
     processPendingQueue().then(() => getPendingCount().then(setPendingCount));
     refreshFollowUpBadge();
-
-    // Startup check — already pending tha toh turant dikha do
     checkAndShowPending();
 
     return () => {
-      unsub();
+      callEndedSub.remove();
       pendingSub.remove();
       appStateSub.remove();
       clearInterval(syncTimer.current);
@@ -291,12 +277,7 @@ function App() {
         </View>
         <TabBar active={tab} onChange={setTab} badges={badges} />
       </View>
-
-      <AddNoteModal
-        call={noteCall}
-        visible={!!noteCall}
-        onClose={handleNoteClose}
-      />
+      <AddNoteModal call={noteCall} visible={!!noteCall} onClose={handleNoteClose} />
     </SafeAreaProvider>
   );
 }

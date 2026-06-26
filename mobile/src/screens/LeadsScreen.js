@@ -31,6 +31,14 @@ const DATE_OPTIONS = [
   { key: 'custom', label: 'Custom'     },
 ];
 
+const ATTEMPT_OPTIONS = [
+  { key: 'all', label: 'All'        },
+  { key: '0',   label: 'Not Called' },
+  { key: '1-2', label: '1–2 Calls'  },
+  { key: '3-5', label: '3–5 Calls'  },
+  { key: '6+',  label: '6+ Calls'   },
+];
+
 function getDateBoundary(key) {
   const now = new Date();
   if (key === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
@@ -88,12 +96,21 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
               📞 {item.lastCallType ? `${item.lastCallType} · ` : ''}
               {lastAgo}{item.lastCallDuration > 0 ? ` · ${Math.floor(item.lastCallDuration / 60)}m ${item.lastCallDuration % 60}s` : ''}
             </Text>
-            {item.notes?.length > 0 && (
-              <Text style={c.noteCount}>{item.notes.length} note{item.notes.length !== 1 ? 's' : ''}</Text>
-            )}
+            <View style={c.callRowRight}>
+              {(item.attempts > 0) && (
+                <View style={c.attemptsTag}>
+                  <Text style={c.attemptsTagText}>{item.attempts}×</Text>
+                </View>
+              )}
+              {item.notes?.length > 0 && (
+                <Text style={c.noteCount}>{item.notes.length} note{item.notes.length !== 1 ? 's' : ''}</Text>
+              )}
+            </View>
           </View>
         ) : (
-          <Text style={c.noCallText}>📵 Never called</Text>
+          <View style={c.callRow}>
+            <Text style={c.noCallText}>📵 Never called</Text>
+          </View>
         )}
 
         {/* Row 3: Note preview (optional) */}
@@ -260,11 +277,12 @@ function NoteSheet({ lead, onClose, onSave }) {
 
 // ── Filter Sheet ──────────────────────────────────────────────────────────────
 
-function FilterSheet({ visible, dateFilter, customFrom, customTo, onApply, onClose }) {
-  const [pendingDate, setPendingDate] = useState(dateFilter);
-  const [pendingFrom, setPendingFrom] = useState(customFrom);
-  const [pendingTo,   setPendingTo]   = useState(customTo);
-  const [calSeg,      setCalSeg]      = useState('from');
+function FilterSheet({ visible, dateFilter, customFrom, customTo, attemptsFilter, onApply, onClose }) {
+  const [pendingDate,     setPendingDate]     = useState(dateFilter);
+  const [pendingFrom,     setPendingFrom]     = useState(customFrom);
+  const [pendingTo,       setPendingTo]       = useState(customTo);
+  const [pendingAttempts, setPendingAttempts] = useState(attemptsFilter);
+  const [calSeg,          setCalSeg]          = useState('from');
 
   // Sync when opened
   useEffect(() => {
@@ -272,12 +290,18 @@ function FilterSheet({ visible, dateFilter, customFrom, customTo, onApply, onClo
       setPendingDate(dateFilter);
       setPendingFrom(customFrom);
       setPendingTo(customTo);
+      setPendingAttempts(attemptsFilter);
       setCalSeg('from');
     }
   }, [visible]);
 
   const handleApply = () => {
-    onApply({ dateFilter: pendingDate, customFrom: pendingFrom, customTo: pendingTo });
+    onApply({
+      dateFilter:     pendingDate,
+      customFrom:     pendingFrom,
+      customTo:       pendingTo,
+      attemptsFilter: pendingAttempts,
+    });
     onClose();
   };
 
@@ -285,6 +309,7 @@ function FilterSheet({ visible, dateFilter, customFrom, customTo, onApply, onClo
     setPendingDate('all');
     setPendingFrom(null);
     setPendingTo(null);
+    setPendingAttempts('all');
     setCalSeg('from');
   };
 
@@ -315,6 +340,22 @@ function FilterSheet({ visible, dateFilter, customFrom, customTo, onApply, onClo
                   }}
                 >
                   <Text style={[f.chipText, pendingDate === opt.key && f.chipTextActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* ── Attempts filter ── */}
+            <Text style={[f.sectionLabel, { marginTop: 18 }]}>CALL ATTEMPTS</Text>
+            <View style={f.chipGroup}>
+              {ATTEMPT_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[f.chip, pendingAttempts === opt.key && f.chipActive]}
+                  onPress={() => setPendingAttempts(opt.key)}
+                >
+                  <Text style={[f.chipText, pendingAttempts === opt.key && f.chipTextActive]}>
                     {opt.label}
                   </Text>
                 </TouchableOpacity>
@@ -380,10 +421,11 @@ export default function LeadsScreen() {
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search,     setSearch]     = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter,   setDateFilter]   = useState('all');
-  const [customFrom,   setCustomFrom]   = useState(null);
-  const [customTo,     setCustomTo]     = useState(null);
+  const [statusFilter,   setStatusFilter]   = useState('all');
+  const [dateFilter,     setDateFilter]     = useState('all');
+  const [customFrom,     setCustomFrom]     = useState(null);
+  const [customTo,       setCustomTo]       = useState(null);
+  const [attemptsFilter, setAttemptsFilter] = useState('all');
   const [showFilter,   setShowFilter]   = useState(false);
   const [noteTarget,   setNoteTarget]   = useState(null);
   const [statusTarget, setStatusTarget] = useState(null);
@@ -432,9 +474,17 @@ export default function LeadsScreen() {
         const boundary = getDateBoundary(dateFilter);
         if (boundary && new Date(l.createdAt) < boundary) return false;
       }
+      // Attempts
+      if (attemptsFilter !== 'all') {
+        const att = l.attempts || 0;
+        if (attemptsFilter === '0'   && att !== 0)              return false;
+        if (attemptsFilter === '1-2' && (att < 1 || att > 2))  return false;
+        if (attemptsFilter === '3-5' && (att < 3 || att > 5))  return false;
+        if (attemptsFilter === '6+'  && att < 6)               return false;
+      }
       return true;
     });
-  }, [leads, search, statusFilter, dateFilter, customFrom, customTo]);
+  }, [leads, search, statusFilter, dateFilter, customFrom, customTo, attemptsFilter]);
 
   // Per-status counts from full list (not filtered)
   const statusCounts = useMemo(() => {
@@ -491,7 +541,8 @@ export default function LeadsScreen() {
     />
   ), [onNotePress, onStatusPress, handleWhatsApp]);
 
-  const isFiltered = dateFilter !== 'all';
+  const activeFilterCount = (dateFilter !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0);
+  const isFiltered = activeFilterCount > 0;
 
   return (
     <View style={s.root}>
@@ -513,7 +564,7 @@ export default function LeadsScreen() {
               onPress={() => setShowFilter(true)}
             >
               <Text style={[s.filterText, isFiltered && s.filterTextActive]}>
-                ⊞ {isFiltered ? '1 active' : 'Filter'}
+                ⊞ {isFiltered ? `${activeFilterCount} active` : 'Filter'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -623,7 +674,7 @@ export default function LeadsScreen() {
               {(isFiltered || search.trim() || statusFilter !== 'all') && (
                 <TouchableOpacity
                   style={s.clearBtn}
-                  onPress={() => { setStatusFilter('all'); setDateFilter('all'); setCustomFrom(null); setCustomTo(null); setSearch(''); }}
+                  onPress={() => { setStatusFilter('all'); setDateFilter('all'); setCustomFrom(null); setCustomTo(null); setAttemptsFilter('all'); setSearch(''); }}
                 >
                   <Text style={s.clearBtnText}>Clear all filters</Text>
                 </TouchableOpacity>
@@ -652,10 +703,12 @@ export default function LeadsScreen() {
         dateFilter={dateFilter}
         customFrom={customFrom}
         customTo={customTo}
-        onApply={({ dateFilter: df, customFrom: cf, customTo: ct }) => {
+        attemptsFilter={attemptsFilter}
+        onApply={({ dateFilter: df, customFrom: cf, customTo: ct, attemptsFilter: af }) => {
           setDateFilter(df);
           setCustomFrom(cf);
           setCustomTo(ct);
+          setAttemptsFilter(af);
         }}
         onClose={() => setShowFilter(false)}
       />
@@ -680,10 +733,13 @@ const c = StyleSheet.create({
   badgeIcon:   { fontSize: 11 },
   badgeLabel:  { fontSize: 10, fontWeight: '700', flexShrink: 1 },
 
-  callRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  callText:    { flex: 1, fontSize: 12, color: Colors.textSec },
-  noteCount:   { fontSize: 11, color: Colors.textMuted, marginLeft: 8, flexShrink: 0 },
-  noCallText:  { fontSize: 12, color: Colors.textMuted, marginBottom: 4 },
+  callRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  callText:       { flex: 1, fontSize: 12, color: Colors.textSec },
+  callRowRight:   { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  attemptsTag:    { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  attemptsTagText:{ fontSize: 10, fontWeight: '700', color: '#3B82F6' },
+  noteCount:      { fontSize: 11, color: Colors.textMuted, flexShrink: 0 },
+  noCallText:     { fontSize: 12, color: Colors.textMuted },
 
   noteRow:     { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginBottom: 4 },
   summaryPill: { fontSize: 11, color: Colors.textSec, fontWeight: '600', backgroundColor: '#F1F5F9', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 },

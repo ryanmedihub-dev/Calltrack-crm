@@ -13,10 +13,18 @@ export async function requestCallPermissions() {
       PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
       PermissionsAndroid.PERMISSIONS.READ_CALL_LOG,
     ]);
-    return (
+    const granted =
       result[PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE] === PermissionsAndroid.RESULTS.GRANTED &&
-      result[PermissionsAndroid.PERMISSIONS.READ_CALL_LOG]    === PermissionsAndroid.RESULTS.GRANTED
-    );
+      result[PermissionsAndroid.PERMISSIONS.READ_CALL_LOG]    === PermissionsAndroid.RESULTS.GRANTED;
+
+    if (granted) {
+      // Restart service now that permissions are granted so ContentObserver registers properly
+      const { CallLogModule } = require('react-native').NativeModules;
+      CallLogModule?.stopCallTrackService?.();
+      setTimeout(() => CallLogModule?.startCallTrackService?.(), 300);
+    }
+
+    return granted;
   } catch {
     return false;
   }
