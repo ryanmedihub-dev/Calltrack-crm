@@ -15,11 +15,14 @@ async function readNativeCallLogs(sinceTimestamp) {
   const { CallLogModule } = NativeModules;
   if (!CallLogModule?.getCallLogsSince) return [];
   try {
-    // Pass the tracked SIM's subscriptionId so native can filter by SIM
-    const trackedSimRaw = await AsyncStorage.getItem('tracked_sim_id');
-    const subscriptionId = trackedSimRaw ? parseInt(trackedSimRaw, 10) : -1;
+    // Pass tracked SIM's subscriptionId + slotIndex (fallback for MIUI devices that
+    // store slot index instead of subscription ID in the call log table)
+    const trackedSimRaw  = await AsyncStorage.getItem('tracked_sim_id');
+    const trackedSlotRaw = await AsyncStorage.getItem('tracked_sim_slot');
+    const subscriptionId = trackedSimRaw  ? parseInt(trackedSimRaw,  10) : -1;
+    const slotIndex      = trackedSlotRaw ? parseInt(trackedSlotRaw, 10) : -1;
 
-    const logs = await CallLogModule.getCallLogsSince(sinceTimestamp, subscriptionId);
+    const logs = await CallLogModule.getCallLogsSince(sinceTimestamp, subscriptionId, slotIndex);
     return Array.isArray(logs) ? logs : [];
   } catch {
     return [];

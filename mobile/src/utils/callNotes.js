@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../lib/api';
 
 const PREFIX = 'callnote_';
 
@@ -40,8 +41,24 @@ export async function getAllNotes() {
   }
 }
 
-// Returns all notes that have a followUp date set and not marked done
+// Returns all notes that have a followUp date set and not marked done.
+// Tries backend first so data survives reinstall; falls back to AsyncStorage.
 export async function getPendingFollowUps() {
+  try {
+    const res = await api.get('/api/calls/pending-followups');
+    if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+      return res.data.data.map((call) => ({
+        key:           call._id,
+        contactName:   call.contactName   || '',
+        contactNumber: call.contactNumber || '',
+        followUp:      { date: call.followUpDate, done: false },
+        note:          call.notes     || '',
+        tags:          call.callTags  || [],
+      }));
+    }
+  } catch {}
+
+  // Offline fallback — local AsyncStorage
   const all = await getAllNotes();
   return Object.entries(all)
     .filter(([, v]) => v.followUp && !v.followUp.done)

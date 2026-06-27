@@ -8,6 +8,7 @@ import { Colors } from '../theme/colors';
 import TagChip from './TagChip';
 import { TAGS } from '../utils/tagColors';
 import { getNote, saveNote } from '../utils/callNotes';
+import api from '../lib/api';
 
 function DatePicker({ value, onChange }) {
   const [show, setShow] = useState(false);
@@ -94,6 +95,16 @@ export default function AddNoteModal({ call, visible, onClose }) {
       tags,
       followUp: followDate ? { date: followDate, done: false } : null,
     });
+    // Persist to backend so follow-up survives reinstall / other devices
+    if (call._id) {
+      try {
+        await api.patch(`/api/calls/${call._id}/notes`, {
+          notes:        note        || undefined,
+          callTags:     tags.length ? tags : undefined,
+          followUpDate: followDate  || null,
+        });
+      } catch {}
+    }
     setSaving(false);
     onClose?.();
   };

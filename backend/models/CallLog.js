@@ -14,9 +14,10 @@ const callLogSchema = new mongoose.Schema({
   duration: { type: Number, default: 0 },
   timestamp: { type: Date, required: true },
   deviceId: { type: String },
-  notes:      { type: String },
-  callTags:   { type: [String], default: [] },
-  callStatus: { type: String, default: null },
+  notes:         { type: String },
+  callTags:      { type: [String], default: [] },
+  callStatus:    { type: String, default: null },
+  followUpDate:  { type: Date, default: null },
   leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
   synced: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }

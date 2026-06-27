@@ -3,7 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { SimInfoModule, CallLogModule } = NativeModules;
 
-const SIM_PREF_KEY = 'tracked_sim_id';
+const SIM_PREF_KEY  = 'tracked_sim_id';
+const SLOT_PREF_KEY = 'tracked_sim_slot';
 
 export async function getAvailableSims() {
   try {
@@ -18,8 +19,9 @@ export async function getTrackedSimId() {
   return raw ? parseInt(raw, 10) : -1;
 }
 
-export async function setTrackedSim(subscriptionId) {
-  await AsyncStorage.setItem(SIM_PREF_KEY, String(subscriptionId));
+export async function setTrackedSim(subscriptionId, slotIndex = -1) {
+  await AsyncStorage.setItem(SIM_PREF_KEY,  String(subscriptionId));
+  await AsyncStorage.setItem(SLOT_PREF_KEY, String(slotIndex));
   CallLogModule?.setTrackedSim(subscriptionId);
 }
 

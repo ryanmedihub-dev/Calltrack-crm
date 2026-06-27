@@ -20,20 +20,6 @@ function EyeOff() {
     </svg>
   );
 }
-function SpinnerIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin">
-      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-    </svg>
-  );
-}
-function ArrowRight() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-    </svg>
-  );
-}
 
 const features = [
   {
@@ -87,45 +73,45 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: '#F5F7FF' }}>
+    <div className="min-h-screen flex" style={{ background: '#F1F5F9' }}>
 
-      {/* ── Left: brand panel ──────────────────────────── */}
+      {/* Left brand panel */}
       <div className="hidden lg:flex lg:w-[48%] xl:w-[44%] flex-col items-center justify-center p-12 relative overflow-hidden"
-        style={{ background: 'linear-gradient(145deg, #0C0A1E 0%, #12103A 55%, #1A1060 100%)' }}>
+        style={{ background: 'linear-gradient(145deg, #0A1628 0%, #0F1F3D 55%, #0F172A 100%)' }}>
 
         {/* Decorative orbs */}
-        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-20 animate-float"
-          style={{ background: 'radial-gradient(circle, #6366F1 0%, transparent 70%)' }} />
+        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, #2563EB 0%, transparent 70%)' }} />
         <div className="absolute bottom-0 -right-24 w-80 h-80 rounded-full opacity-15"
-          style={{ background: 'radial-gradient(circle, #8B5CF6 0%, transparent 70%)' }} />
-        <div className="absolute top-1/2 left-1/3 w-48 h-48 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, #F472B6 0%, transparent 70%)' }} />
+          style={{ background: 'radial-gradient(circle, #3B82F6 0%, transparent 70%)' }} />
+        <div className="absolute top-1/2 left-1/3 w-48 h-48 rounded-full opacity-08"
+          style={{ background: 'radial-gradient(circle, #60A5FA 0%, transparent 70%)' }} />
 
         {/* Grid pattern */}
         <div className="absolute inset-0 opacity-[0.04]"
           style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.8) 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
 
         {/* Content */}
-        <div className="relative z-10 w-full max-w-sm animate-fade-in-up">
+        <div className="relative z-10 w-full max-w-sm">
           {/* Logo */}
           <div className="flex items-center gap-3 mb-10">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)', boxShadow: '0 8px 24px rgba(99,102,241,0.45)' }}>
+              style={{ background: 'linear-gradient(135deg, #2563EB, #3B82F6)', boxShadow: '0 8px 24px rgba(37,99,235,0.40)' }}>
               <span className="text-white text-[15px] font-black tracking-tight">CT</span>
             </div>
             <div>
               <p className="text-white text-lg font-bold leading-none">CallTrack</p>
-              <p className="text-xs mt-0.5 font-medium" style={{ color: '#6B6894' }}>CRM Platform</p>
+              <p className="text-xs mt-0.5 font-medium" style={{ color: '#4B6FA3' }}>CRM Platform</p>
             </div>
           </div>
 
           <h1 className="text-3xl font-extrabold text-white leading-tight mb-3">
             Manage your<br />
-            <span style={{ background: 'linear-gradient(135deg, #818CF8, #C084FC)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+            <span style={{ background: 'linear-gradient(135deg, #60A5FA, #93C5FD)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
               call operations
             </span>
           </h1>
-          <p className="text-sm leading-relaxed mb-10" style={{ color: '#8D8BAC' }}>
+          <p className="text-sm leading-relaxed mb-10" style={{ color: '#64748B' }}>
             The all-in-one dashboard to monitor call activity, drive lead conversions and measure team performance.
           </p>
 
@@ -134,35 +120,34 @@ export default function LoginPage() {
             {features.map((f) => (
               <div key={f.title}
                 className="flex items-start gap-3.5 rounded-2xl px-4 py-3.5"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                  style={{ background: 'rgba(99,102,241,0.20)', color: '#818CF8' }}>
+                  style={{ background: 'rgba(37,99,235,0.20)', color: '#93C5FD' }}>
                   {f.icon}
                 </div>
                 <div className="min-w-0">
                   <p className="text-white text-sm font-semibold leading-none">{f.title}</p>
-                  <p className="text-xs mt-1 leading-relaxed" style={{ color: '#7572A8' }}>{f.desc}</p>
+                  <p className="text-xs mt-1 leading-relaxed" style={{ color: '#4B6FA3' }}>{f.desc}</p>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Bottom badge */}
           <div className="mt-10 flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#10B981' }} />
-            <p className="text-xs" style={{ color: '#5A5780' }}>System is online · All services running</p>
+            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#22C55E' }} />
+            <p className="text-xs" style={{ color: '#334D6E' }}>System is online · All services running</p>
           </div>
         </div>
       </div>
 
-      {/* ── Right: form panel ──────────────────────────── */}
+      {/* Right form panel */}
       <div className="flex-1 flex items-center justify-center p-6">
-        <div className="w-full max-w-[400px] animate-fade-in-up">
+        <div className="w-full max-w-[400px]">
 
           {/* Mobile logo */}
           <div className="lg:hidden text-center mb-8">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-3"
-              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)', boxShadow: '0 6px 20px rgba(99,102,241,0.35)' }}>
+              style={{ background: 'linear-gradient(135deg, #2563EB, #3B82F6)', boxShadow: '0 6px 20px rgba(37,99,235,0.30)' }}>
               <span className="text-white text-xl font-black">CT</span>
             </div>
             <h1 className="text-2xl font-bold" style={{ color: '#0F172A' }}>CallTrack CRM</h1>
@@ -170,7 +155,7 @@ export default function LoginPage() {
 
           {/* Card */}
           <div className="rounded-2xl p-8"
-            style={{ background: '#ffffff', border: '1px solid #E2E8F4', boxShadow: '0 4px 24px rgba(99,102,241,0.07), 0 1px 4px rgba(0,0,0,0.05)' }}>
+            style={{ background: '#ffffff', border: '1px solid #E2E8F0', boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
 
             <div className="mb-7">
               <h2 className="text-xl font-bold leading-none" style={{ color: '#0F172A' }}>Welcome back</h2>
@@ -178,7 +163,6 @@ export default function LoginPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Email */}
               <div>
                 <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: '#64748B' }}>
                   Email address
@@ -188,17 +172,9 @@ export default function LoginPage() {
                   value={form.email}
                   onChange={e => setForm({ ...form, email: e.target.value })}
                   placeholder="you@company.com"
-                  className="w-full rounded-xl px-4 py-3 text-sm transition-all input-ring"
-                  style={{
-                    background: '#F8FAFF',
-                    border: '1px solid #E2E8F4',
-                    color: '#0F172A',
-                    outline: 'none',
-                  }}
-                />
+                  className="form-input" />
               </div>
 
-              {/* Password */}
               <div>
                 <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wider" style={{ color: '#64748B' }}>
                   Password
@@ -209,51 +185,50 @@ export default function LoginPage() {
                     value={form.password}
                     onChange={e => setForm({ ...form, password: e.target.value })}
                     placeholder="••••••••"
-                    className="w-full rounded-xl px-4 py-3 pr-11 text-sm transition-all input-ring"
-                    style={{
-                      background: '#F8FAFF',
-                      border: '1px solid #E2E8F4',
-                      color: '#0F172A',
-                      outline: 'none',
-                    }}
-                  />
+                    className="form-input pr-11" />
                   <button
                     type="button"
                     onClick={() => setShowPw(!showPw)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-colors"
                     style={{ color: '#94A3B8' }}
-                    onMouseEnter={e => e.currentTarget.style.color = '#6366F1'}
+                    onMouseEnter={e => e.currentTarget.style.color = '#2563EB'}
                     onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}>
                     {showPw ? <EyeOff /> : <EyeOpen />}
                   </button>
                 </div>
               </div>
 
-              {/* Submit */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 rounded-xl text-sm font-semibold mt-2 flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 rounded-xl text-sm font-semibold mt-2 flex items-center justify-center gap-2 transition-all text-white"
                 style={{
-                  background: loading ? '#818CF8' : 'linear-gradient(135deg, #6366F1 0%, #7C3AED 100%)',
-                  color: '#fff',
-                  boxShadow: loading ? 'none' : '0 4px 16px rgba(99,102,241,0.35)',
-                  opacity: loading ? 0.8 : 1,
-                  transform: 'translateY(0)',
+                  background: loading ? '#60A5FA' : '#2563EB',
+                  boxShadow: loading ? 'none' : '0 4px 14px rgba(37,99,235,0.35)',
+                  opacity: loading ? 0.85 : 1,
                 }}
-                onMouseEnter={e => { if (!loading) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 24px rgba(99,102,241,0.45)'; } }}
-                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = loading ? 'none' : '0 4px 16px rgba(99,102,241,0.35)'; }}>
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.background = '#1D4ED8'; }}
+                onMouseLeave={e => { if (!loading) e.currentTarget.style.background = '#2563EB'; }}>
                 {loading ? (
-                  <><SpinnerIcon />Signing in…</>
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="animate-spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                    </svg>
+                    Signing in…
+                  </>
                 ) : (
-                  <><span>Sign In</span><ArrowRight /></>
+                  <>
+                    <span>Sign In</span>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                  </>
                 )}
               </button>
             </form>
           </div>
 
-          {/* Footer note */}
-          <p className="text-center text-xs mt-5" style={{ color: '#CBD5E1' }}>
+          <p className="text-center text-xs mt-5" style={{ color: '#94A3B8' }}>
             Secure access · Session expires in 7 days
           </p>
         </div>

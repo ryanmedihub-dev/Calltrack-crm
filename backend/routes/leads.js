@@ -71,6 +71,54 @@ router.get('/assigned', protect, async (req, res) => {
   }
 });
 
+// POST /api/leads/bulk-upload — CSV bulk import (must be before /:id routes)
+const VALID_STATUSES = new Set([
+  'new','contacted','not_connected','interested',
+  'not_interested','follow_up','booking_done','converted','lost',
+]);
+router.post('/bulk-upload', protect, async (req, res) => {
+  try {
+    const { leads: rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'No leads provided' });
+    }
+    if (rows.length > 1000) {
+      return res.status(400).json({ success: false, error: 'Maximum 1000 leads per upload' });
+    }
+
+    let inserted = 0, skipped = 0, errors = 0;
+
+    for (const row of rows) {
+      try {
+        const name   = (row.name  || '').trim();
+        const phone  = normalizePhone((row.phone || '').toString().trim()) || (row.phone || '').replace(/\D/g, '');
+        const status = VALID_STATUSES.has(row.status) ? row.status : 'new';
+
+        if (!name || !phone) { errors++; continue; }
+
+        const exists = await Lead.exists({ phone });
+        if (exists) { skipped++; continue; }
+
+        await Lead.create({
+          name,
+          phone,
+          status,
+          source:     'bulk_upload',
+          assignedTo: req.user._id,
+        });
+        inserted++;
+      } catch (rowErr) {
+        if (rowErr.code === 11000) skipped++;
+        else errors++;
+      }
+    }
+
+    return res.json({ success: true, inserted, skipped, errors });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/leads/bulk-assign (must be before /:id routes)
 router.post('/bulk-assign', protect, isManager, async (req, res) => {
   try {

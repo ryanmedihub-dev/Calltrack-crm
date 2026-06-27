@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Alert, TextInput, Modal, RefreshControl, StatusBar,
-  ScrollView, Linking, ActivityIndicator, Platform,
+  ScrollView, Linking, ActivityIndicator, Platform, Animated,
 } from 'react-native';
 import api from '../lib/api';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import MiniCalendar from '../components/MiniCalendar';
+import BulkUploadModal from '../components/BulkUploadModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -23,20 +24,27 @@ const STATUS = {
   lost:          { fg: '#6B7280', bg: '#F3F4F6', label: 'Lost',          icon: '💀' },
 };
 
-const DATE_OPTIONS = [
-  { key: 'all',    label: 'All Time'   },
-  { key: 'today',  label: 'Today'      },
-  { key: 'week',   label: 'This Week'  },
-  { key: 'month',  label: 'This Month' },
-  { key: 'custom', label: 'Custom'     },
+const DATE_PRESETS = [
+  { key: 'all',    label: 'All Time'  },
+  { key: 'today',  label: 'Today'     },
+  { key: 'week',   label: 'This Week' },
+  { key: 'month',  label: 'Month'     },
+  { key: 'custom', label: '📅 Custom' },
 ];
 
 const ATTEMPT_OPTIONS = [
   { key: 'all', label: 'All'        },
-  { key: '0',   label: 'Not Called' },
-  { key: '1-2', label: '1–2 Calls'  },
-  { key: '3-5', label: '3–5 Calls'  },
-  { key: '6+',  label: '6+ Calls'   },
+  { key: '0',   label: '0 Calls'    },
+  { key: '1-2', label: '1–2'        },
+  { key: '3-5', label: '3–5'        },
+  { key: '6+',  label: '6+'         },
+];
+
+const SORTS = [
+  { key: 'newest',   label: 'Newest first'    },
+  { key: 'oldest',   label: 'Oldest first'    },
+  { key: 'name_az',  label: 'Name A → Z'      },
+  { key: 'attempts', label: 'Most call attempts' },
 ];
 
 function getDateBoundary(key) {
@@ -64,15 +72,13 @@ const fmtDate = (d) => d
 // ── Lead Card ─────────────────────────────────────────────────────────────────
 
 const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) {
-  const st       = STATUS[item.status] || { fg: '#64748B', bg: '#F1F5F9', label: item.status || 'Unknown', icon: '❓' };
-  const lastAgo  = timeAgo(item.lastCallAt);
+  const st      = STATUS[item.status] || { fg: '#64748B', bg: '#F1F5F9', label: item.status || 'Unknown', icon: '❓' };
+  const lastAgo = timeAgo(item.lastCallAt);
 
   return (
     <View style={c.card}>
       <View style={[c.accent, { backgroundColor: st.fg }]} />
       <View style={c.body}>
-
-        {/* Row 1: Avatar + Name/Phone + Status badge */}
         <View style={c.topRow}>
           <View style={[c.avatar, { backgroundColor: st.bg }]}>
             <Text style={[c.avatarLetter, { color: st.fg }]}>
@@ -89,21 +95,17 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
           </View>
         </View>
 
-        {/* Row 2: Last call info */}
         {(lastAgo || item.lastCallDuration > 0) ? (
           <View style={c.callRow}>
             <Text style={c.callText} numberOfLines={1}>
-              📞 {item.lastCallType ? `${item.lastCallType} · ` : ''}
-              {lastAgo}{item.lastCallDuration > 0 ? ` · ${Math.floor(item.lastCallDuration / 60)}m ${item.lastCallDuration % 60}s` : ''}
+              📞 {item.lastCallType ? `${item.lastCallType} · ` : ''}{lastAgo}
+              {item.lastCallDuration > 0 ? ` · ${Math.floor(item.lastCallDuration / 60)}m ${item.lastCallDuration % 60}s` : ''}
             </Text>
             <View style={c.callRowRight}>
               {(item.attempts > 0) && (
                 <View style={c.attemptsTag}>
                   <Text style={c.attemptsTagText}>{item.attempts}×</Text>
                 </View>
-              )}
-              {item.notes?.length > 0 && (
-                <Text style={c.noteCount}>{item.notes.length} note{item.notes.length !== 1 ? 's' : ''}</Text>
               )}
             </View>
           </View>
@@ -113,19 +115,10 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
           </View>
         )}
 
-        {/* Row 3: Note preview (optional) */}
-        {(item.lastCallNote || item.lastCallSummary) ? (
-          <View style={c.noteRow}>
-            {item.lastCallSummary && (
-              <Text style={c.summaryPill}>💬 {item.lastCallSummary}</Text>
-            )}
-            {item.lastCallNote && (
-              <Text style={c.notePreview} numberOfLines={1}>📝 {item.lastCallNote}</Text>
-            )}
-          </View>
+        {item.lastCallNote ? (
+          <Text style={c.notePreview} numberOfLines={1}>📝 {item.lastCallNote}</Text>
         ) : null}
 
-        {/* Row 4: Follow-up (optional) */}
         {item.followUpDate ? (
           <View style={c.fuRow}>
             <Text style={c.fuText}>
@@ -134,7 +127,6 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
           </View>
         ) : null}
 
-        {/* Row 5: Action buttons — equal width, fixed height */}
         <View style={c.actions}>
           <TouchableOpacity
             style={[c.btn, c.btnCall]}
@@ -143,25 +135,13 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
           >
             <Text style={c.btnCallText}>📞 Call</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[c.btn, c.btnGhost]}
-            onPress={() => onWhatsApp(item)}
-            activeOpacity={0.75}
-          >
+          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onWhatsApp(item)} activeOpacity={0.75}>
             <Text style={c.btnGhostText}>💬 WA</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[c.btn, c.btnGhost]}
-            onPress={() => onNote(item)}
-            activeOpacity={0.75}
-          >
+          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onNote(item)} activeOpacity={0.75}>
             <Text style={c.btnGhostText}>📝 Note</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[c.btn, c.btnGhost]}
-            onPress={() => onStatus(item)}
-            activeOpacity={0.75}
-          >
+          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onStatus(item)} activeOpacity={0.75}>
             <Text style={c.btnGhostText}>✏️ Status</Text>
           </TouchableOpacity>
         </View>
@@ -174,13 +154,7 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
 
 function StatusSheet({ lead, onClose, onSelect, updating }) {
   return (
-    <Modal
-      visible={!!lead}
-      transparent
-      animationType="slide"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!lead} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <View style={m.overlay}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={m.sheet}>
@@ -231,13 +205,7 @@ function NoteSheet({ lead, onClose, onSave }) {
   };
 
   return (
-    <Modal
-      visible={!!lead}
-      transparent
-      animationType="slide"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
+    <Modal visible={!!lead} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
       <View style={m.overlay}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={m.sheet}>
@@ -275,165 +243,150 @@ function NoteSheet({ lead, onClose, onSave }) {
   );
 }
 
-// ── Filter Sheet ──────────────────────────────────────────────────────────────
+// ── Sort Sheet ────────────────────────────────────────────────────────────────
 
-function FilterSheet({ visible, dateFilter, customFrom, customTo, attemptsFilter, onApply, onClose }) {
-  const [pendingDate,     setPendingDate]     = useState(dateFilter);
-  const [pendingFrom,     setPendingFrom]     = useState(customFrom);
-  const [pendingTo,       setPendingTo]       = useState(customTo);
-  const [pendingAttempts, setPendingAttempts] = useState(attemptsFilter);
-  const [calSeg,          setCalSeg]          = useState('from');
-
-  // Sync when opened
+function SortSheet({ visible, value, onSelect, onClose }) {
+  const translateY = useRef(new Animated.Value(300)).current;
   useEffect(() => {
-    if (visible) {
-      setPendingDate(dateFilter);
-      setPendingFrom(customFrom);
-      setPendingTo(customTo);
-      setPendingAttempts(attemptsFilter);
-      setCalSeg('from');
-    }
+    Animated.spring(translateY, { toValue: visible ? 0 : 300, useNativeDriver: true, damping: 20, mass: 0.7 }).start();
   }, [visible]);
-
-  const handleApply = () => {
-    onApply({
-      dateFilter:     pendingDate,
-      customFrom:     pendingFrom,
-      customTo:       pendingTo,
-      attemptsFilter: pendingAttempts,
-    });
-    onClose();
-  };
-
-  const handleReset = () => {
-    setPendingDate('all');
-    setPendingFrom(null);
-    setPendingTo(null);
-    setPendingAttempts('all');
-    setCalSeg('from');
-  };
-
+  if (!visible) return null;
   return (
-    <Modal visible={visible} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={{ flex: 1 }}>
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
-        <View style={f.sheet}>
-          <View style={f.handle} />
-          <View style={f.topRow}>
-            <Text style={f.title}>Filter Leads</Text>
-            <TouchableOpacity style={f.resetBtn} onPress={handleReset}>
-              <Text style={f.resetText}>Reset</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <Text style={f.sectionLabel}>DATE RANGE</Text>
-            <View style={f.chipGroup}>
-              {DATE_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[f.chip, pendingDate === opt.key && f.chipActive]}
-                  onPress={() => {
-                    setPendingDate(opt.key);
-                    if (opt.key !== 'custom') { setPendingFrom(null); setPendingTo(null); }
-                    else setCalSeg('from');
-                  }}
-                >
-                  <Text style={[f.chipText, pendingDate === opt.key && f.chipTextActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* ── Attempts filter ── */}
-            <Text style={[f.sectionLabel, { marginTop: 18 }]}>CALL ATTEMPTS</Text>
-            <View style={f.chipGroup}>
-              {ATTEMPT_OPTIONS.map((opt) => (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[f.chip, pendingAttempts === opt.key && f.chipActive]}
-                  onPress={() => setPendingAttempts(opt.key)}
-                >
-                  <Text style={[f.chipText, pendingAttempts === opt.key && f.chipTextActive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {pendingDate === 'custom' && (
-              <View style={f.dateWrap}>
-                {pendingFrom && pendingTo && (
-                  <View style={f.rangeSummary}>
-                    <Text style={f.rangeSummaryText}>📅 {fmtDate(pendingFrom)} → {fmtDate(pendingTo)}</Text>
-                  </View>
-                )}
-                <View style={f.segRow}>
-                  {['from', 'to'].map((seg) => {
-                    const val = seg === 'from' ? pendingFrom : pendingTo;
-                    return (
-                      <TouchableOpacity
-                        key={seg}
-                        style={[f.segBtn, calSeg === seg && f.segBtnActive]}
-                        onPress={() => setCalSeg(seg)}
-                      >
-                        <Text style={f.segLabel}>{seg.toUpperCase()}</Text>
-                        <Text style={[f.segValue, val && { color: Colors.primary }]}>{fmtDate(val)}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <View style={f.calWrap}>
-                  <MiniCalendar
-                    value={calSeg === 'from' ? pendingFrom : pendingTo}
-                    onChange={(d) => {
-                      if (calSeg === 'from') {
-                        if (pendingTo && d > pendingTo) { setPendingFrom(pendingTo); setPendingTo(d); }
-                        else { setPendingFrom(d); setCalSeg('to'); }
-                      } else {
-                        if (pendingFrom && d < pendingFrom) { setPendingTo(pendingFrom); setPendingFrom(d); }
-                        else setPendingTo(d);
-                      }
-                    }}
-                  />
-                </View>
-              </View>
-            )}
-            <View style={{ height: 8 }} />
-          </ScrollView>
-
-          <View style={f.footer}>
-            <TouchableOpacity style={f.applyBtn} onPress={handleApply}>
-              <Text style={f.applyText}>Apply Filters</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <TouchableOpacity style={so.overlay} activeOpacity={1} onPress={onClose} />
+      <Animated.View style={[so.sheet, { transform: [{ translateY }] }]}>
+        <View style={so.handle} />
+        <Text style={so.title}>Sort Leads</Text>
+        {SORTS.map((s) => (
+          <TouchableOpacity
+            key={s.key}
+            style={so.row}
+            onPress={() => { onSelect(s.key); onClose(); }}
+          >
+            <Text style={[so.label, value === s.key && so.labelActive]}>{s.label}</Text>
+            {value === s.key && <Text style={so.check}>✓</Text>}
+          </TouchableOpacity>
+        ))}
+        <View style={{ height: 24 }} />
+      </Animated.View>
     </Modal>
   );
 }
+const so = StyleSheet.create({
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
+  sheet:   { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
+  handle:  { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 18 },
+  title:   { fontSize: 16, fontWeight: '700', color: Colors.text, marginBottom: 12 },
+  row:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  label:   { fontSize: 15, fontWeight: '500', color: Colors.textSec },
+  labelActive: { color: Colors.primary, fontWeight: '700' },
+  check:   { fontSize: 16, color: Colors.primary, fontWeight: '700' },
+});
+
+// ── Custom Date Sheet ────────────────────────────────────────────────────────
+
+function CustomDateSheet({ visible, from, to, onApply, onClose }) {
+  const [seg, setSeg]     = useState('from');
+  const [pFrom, setPFrom] = useState(from);
+  const [pTo, setPTo]     = useState(to);
+  const translateY = useRef(new Animated.Value(500)).current;
+
+  useEffect(() => {
+    if (visible) { setSeg('from'); setPFrom(from); setPTo(to); }
+    Animated.spring(translateY, { toValue: visible ? 0 : 500, useNativeDriver: true, damping: 20, mass: 0.8 }).start();
+  }, [visible]);
+
+  if (!visible) return null;
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <TouchableOpacity style={cds.overlay} activeOpacity={1} onPress={onClose} />
+      <Animated.View style={[cds.sheet, { transform: [{ translateY }] }]}>
+        <View style={cds.handle} />
+        <Text style={cds.title}>Custom Date Range</Text>
+        <View style={cds.segRow}>
+          {['from', 'to'].map((s) => {
+            const val = s === 'from' ? pFrom : pTo;
+            return (
+              <TouchableOpacity key={s} style={[cds.seg, seg === s && cds.segActive]} onPress={() => setSeg(s)}>
+                <Text style={cds.segLabel}>{s.toUpperCase()}</Text>
+                <Text style={[cds.segValue, val && { color: Colors.primary }]}>{fmtDate(val)}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {(pFrom && pTo) && (
+          <View style={cds.rangeSummary}>
+            <Text style={cds.rangeSummaryText}>📅 {fmtDate(pFrom)} → {fmtDate(pTo)}</Text>
+          </View>
+        )}
+        <View style={cds.calWrap}>
+          <MiniCalendar
+            value={seg === 'from' ? pFrom : pTo}
+            onChange={(d) => {
+              if (seg === 'from') { setPFrom(d); if (pTo && d > pTo) setPTo(null); setSeg('to'); }
+              else { if (pFrom && d < pFrom) { setPFrom(d); setPTo(pFrom); } else setPTo(d); }
+            }}
+          />
+        </View>
+        <TouchableOpacity
+          style={[cds.applyBtn, !pFrom && { opacity: 0.5 }]}
+          onPress={() => { onApply(pFrom, pTo); onClose(); }}
+          disabled={!pFrom}
+        >
+          <Text style={cds.applyText}>Apply Range</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={cds.clearBtn} onPress={() => { onApply(null, null); onClose(); }}>
+          <Text style={cds.clearText}>Clear Date Filter</Text>
+        </TouchableOpacity>
+        <View style={{ height: 24 }} />
+      </Animated.View>
+    </Modal>
+  );
+}
+const cds = StyleSheet.create({
+  overlay:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
+  sheet:       { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
+  handle:      { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16 },
+  title:       { fontSize: 17, fontWeight: '700', color: Colors.text, marginBottom: 16 },
+  segRow:      { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  seg:         { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 12, backgroundColor: Colors.bg },
+  segActive:   { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  segLabel:    { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
+  segValue:    { fontSize: 15, fontWeight: '700', color: Colors.text },
+  rangeSummary:{ backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 12, alignSelf: 'center', borderWidth: 1, borderColor: Colors.primary },
+  rangeSummaryText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  calWrap:     { borderRadius: 14, backgroundColor: Colors.bg, padding: 10, borderWidth: 1, borderColor: Colors.border, marginBottom: 14 },
+  applyBtn:    { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
+  applyText:   { fontSize: 15, fontWeight: '700', color: '#fff' },
+  clearBtn:    { paddingVertical: 10, alignItems: 'center' },
+  clearText:   { fontSize: 13, fontWeight: '600', color: Colors.textSec },
+});
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
 export default function LeadsScreen() {
-  const [leads,      setLeads]      = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [search,     setSearch]     = useState('');
+  const [leads,          setLeads]          = useState([]);
+  const [loading,        setLoading]        = useState(true);
+  const [refreshing,     setRefreshing]     = useState(false);
+  const [search,         setSearch]         = useState('');
+  const [showSearch,     setShowSearch]     = useState(false);
   const [statusFilter,   setStatusFilter]   = useState('all');
-  const [dateFilter,     setDateFilter]     = useState('all');
+  const [datePreset,     setDatePreset]     = useState('all');
   const [customFrom,     setCustomFrom]     = useState(null);
   const [customTo,       setCustomTo]       = useState(null);
   const [attemptsFilter, setAttemptsFilter] = useState('all');
-  const [showFilter,   setShowFilter]   = useState(false);
-  const [noteTarget,   setNoteTarget]   = useState(null);
-  const [statusTarget, setStatusTarget] = useState(null);
+  const [sort,           setSort]           = useState('newest');
+  const [noteTarget,     setNoteTarget]     = useState(null);
+  const [statusTarget,   setStatusTarget]   = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [showSort,       setShowSort]       = useState(false);
+  const [showCustomDate, setShowCustomDate] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const searchRef = useRef(null);
 
   const fetchLeads = async () => {
     try {
-      const res = await api.get('/api/leads/assigned', { params: { limit: 200 } });
+      const res  = await api.get('/api/leads/assigned', { params: { limit: 200 } });
       const data = res.data.data;
       setLeads(Array.isArray(data) ? data : (data?.leads || []));
     } catch {}
@@ -449,65 +402,81 @@ export default function LeadsScreen() {
     setRefreshing(false);
   };
 
-  // Filtered list — memoised so it only recalculates when deps change
+  // Filtered + sorted list
   const displayLeads = useMemo(() => {
-    return leads.filter((l) => {
-      // Search
+    let result = leads.filter((l) => {
       if (search.trim()) {
         const q = search.toLowerCase();
-        if (
-          !(l.name  || '').toLowerCase().includes(q) &&
-          !(l.phone || '').includes(search.trim())
-        ) return false;
+        if (!(l.name || '').toLowerCase().includes(q) && !(l.phone || '').includes(search.trim())) return false;
       }
-      // Status
       if (statusFilter !== 'all' && l.status !== statusFilter) return false;
-      // Date
-      if (dateFilter === 'custom') {
+      if (datePreset === 'custom') {
         const created = new Date(l.createdAt);
         if (customFrom && created < customFrom) return false;
-        if (customTo) {
-          const end = new Date(customTo); end.setHours(23, 59, 59, 999);
-          if (created > end) return false;
-        }
+        if (customTo) { const end = new Date(customTo); end.setHours(23,59,59,999); if (created > end) return false; }
       } else {
-        const boundary = getDateBoundary(dateFilter);
-        if (boundary && new Date(l.createdAt) < boundary) return false;
+        const b = getDateBoundary(datePreset);
+        if (b && new Date(l.createdAt) < b) return false;
       }
-      // Attempts
       if (attemptsFilter !== 'all') {
         const att = l.attempts || 0;
-        if (attemptsFilter === '0'   && att !== 0)              return false;
-        if (attemptsFilter === '1-2' && (att < 1 || att > 2))  return false;
-        if (attemptsFilter === '3-5' && (att < 3 || att > 5))  return false;
-        if (attemptsFilter === '6+'  && att < 6)               return false;
+        if (attemptsFilter === '0'   && att !== 0)             return false;
+        if (attemptsFilter === '1-2' && (att < 1 || att > 2)) return false;
+        if (attemptsFilter === '3-5' && (att < 3 || att > 5)) return false;
+        if (attemptsFilter === '6+'  && att < 6)              return false;
       }
       return true;
     });
-  }, [leads, search, statusFilter, dateFilter, customFrom, customTo, attemptsFilter]);
 
-  // Per-status counts from full list (not filtered)
+    result.sort((a, b) => {
+      if (sort === 'oldest')   return new Date(a.createdAt) - new Date(b.createdAt);
+      if (sort === 'name_az')  return (a.name || '').localeCompare(b.name || '');
+      if (sort === 'attempts') return (b.attempts || 0) - (a.attempts || 0);
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    return result;
+  }, [leads, search, statusFilter, datePreset, customFrom, customTo, attemptsFilter, sort]);
+
+  // Status counts: from base that excludes statusFilter (so badges show count if you click that status)
   const statusCounts = useMemo(() => {
-    const acc = {};
+    const acc = { all: 0 };
     for (const key of Object.keys(STATUS)) acc[key] = 0;
-    for (const l of leads) if (acc[l.status] !== undefined) acc[l.status]++;
+    const base = leads.filter((l) => {
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        if (!(l.name || '').toLowerCase().includes(q) && !(l.phone || '').includes(search.trim())) return false;
+      }
+      if (datePreset === 'custom') {
+        const created = new Date(l.createdAt);
+        if (customFrom && created < customFrom) return false;
+        if (customTo) { const end = new Date(customTo); end.setHours(23,59,59,999); if (created > end) return false; }
+      } else {
+        const b = getDateBoundary(datePreset);
+        if (b && new Date(l.createdAt) < b) return false;
+      }
+      if (attemptsFilter !== 'all') {
+        const att = l.attempts || 0;
+        if (attemptsFilter === '0'   && att !== 0)             return false;
+        if (attemptsFilter === '1-2' && (att < 1 || att > 2)) return false;
+        if (attemptsFilter === '3-5' && (att < 3 || att > 5)) return false;
+        if (attemptsFilter === '6+'  && att < 6)              return false;
+      }
+      return true;
+    });
+    acc.all = base.length;
+    for (const l of base) if (acc[l.status] !== undefined) acc[l.status]++;
     return acc;
-  }, [leads]);
+  }, [leads, search, datePreset, customFrom, customTo, attemptsFilter]);
 
   const handleUpdateStatus = async (newStatus) => {
     if (!statusTarget || updatingStatus) return;
     setUpdatingStatus(true);
     try {
       await api.put(`/api/leads/${statusTarget._id}`, { status: newStatus });
-      setLeads((prev) =>
-        prev.map((l) => l._id === statusTarget._id ? { ...l, status: newStatus } : l)
-      );
+      setLeads((prev) => prev.map((l) => l._id === statusTarget._id ? { ...l, status: newStatus } : l));
       setStatusTarget(null);
-    } catch {
-      Alert.alert('Error', 'Failed to update status');
-    } finally {
-      setUpdatingStatus(false);
-    }
+    } catch { Alert.alert('Error', 'Failed to update status'); }
+    finally { setUpdatingStatus(false); }
   };
 
   const handleSaveNote = async (text) => {
@@ -516,9 +485,7 @@ export default function LeadsScreen() {
       await api.post(`/api/leads/${noteTarget._id}/note`, { text });
       setNoteTarget(null);
       fetchLeads();
-    } catch {
-      Alert.alert('Error', 'Failed to add note');
-    }
+    } catch { Alert.alert('Error', 'Failed to add note'); }
   };
 
   const handleWhatsApp = useCallback((item) => {
@@ -533,25 +500,43 @@ export default function LeadsScreen() {
   const onStatusPress = useCallback((item) => setStatusTarget(item), []);
 
   const renderItem = useCallback(({ item }) => (
-    <LeadCard
-      item={item}
-      onNote={onNotePress}
-      onStatus={onStatusPress}
-      onWhatsApp={handleWhatsApp}
-    />
+    <LeadCard item={item} onNote={onNotePress} onStatus={onStatusPress} onWhatsApp={handleWhatsApp} />
   ), [onNotePress, onStatusPress, handleWhatsApp]);
 
-  const activeFilterCount = (dateFilter !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0);
-  const isFiltered = activeFilterCount > 0;
+  const hasActiveFilters = datePreset !== 'all' || attemptsFilter !== 'all' || search.trim() || statusFilter !== 'all' || sort !== 'newest';
+  const activeCount      = (datePreset !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);
+
+  const clearAll = () => {
+    setStatusFilter('all'); setDatePreset('all'); setCustomFrom(null);
+    setCustomTo(null); setAttemptsFilter('all'); setSearch(''); setSort('newest');
+  };
+
+  const hasCustom = datePreset === 'custom' && (customFrom || customTo);
 
   return (
     <View style={s.root}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       {/* ── Header ── */}
-      <View style={s.header}>
-        <View style={s.headerTop}>
-          <View style={{ flex: 1 }}>
+      {showSearch ? (
+        <View style={s.searchBar}>
+          <Text style={s.searchBarIcon}>🔍</Text>
+          <TextInput
+            ref={searchRef}
+            style={s.searchBarInput}
+            placeholder="Search name or phone…"
+            placeholderTextColor={Colors.textMuted}
+            value={search}
+            onChangeText={setSearch}
+            autoFocus
+          />
+          <TouchableOpacity onPress={() => { setSearch(''); setShowSearch(false); }}>
+            <Text style={s.searchClear}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={s.header}>
+          <View>
             <Text style={s.preLabel}>PIPELINE</Text>
             <Text style={s.heading}>My Leads</Text>
           </View>
@@ -559,64 +544,91 @@ export default function LeadsScreen() {
             <View style={s.totalPill}>
               <Text style={s.totalText}>{leads.length}</Text>
             </View>
+            <TouchableOpacity style={s.iconBtn} onPress={() => setShowSearch(true)}>
+              <Text style={s.iconText}>🔍</Text>
+            </TouchableOpacity>
             <TouchableOpacity
-              style={[s.filterBtn, isFiltered && s.filterBtnActive]}
-              onPress={() => setShowFilter(true)}
+              style={[s.iconBtn, sort !== 'newest' && s.iconBtnActive]}
+              onPress={() => setShowSort(true)}
             >
-              <Text style={[s.filterText, isFiltered && s.filterTextActive]}>
-                ⊞ {isFiltered ? `${activeFilterCount} active` : 'Filter'}
-              </Text>
+              <Text style={[s.iconText, sort !== 'newest' && { color: Colors.primary }]}>⇅</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.iconBtn, s.uploadBtn]} onPress={() => setShowBulkUpload(true)}>
+              <Text style={s.uploadBtnText}>⬆ Upload</Text>
             </TouchableOpacity>
           </View>
         </View>
+      )}
 
-        {/* Search */}
-        <View style={s.searchRow}>
-          <Text style={s.searchIcon}>🔍</Text>
-          <TextInput
-            style={s.searchInput}
-            placeholder="Search name or phone…"
-            placeholderTextColor={Colors.textMuted}
-            value={search}
-            onChangeText={setSearch}
-            returnKeyType="search"
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={s.searchClear}>✕</Text>
+      {/* ── Date preset chips ── */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.dateRow}
+        style={s.dateRowWrap}
+      >
+        {DATE_PRESETS.map((dp) => {
+          const active   = datePreset === dp.key;
+          const isCustom = dp.key === 'custom';
+          return (
+            <TouchableOpacity
+              key={dp.key}
+              style={[s.dateChip, active && (isCustom ? s.dateChipCustom : s.dateChipActive)]}
+              onPress={() => { setDatePreset(dp.key); if (isCustom) setShowCustomDate(true); }}
+            >
+              <Text style={[s.dateChipText, active && (isCustom ? s.dateChipTextCustom : s.dateChipTextActive)]}>
+                {dp.label}{isCustom && hasCustom ? `: ${fmtDate(customFrom)}${customTo ? `→${fmtDate(customTo)}` : ''}` : ''}
+              </Text>
             </TouchableOpacity>
-          )}
-        </View>
-      </View>
+          );
+        })}
+      </ScrollView>
 
-      {/* ── Status strip (primary filter — instant) ── */}
-      <View style={s.stripWrap}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.strip}
-          keyboardShouldPersistTaps="handled"
-        >
+      {/* ── Attempts chips ── */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.attRow}
+        style={s.attRowWrap}
+      >
+        <Text style={s.attLabel}>Calls:</Text>
+        {ATTEMPT_OPTIONS.map((opt) => {
+          const active = attemptsFilter === opt.key;
+          return (
+            <TouchableOpacity
+              key={opt.key}
+              style={[s.attChip, active && s.attChipActive]}
+              onPress={() => setAttemptsFilter(opt.key)}
+            >
+              <Text style={[s.attChipText, active && s.attChipTextActive]}>{opt.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* ── Status pills ── */}
+      <View style={s.statusWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.statusRow}>
           <TouchableOpacity
             style={[s.pill, statusFilter === 'all' && s.pillActive]}
             onPress={() => setStatusFilter('all')}
           >
             <Text style={[s.pillText, statusFilter === 'all' && s.pillTextActive]}>
-              All · {leads.length}
+              All · {statusCounts.all}
             </Text>
           </TouchableOpacity>
-
           {Object.entries(STATUS).map(([key, st]) => {
             const active = statusFilter === key;
+            if (!statusCounts[key]) return null;
             return (
               <TouchableOpacity
                 key={key}
                 style={[s.pill, active && { backgroundColor: st.bg, borderColor: st.fg, borderWidth: 1.5 }]}
                 onPress={() => setStatusFilter(active ? 'all' : key)}
               >
-                <Text style={s.pillDotText}>{st.icon}</Text>
+                <Text style={s.pillIcon}>{st.icon}</Text>
                 <Text style={[s.pillText, active && { color: st.fg, fontWeight: '700' }]}>
-                  {st.label}{statusCounts[key] > 0 ? ` · ${statusCounts[key]}` : ''}
+                  {st.label} · {statusCounts[key]}
                 </Text>
               </TouchableOpacity>
             );
@@ -624,25 +636,18 @@ export default function LeadsScreen() {
         </ScrollView>
       </View>
 
-      {/* ── Active filter chip ── */}
-      {(isFiltered || search.trim()) ? (
-        <View style={s.activeFilterRow}>
-          <Text style={s.activeFilterText}>
-            Showing {displayLeads.length} of {leads.length} leads
+      {/* ── Results summary / clear bar ── */}
+      {hasActiveFilters && (
+        <View style={s.summaryBar}>
+          <Text style={s.summaryText}>
+            {displayLeads.length} of {leads.length} leads
+            {activeCount > 0 ? ` · ${activeCount} filter${activeCount !== 1 ? 's' : ''}` : ''}
           </Text>
-          <TouchableOpacity
-            onPress={() => {
-              setStatusFilter('all');
-              setDateFilter('all');
-              setCustomFrom(null);
-              setCustomTo(null);
-              setSearch('');
-            }}
-          >
+          <TouchableOpacity onPress={clearAll}>
             <Text style={s.clearAllText}>Clear all ✕</Text>
           </TouchableOpacity>
         </View>
-      ) : null}
+      )}
 
       {/* ── List ── */}
       {loading ? (
@@ -657,26 +662,22 @@ export default function LeadsScreen() {
           renderItem={renderItem}
           contentContainerStyle={s.listContent}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           ListEmptyComponent={
             <View style={s.emptyWrap}>
               <Text style={s.emptyIcon}>🎯</Text>
-              <Text style={s.emptyTitle}>
-                {leads.length === 0 ? 'No leads yet' : 'No leads match'}
-              </Text>
+              <Text style={s.emptyTitle}>{leads.length === 0 ? 'No leads yet' : 'No leads match'}</Text>
               <Text style={s.emptyHint}>
-                {leads.length === 0
-                  ? 'Your manager will assign leads to you'
-                  : 'Try different filters or search terms'}
+                {leads.length === 0 ? 'Upload leads via CSV or your manager will assign them' : 'Try different filters or search terms'}
               </Text>
-              {(isFiltered || search.trim() || statusFilter !== 'all') && (
-                <TouchableOpacity
-                  style={s.clearBtn}
-                  onPress={() => { setStatusFilter('all'); setDateFilter('all'); setCustomFrom(null); setCustomTo(null); setAttemptsFilter('all'); setSearch(''); }}
-                >
+              {hasActiveFilters && (
+                <TouchableOpacity style={s.clearBtn} onPress={clearAll}>
                   <Text style={s.clearBtnText}>Clear all filters</Text>
+                </TouchableOpacity>
+              )}
+              {leads.length === 0 && (
+                <TouchableOpacity style={s.uploadEmptyBtn} onPress={() => setShowBulkUpload(true)}>
+                  <Text style={s.uploadEmptyText}>⬆ Upload Leads via CSV</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -691,38 +692,39 @@ export default function LeadsScreen() {
         onSelect={handleUpdateStatus}
         updating={updatingStatus}
       />
-
       <NoteSheet
         lead={noteTarget}
         onClose={() => setNoteTarget(null)}
         onSave={handleSaveNote}
       />
-
-      <FilterSheet
-        visible={showFilter}
-        dateFilter={dateFilter}
-        customFrom={customFrom}
-        customTo={customTo}
-        attemptsFilter={attemptsFilter}
-        onApply={({ dateFilter: df, customFrom: cf, customTo: ct, attemptsFilter: af }) => {
-          setDateFilter(df);
-          setCustomFrom(cf);
-          setCustomTo(ct);
-          setAttemptsFilter(af);
-        }}
-        onClose={() => setShowFilter(false)}
+      <SortSheet
+        visible={showSort}
+        value={sort}
+        onSelect={setSort}
+        onClose={() => setShowSort(false)}
+      />
+      <CustomDateSheet
+        visible={showCustomDate}
+        from={customFrom}
+        to={customTo}
+        onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); }}
+        onClose={() => setShowCustomDate(false)}
+      />
+      <BulkUploadModal
+        visible={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+        onUploaded={() => { setShowBulkUpload(false); fetchLeads(); }}
       />
     </View>
   );
 }
 
-// ── Card styles ───────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const c = StyleSheet.create({
   card:        { backgroundColor: '#fff', borderRadius: 16, marginBottom: 10, flexDirection: 'row', overflow: 'hidden', ...Shadows.card },
   accent:      { width: 4 },
   body:        { flex: 1, paddingHorizontal: 13, paddingVertical: 12 },
-
   topRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   avatar:      { width: 42, height: 42, borderRadius: 13, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
   avatarLetter:{ fontSize: 17, fontWeight: '800' },
@@ -732,46 +734,34 @@ const c = StyleSheet.create({
   badge:       { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 3, gap: 3, flexShrink: 0, maxWidth: 120 },
   badgeIcon:   { fontSize: 11 },
   badgeLabel:  { fontSize: 10, fontWeight: '700', flexShrink: 1 },
-
-  callRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  callText:       { flex: 1, fontSize: 12, color: Colors.textSec },
-  callRowRight:   { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
-  attemptsTag:    { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  attemptsTagText:{ fontSize: 10, fontWeight: '700', color: '#3B82F6' },
-  noteCount:      { fontSize: 11, color: Colors.textMuted, flexShrink: 0 },
-  noCallText:     { fontSize: 12, color: Colors.textMuted },
-
-  noteRow:     { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginBottom: 4 },
-  summaryPill: { fontSize: 11, color: Colors.textSec, fontWeight: '600', backgroundColor: '#F1F5F9', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 2 },
-  notePreview: { flex: 1, fontSize: 11, color: Colors.textMuted, fontStyle: 'italic' },
-
-  fuRow:  { marginBottom: 4 },
-  fuText: { fontSize: 11, fontWeight: '600', color: '#7C3AED', backgroundColor: '#EDE9FE', alignSelf: 'flex-start', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 },
-
-  // Action buttons — equal width, fixed height, no size-change glitch
-  actions: { flexDirection: 'row', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.divider },
-  btn:     { flex: 1, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  btnCall:      { backgroundColor: Colors.primary },
-  btnCallText:  { color: '#fff', fontSize: 11, fontWeight: '700' },
-  btnGhost:     { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  btnGhostText: { color: Colors.textSec, fontSize: 11, fontWeight: '600' },
+  callRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  callText:    { flex: 1, fontSize: 12, color: Colors.textSec },
+  callRowRight:{ flexDirection: 'row', alignItems: 'center', gap: 6 },
+  attemptsTag: { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  attemptsTagText: { fontSize: 10, fontWeight: '700', color: '#3B82F6' },
+  noCallText:  { fontSize: 12, color: Colors.textMuted },
+  notePreview: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
+  fuRow:       { marginBottom: 4 },
+  fuText:      { fontSize: 11, fontWeight: '600', color: '#7C3AED', backgroundColor: '#EDE9FE', alignSelf: 'flex-start', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 },
+  actions:     { flexDirection: 'row', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.divider },
+  btn:         { flex: 1, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  btnCall:     { backgroundColor: Colors.primary },
+  btnCallText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  btnGhost:    { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
+  btnGhostText:{ color: Colors.textSec, fontSize: 11, fontWeight: '600' },
 });
 
-// ── Status/Note sheet styles ──────────────────────────────────────────────────
-
 const m = StyleSheet.create({
-  overlay:  { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
-  sheet:    { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 12 },
-  handle:   { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
-  title:    { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: 4 },
-  sub:      { fontSize: 13, color: Colors.textSec, marginBottom: 16 },
-
-  statusGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  statusOpt:       { width: '30%', borderRadius: 14, padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1.5, borderColor: 'transparent' },
-  statusOptIcon:   { fontSize: 22, marginBottom: 5 },
-  statusOptLabel:  { fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  checkBadge:      { position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
-
+  overlay:    { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
+  sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 12 },
+  handle:     { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  title:      { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: 4 },
+  sub:        { fontSize: 13, color: Colors.textSec, marginBottom: 16 },
+  statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  statusOpt:  { width: '30%', borderRadius: 14, padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1.5, borderColor: 'transparent' },
+  statusOptIcon:  { fontSize: 22, marginBottom: 5 },
+  statusOptLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  checkBadge: { position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
   noteInput:  { backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 14, color: Colors.text, fontSize: 14, textAlignVertical: 'top', minHeight: 110 },
   charCount:  { color: Colors.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4, marginBottom: 16 },
   btnRow:     { flexDirection: 'row', gap: 10 },
@@ -781,80 +771,66 @@ const m = StyleSheet.create({
   saveText:   { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
 
-// ── Screen + filter sheet styles ─────────────────────────────────────────────
-
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bg },
 
-  header:     { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 20 : 16, paddingBottom: 12, ...Shadows.sm },
-  headerTop:  { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12 },
-  preLabel:   { fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
-  heading:    { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
-  headerRight:{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 2 },
-  totalPill:  { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  totalText:  { color: Colors.primary, fontSize: 13, fontWeight: '800' },
-  filterBtn:  { flexDirection: 'row', alignItems: 'center', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  filterBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  filterText: { fontSize: 12, fontWeight: '600', color: Colors.textSec },
-  filterTextActive:{ color: Colors.primary },
+  header:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 18 : 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  preLabel:    { fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
+  heading:     { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 2 },
+  totalPill:   { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  totalText:   { color: Colors.primary, fontSize: 13, fontWeight: '800' },
+  iconBtn:     { width: 36, height: 36, borderRadius: 11, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', alignItems: 'center', ...Shadows.sm },
+  iconBtnActive:{ backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  iconText:    { fontSize: 15 },
+  uploadBtn:   { width: 'auto', paddingHorizontal: 10, backgroundColor: '#059669' + '22', borderColor: '#059669' },
+  uploadBtnText: { fontSize: 11, fontWeight: '700', color: '#059669' },
 
-  searchRow:   { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.bg, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, height: 42 },
-  searchIcon:  { fontSize: 14, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 13, color: Colors.text, paddingVertical: 0 },
-  searchClear: { color: Colors.textMuted, fontSize: 14, paddingLeft: 8 },
+  searchBar:      { margin: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 13, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, height: 44, ...Shadows.sm },
+  searchBarIcon:  { fontSize: 14, marginRight: 8 },
+  searchBarInput: { flex: 1, fontSize: 14, color: Colors.text },
+  searchClear:    { fontSize: 14, color: Colors.textMuted, padding: 4 },
 
-  stripWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  strip:     { paddingHorizontal: 16, paddingVertical: 10, gap: 7 },
-  pill:      { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  pillActive:{ backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillDotText:{ fontSize: 12 },
+  dateRowWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  dateRow:     { paddingHorizontal: 14, paddingVertical: 9, gap: 7 },
+  dateChip:    { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border },
+  dateChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dateChipCustom: { backgroundColor: '#EDE9FE', borderColor: '#7C3AED' },
+  dateChipText:   { fontSize: 12, fontWeight: '600', color: Colors.textSec },
+  dateChipTextActive:  { color: '#fff', fontWeight: '700' },
+  dateChipTextCustom:  { color: '#7C3AED', fontWeight: '700' },
+
+  attRowWrap:     { backgroundColor: '#FAFAFA', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  attRow:         { paddingHorizontal: 14, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  attLabel:       { fontSize: 11, fontWeight: '700', color: Colors.textMuted, marginRight: 2 },
+  attChip:        { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border },
+  attChipActive:  { backgroundColor: '#0F172A', borderColor: '#0F172A' },
+  attChipText:    { fontSize: 11, fontWeight: '600', color: Colors.textSec },
+  attChipTextActive: { color: '#fff', fontWeight: '700' },
+
+  statusWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  statusRow:  { paddingHorizontal: 14, paddingVertical: 9, gap: 7 },
+  pill:       { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
+  pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  pillIcon:   { fontSize: 12 },
   pillText:   { fontSize: 12, fontWeight: '500', color: Colors.textSec },
   pillTextActive: { color: '#fff', fontWeight: '700' },
 
-  activeFilterRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: Colors.primaryLight + 'AA' },
-  activeFilterText:{ fontSize: 12, color: Colors.primary, fontWeight: '600' },
-  clearAllText:    { fontSize: 12, color: Colors.primary, fontWeight: '700' },
+  summaryBar:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 7, backgroundColor: Colors.primaryLight },
+  summaryText:  { fontSize: 11, color: Colors.primary, fontWeight: '600' },
+  clearAllText: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
 
   listContent: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40 },
 
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
   loadingText: { marginTop: 12, color: Colors.textMuted, fontSize: 14 },
 
-  emptyWrap:  { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
-  emptyIcon:  { fontSize: 52, marginBottom: 14 },
-  emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.textSec },
-  emptyHint:  { fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
-  clearBtn:   { marginTop: 20, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 24, backgroundColor: Colors.primaryLight },
-  clearBtnText:{ fontSize: 13, fontWeight: '700', color: Colors.primary },
-});
-
-const f = StyleSheet.create({
-  sheet:   { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingTop: 12, paddingHorizontal: 20, maxHeight: '80%' },
-  handle:  { width: 36, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  topRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
-  title:   { fontSize: 17, fontWeight: '700', color: Colors.text },
-  resetBtn:{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  resetText:{ fontSize: 12, fontWeight: '600', color: Colors.textSec },
-
-  sectionLabel: { fontSize: 11, fontWeight: '700', color: Colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 },
-  chipGroup:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  chip:         { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  chipActive:   { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  chipText:     { fontSize: 13, fontWeight: '600', color: Colors.textSec },
-  chipTextActive:{ color: '#fff' },
-
-  dateWrap:     { marginTop: 12, marginBottom: 8 },
-  rangeSummary: { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, marginBottom: 12, alignItems: 'center', borderWidth: 1, borderColor: Colors.primary },
-  rangeSummaryText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
-
-  segRow:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  segBtn:     { flex: 1, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.border, padding: 10, backgroundColor: Colors.bg },
-  segBtnActive:{ borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  segLabel:   { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
-  segValue:   { fontSize: 14, fontWeight: '700', color: Colors.text },
-
-  calWrap:  { borderRadius: 14, backgroundColor: Colors.bg, padding: 12, borderWidth: 1, borderColor: Colors.border },
-  footer:   { paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 34 : 20, borderTopWidth: 1, borderTopColor: Colors.divider },
-  applyBtn: { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
-  applyText:{ fontSize: 15, fontWeight: '700', color: '#fff' },
+  emptyWrap:     { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
+  emptyIcon:     { fontSize: 52, marginBottom: 14 },
+  emptyTitle:    { fontSize: 17, fontWeight: '700', color: Colors.textSec },
+  emptyHint:     { fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
+  clearBtn:      { marginTop: 20, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 24, backgroundColor: Colors.primaryLight },
+  clearBtnText:  { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  uploadEmptyBtn:{ marginTop: 12, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 24, backgroundColor: '#D1FAE5', borderWidth: 1.5, borderColor: '#059669' },
+  uploadEmptyText: { fontSize: 13, fontWeight: '700', color: '#059669' },
 });

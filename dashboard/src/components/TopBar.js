@@ -25,14 +25,14 @@ const PAGE_TITLES = {
 };
 
 const PAGE_SUBTITLES = {
-  '/dashboard':   'Your real-time operations overview',
-  '/analytics':   'Trends and performance insights',
-  '/calls':       'Sync and review all call activity',
-  '/calls/live':  'Monitor active calls in real time',
-  '/employees':   'Manage your team members',
-  '/leads':       'Track and convert your contacts',
-  '/reports':     'Generate and export reports',
-  '/settings':    'Configure your workspace',
+  '/dashboard':    'Real-time operations overview',
+  '/analytics':    'Trends and performance insights',
+  '/calls':        'Review all call activity',
+  '/calls/live':   'Monitor active calls in real time',
+  '/employees':    'Manage your team',
+  '/leads':        'Track and convert contacts',
+  '/reports':      'Generate and export reports',
+  '/settings':     'Configure your workspace',
 };
 
 const PARENTS = {
@@ -51,42 +51,6 @@ function buildCrumbs(pathname) {
     parent,
     { label: PAGE_TITLES[pathname] || parts[parts.length - 1], href: pathname, current: true },
   ].filter(Boolean);
-}
-
-function HamburgerIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <line x1="3" y1="6"  x2="21" y2="6"/>
-      <line x1="3" y1="12" x2="21" y2="12"/>
-      <line x1="3" y1="18" x2="21" y2="18"/>
-    </svg>
-  );
-}
-
-function BellIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="8"/>
-      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-    </svg>
-  );
-}
-
-function ChevronRight() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="9 18 15 12 9 6"/>
-    </svg>
-  );
 }
 
 export default function TopBar({ collapsed, onToggle, onMobileToggle, user }) {
@@ -123,50 +87,57 @@ export default function TopBar({ collapsed, onToggle, onMobileToggle, user }) {
     <>
       <header
         className={[
-          'h-16 flex items-center justify-between pl-4 pr-4 lg:pr-5',
+          'h-14 flex items-center justify-between pl-4 pr-4 lg:pr-5',
           'fixed top-0 right-0 left-0 z-30',
           'transition-all duration-300 ease-in-out',
-          collapsed ? 'lg:left-[66px]' : 'lg:left-60',
+          collapsed ? 'lg:left-[64px]' : 'lg:left-56',
           scrolled
-            ? 'bg-white/90 backdrop-blur-xl border-b border-slate-200/80 shadow-sm'
-            : 'bg-white/80 backdrop-blur-md border-b border-slate-100',
-        ].join(' ')}>
+            ? 'shadow-sm'
+            : '',
+        ].join(' ')}
+        style={{ background: '#ffffff', borderBottom: '1px solid #E2E8F0' }}>
 
-        {/* Left — toggle + breadcrumb / title */}
+        {/* Left */}
         <div className="flex items-center gap-3 min-w-0">
-          {/* Mobile hamburger */}
           <button onClick={onMobileToggle}
-            className="lg:hidden flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
+            className="lg:hidden flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
             style={{ color: '#64748B' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; e.currentTarget.style.color = '#0F172A'; }}
             onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#64748B'; }}>
-            <HamburgerIcon />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="3" y1="6"  x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
           </button>
 
-          {/* Desktop toggle */}
           <button onClick={onToggle}
-            className="hidden lg:flex flex-shrink-0 w-9 h-9 rounded-xl items-center justify-center transition-colors"
+            className="hidden lg:flex flex-shrink-0 w-8 h-8 rounded-lg items-center justify-center transition-colors"
             style={{ color: '#64748B' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; e.currentTarget.style.color = '#0F172A'; }}
             onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#64748B'; }}>
-            <HamburgerIcon />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="3" y1="6"  x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
           </button>
 
-          {/* Divider */}
-          <div className="hidden sm:block h-5 w-px bg-slate-200" />
+          <div className="hidden sm:block h-5 w-px" style={{ background: '#E2E8F0' }} />
 
-          {/* Breadcrumb or title + subtitle */}
           <div className="min-w-0">
             {crumbs ? (
-              <nav className="flex items-center gap-1.5 text-sm min-w-0">
+              <nav className="flex items-center gap-1.5 min-w-0">
                 {crumbs.map((crumb, i) => (
                   <span key={crumb.href} className="flex items-center gap-1.5 min-w-0">
-                    {i > 0 && <span className="text-slate-300 flex-shrink-0"><ChevronRight /></span>}
+                    {i > 0 && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.5" strokeLinecap="round">
+                        <polyline points="9 18 15 12 9 6"/>
+                      </svg>
+                    )}
                     {crumb.current ? (
-                      <span className="font-semibold text-slate-800 truncate text-[13px]">{crumb.label}</span>
+                      <span className="font-semibold truncate text-[13px]" style={{ color: '#0F172A' }}>{crumb.label}</span>
                     ) : (
-                      <Link href={crumb.href}
-                        className="text-slate-400 hover:text-slate-600 transition-colors truncate text-[13px]">
+                      <Link href={crumb.href} className="truncate text-[13px] transition-colors"
+                        style={{ color: '#94A3B8' }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#64748B'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#94A3B8'}>
                         {crumb.label}
                       </Link>
                     )}
@@ -175,82 +146,74 @@ export default function TopBar({ collapsed, onToggle, onMobileToggle, user }) {
               </nav>
             ) : (
               <div className="flex items-baseline gap-2">
-                <h1 className="text-[14px] font-bold text-slate-800 leading-none">{pageTitle}</h1>
+                <h1 className="text-[14px] font-bold leading-none" style={{ color: '#0F172A' }}>{pageTitle}</h1>
                 {pageSubtitle && (
-                  <p className="hidden md:block text-[12px] text-slate-400 leading-none truncate">{pageSubtitle}</p>
+                  <p className="hidden md:block text-[12px] leading-none truncate" style={{ color: '#94A3B8' }}>{pageSubtitle}</p>
                 )}
               </div>
             )}
           </div>
         </div>
 
-        {/* Right — search + actions + user */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Search button — desktop */}
+        {/* Right */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Search — desktop */}
           <button onClick={() => setPaletteOpen(true)}
-            className="hidden sm:flex items-center gap-2 text-xs px-3 py-2 rounded-xl transition-all"
-            style={{
-              background: '#F8FAFF',
-              border: '1px solid #E2E8F4',
-              color: '#94A3B8',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'rgba(99,102,241,0.35)';
-              e.currentTarget.style.color = '#6366F1';
-              e.currentTarget.style.background = '#F5F7FF';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = '#E2E8F4';
-              e.currentTarget.style.color = '#94A3B8';
-              e.currentTarget.style.background = '#F8FAFF';
-            }}>
-            <SearchIcon />
+            className="hidden sm:flex items-center gap-2 text-xs px-3 h-8 rounded-lg transition-all"
+            style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', color: '#94A3B8' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#3B82F6'; e.currentTarget.style.color = '#2563EB'; e.currentTarget.style.background = '#EFF6FF'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#E2E8F0'; e.currentTarget.style.color = '#94A3B8'; e.currentTarget.style.background = '#F8FAFC'; }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
             <span className="hidden md:inline font-medium">Search…</span>
-            <kbd className="hidden lg:inline ml-1 text-[10px] rounded-md px-1.5 py-0.5 font-mono"
-              style={{ background: '#EEF2FF', color: '#6366F1', border: '1px solid #C7D2FE' }}>
-              ⌘K
-            </kbd>
+            <kbd className="hidden lg:inline ml-1 text-[10px] rounded px-1 py-0.5 font-mono"
+              style={{ background: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE' }}>⌘K</kbd>
           </button>
 
-          {/* Mobile search */}
+          {/* Search — mobile */}
           <button onClick={() => setPaletteOpen(true)}
-            className="sm:hidden w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
+            className="sm:hidden w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
             style={{ color: '#94A3B8' }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#F5F7FF'; e.currentTarget.style.color = '#6366F1'; }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#EFF6FF'; e.currentTarget.style.color = '#2563EB'; }}
             onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#94A3B8'; }}>
-            <SearchIcon />
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
           </button>
 
           {/* Notifications */}
           <Link href="/notifications"
-            className="relative w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
-            style={{ color: '#94A3B8' }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#F5F7FF'; e.currentTarget.style.color = '#6366F1'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#94A3B8'; }}>
-            <BellIcon />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2 border-white"
+            className="relative w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+            style={{ color: '#64748B' }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#F1F5F9'; e.currentTarget.style.color = '#0F172A'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = ''; e.currentTarget.style.color = '#64748B'; }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span className="absolute top-1 right-1 w-2 h-2 rounded-full border-2 border-white"
               style={{ background: '#EF4444' }} />
           </Link>
 
-          {/* Live indicator */}
-          <span className="hidden md:flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-full select-none"
-            style={{ background: 'rgba(16,185,129,0.08)', color: '#059669', border: '1px solid rgba(16,185,129,0.20)' }}>
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#10B981' }} />
+          {/* Live badge */}
+          <span className="hidden md:flex items-center gap-1.5 text-[11px] font-semibold px-2.5 h-6 rounded-full select-none"
+            style={{ background: 'rgba(22,163,74,0.08)', color: '#16A34A', border: '1px solid rgba(22,163,74,0.20)' }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#22C55E' }} />
             Live
           </span>
 
-          {/* Vertical divider */}
-          <div className="hidden sm:block h-6 w-px bg-slate-200" />
+          <div className="hidden sm:block h-5 w-px" style={{ background: '#E2E8F0' }} />
 
           {/* User chip */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-[11px] font-bold select-none flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366F1, #8B5CF6)', boxShadow: '0 2px 8px rgba(99,102,241,0.30)' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold select-none"
+              style={{ background: '#2563EB' }}>
               {initials}
             </div>
             <div className="hidden md:block">
-              <p className="text-[12px] font-semibold text-slate-800 leading-none">{user?.name || '…'}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5 capitalize leading-none">{user?.role || ''}</p>
+              <p className="text-[12px] font-semibold leading-none" style={{ color: '#0F172A' }}>{user?.name || '…'}</p>
+              <p className="text-[11px] mt-0.5 capitalize leading-none" style={{ color: '#94A3B8' }}>{user?.role || ''}</p>
             </div>
           </div>
         </div>

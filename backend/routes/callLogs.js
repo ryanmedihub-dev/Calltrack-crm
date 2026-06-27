@@ -535,20 +535,43 @@ router.get('/export', protect, isManager, async (req, res) => {
   }
 });
 
-// PATCH /api/calls/:id/notes — add notes, tags, status to a call log
+// GET /api/calls/pending-followups — all calls with a future followUpDate for this employee
+router.get('/pending-followups', protect, async (req, res) => {
+  try {
+    const calls = await CallLog.find({
+      employeeId:   req.user._id,
+      followUpDate: { $gt: new Date() },
+    }).sort({ followUpDate: 1 }).limit(200).lean();
+    return res.json({ success: true, data: calls });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/calls/:id/notes — add notes, tags, status, followUpDate to a call log
 router.patch('/:id/notes', protect, async (req, res) => {
   try {
-    const { notes, callTags, callStatus } = req.body;
+    const { notes, callTags, callStatus, followUpDate } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
     if (req.user.role !== 'manager' && !isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
-    if (notes     !== undefined) call.notes      = notes;
-    if (callTags  !== undefined) call.callTags   = callTags;
-    if (callStatus !== undefined) call.callStatus = callStatus;
+    if (notes        !== undefined) call.notes       = notes;
+    if (callTags     !== undefined) call.callTags    = callTags;
+    if (callStatus   !== undefined) call.callStatus  = callStatus;
+    if (followUpDate !== undefined) call.followUpDate = followUpDate ? new Date(followUpDate) : null;
     await call.save();
+
+    // Propagate followUpDate to linked lead so it shows on the leads screen
+    if (followUpDate !== undefined && call.leadId) {
+      await Lead.findByIdAndUpdate(
+        call.leadId,
+        { $set: { followUpDate: followUpDate ? new Date(followUpDate) : null } }
+      ).catch(() => {});
+    }
+
     return res.json({ success: true, data: call });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

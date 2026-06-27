@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, StatusBar, Platform,
+  PermissionsAndroid,
 } from 'react-native';
 import { getAvailableSims, setTrackedSim } from '../services/simService';
 import { Colors } from '../theme/colors';
@@ -15,17 +16,24 @@ export default function SimSetupScreen({ onDone }) {
   const [saving,   setSaving]   = useState(false);
 
   useEffect(() => {
-    getAvailableSims().then((list) => {
+    const loadSims = async () => {
+      if (Platform.OS === 'android') {
+        try {
+          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE);
+        } catch {}
+      }
+      const list = await getAvailableSims();
       setSims(list || []);
-      // If exactly one SIM found, pre-select it
       if (list?.length === 1) setSelected(list[0].subscriptionId);
       setLoading(false);
-    });
+    };
+    loadSims();
   }, []);
 
   const handleContinue = async () => {
     setSaving(true);
-    await setTrackedSim(selected);
+    const selectedSim = options.find((o) => o.subscriptionId === selected);
+    await setTrackedSim(selected, selectedSim?.slotIndex ?? -1);
     setSaving(false);
     onDone();
   };
