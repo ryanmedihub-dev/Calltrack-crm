@@ -8,12 +8,11 @@ import api from '../lib/api';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import MiniCalendar from '../components/MiniCalendar';
-import BulkUploadModal from '../components/BulkUploadModal';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS = {
-  new:           { fg: '#6366F1', bg: '#EEF2FF', label: 'New',           icon: '🆕' },
+  new:           { fg: '#1A6BFF', bg: '#EBF2FF', label: 'New',           icon: '🆕' },
   contacted:     { fg: '#7C3AED', bg: '#EDE9FE', label: 'Contacted',     icon: '📞' },
   not_connected: { fg: '#64748B', bg: '#F1F5F9', label: 'Not Connected',  icon: '📵' },
   interested:    { fg: '#D97706', bg: '#FEF3C7', label: 'Interested',    icon: '👍' },
@@ -33,25 +32,27 @@ const DATE_PRESETS = [
 ];
 
 const ATTEMPT_OPTIONS = [
-  { key: 'all', label: 'All'        },
-  { key: '0',   label: '0 Calls'    },
-  { key: '1-2', label: '1–2'        },
-  { key: '3-5', label: '3–5'        },
-  { key: '6+',  label: '6+'         },
+  { key: 'all', label: 'All'     },
+  { key: '0',   label: '0 Calls' },
+  { key: '1-2', label: '1–2'     },
+  { key: '3-5', label: '3–5'     },
+  { key: '6+',  label: '6+'      },
 ];
 
 const SORTS = [
-  { key: 'newest',   label: 'Newest first'    },
-  { key: 'oldest',   label: 'Oldest first'    },
-  { key: 'name_az',  label: 'Name A → Z'      },
+  { key: 'newest',   label: 'Newest first'      },
+  { key: 'oldest',   label: 'Oldest first'      },
+  { key: 'name_az',  label: 'Name A → Z'        },
   { key: 'attempts', label: 'Most call attempts' },
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function getDateBoundary(key) {
   const now = new Date();
-  if (key === 'today') { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
-  if (key === 'week')  { const d = new Date(now); d.setDate(d.getDate() - 7); d.setHours(0,0,0,0); return d; }
-  if (key === 'month') { const d = new Date(now); d.setDate(1); d.setHours(0, 0, 0, 0); return d; }
+  if (key === 'today') { const d = new Date(now); d.setHours(0,0,0,0); return d; }
+  if (key === 'week')  { const d = new Date(now); d.setDate(d.getDate()-7); d.setHours(0,0,0,0); return d; }
+  if (key === 'month') { const d = new Date(now); d.setDate(1); d.setHours(0,0,0,0); return d; }
   return null;
 }
 
@@ -62,87 +63,87 @@ function timeAgo(dateStr) {
   if (days === 0) return 'Today';
   if (days === 1) return '1d ago';
   if (days < 30)  return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days/30)}mo ago`;
 }
 
 const fmtDate = (d) => d
   ? d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
   : 'Select';
 
+const fmtDur = (sec) => {
+  if (!sec) return null;
+  const m = Math.floor(sec/60), s = sec%60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+};
+
 // ── Lead Card ─────────────────────────────────────────────────────────────────
 
 const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) {
   const st      = STATUS[item.status] || { fg: '#64748B', bg: '#F1F5F9', label: item.status || 'Unknown', icon: '❓' };
   const lastAgo = timeAgo(item.lastCallAt);
+  const dur     = fmtDur(item.lastCallDuration);
 
   return (
-    <View style={c.card}>
-      <View style={[c.accent, { backgroundColor: st.fg }]} />
-      <View style={c.body}>
-        <View style={c.topRow}>
-          <View style={[c.avatar, { backgroundColor: st.bg }]}>
-            <Text style={[c.avatarLetter, { color: st.fg }]}>
+    <View style={lc.wrap}>
+      <View style={[lc.bar, { backgroundColor: st.fg }]} />
+      <View style={lc.body}>
+        <View style={lc.topRow}>
+          <View style={[lc.avatar, { backgroundColor: st.bg }]}>
+            <Text style={[lc.avatarLetter, { color: st.fg }]}>
               {item.name?.charAt(0)?.toUpperCase() || '?'}
             </Text>
           </View>
-          <View style={c.nameBlock}>
-            <Text style={c.name} numberOfLines={1}>{item.name || 'Unknown'}</Text>
-            <Text style={c.phone}>{item.phone}</Text>
+          <View style={lc.nameBlock}>
+            <Text style={lc.name} numberOfLines={1}>{item.name || 'Unknown'}</Text>
+            <Text style={lc.phone}>{item.phone}</Text>
           </View>
-          <View style={[c.badge, { backgroundColor: st.bg }]}>
-            <Text style={c.badgeIcon}>{st.icon}</Text>
-            <Text style={[c.badgeLabel, { color: st.fg }]} numberOfLines={1}>{st.label}</Text>
+          <View style={[lc.badge, { backgroundColor: st.bg, borderColor: st.fg + '40' }]}>
+            <Text style={lc.badgeIcon}>{st.icon}</Text>
+            <Text style={[lc.badgeLabel, { color: st.fg }]} numberOfLines={1}>{st.label}</Text>
           </View>
         </View>
 
-        {(lastAgo || item.lastCallDuration > 0) ? (
-          <View style={c.callRow}>
-            <Text style={c.callText} numberOfLines={1}>
-              📞 {item.lastCallType ? `${item.lastCallType} · ` : ''}{lastAgo}
-              {item.lastCallDuration > 0 ? ` · ${Math.floor(item.lastCallDuration / 60)}m ${item.lastCallDuration % 60}s` : ''}
+        {(lastAgo || item.attempts > 0) ? (
+          <View style={lc.callRow}>
+            <Text style={lc.callInfo} numberOfLines={1}>
+              {item.lastCallType ? `${item.lastCallType}` : '📞'}
+              {lastAgo ? ` · ${lastAgo}` : ''}
+              {dur ? ` · ${dur}` : ''}
             </Text>
-            <View style={c.callRowRight}>
-              {(item.attempts > 0) && (
-                <View style={c.attemptsTag}>
-                  <Text style={c.attemptsTagText}>{item.attempts}×</Text>
-                </View>
-              )}
-            </View>
+            {item.attempts > 0 && (
+              <View style={lc.attBadge}>
+                <Text style={lc.attTxt}>{item.attempts}×</Text>
+              </View>
+            )}
           </View>
         ) : (
-          <View style={c.callRow}>
-            <Text style={c.noCallText}>📵 Never called</Text>
-          </View>
+          <Text style={lc.noCall}>📵 Never called</Text>
         )}
 
-        {item.lastCallNote ? (
-          <Text style={c.notePreview} numberOfLines={1}>📝 {item.lastCallNote}</Text>
-        ) : null}
-
-        {item.followUpDate ? (
-          <View style={c.fuRow}>
-            <Text style={c.fuText}>
+        {!!item.lastCallNote && (
+          <Text style={lc.note} numberOfLines={1}>📝 {item.lastCallNote}</Text>
+        )}
+        {!!item.followUpDate && (
+          <View style={lc.fuWrap}>
+            <Text style={lc.fuTxt}>
               📅 {new Date(item.followUpDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
             </Text>
           </View>
-        ) : null}
+        )}
 
-        <View style={c.actions}>
-          <TouchableOpacity
-            style={[c.btn, c.btnCall]}
-            onPress={() => Linking.openURL(`tel:${item.phone}`).catch(() => {})}
-            activeOpacity={0.75}
-          >
-            <Text style={c.btnCallText}>📞 Call</Text>
+        <View style={lc.actions}>
+          <TouchableOpacity style={[lc.btn, lc.btnCall]}
+            onPress={() => Linking.openURL(`tel:${item.phone}`).catch(()=>{})} activeOpacity={0.8}>
+            <Text style={lc.btnCallTxt}>📞 Call</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onWhatsApp(item)} activeOpacity={0.75}>
-            <Text style={c.btnGhostText}>💬 WA</Text>
+          <TouchableOpacity style={[lc.btn, lc.btnGhost]} onPress={() => onWhatsApp(item)} activeOpacity={0.8}>
+            <Text style={lc.btnGhostTxt}>💬 WA</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onNote(item)} activeOpacity={0.75}>
-            <Text style={c.btnGhostText}>📝 Note</Text>
+          <TouchableOpacity style={[lc.btn, lc.btnGhost]} onPress={() => onNote(item)} activeOpacity={0.8}>
+            <Text style={lc.btnGhostTxt}>📝 Note</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[c.btn, c.btnGhost]} onPress={() => onStatus(item)} activeOpacity={0.75}>
-            <Text style={c.btnGhostText}>✏️ Status</Text>
+          <TouchableOpacity style={[lc.btn, lc.btnGhost]} onPress={() => onStatus(item)} activeOpacity={0.8}>
+            <Text style={lc.btnGhostTxt}>✏️ Status</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -155,26 +156,23 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
 function StatusSheet({ lead, onClose, onSelect, updating }) {
   return (
     <Modal visible={!!lead} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={m.overlay}>
+      <View style={sh.overlay}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
-        <View style={m.sheet}>
-          <View style={m.handle} />
-          <Text style={m.title}>Update Status</Text>
-          {lead && <Text style={m.sub}>{lead.name} · {lead.phone}</Text>}
-          <View style={m.statusGrid}>
+        <View style={sh.sheet}>
+          <View style={sh.handle} />
+          <Text style={sh.title}>Update Status</Text>
+          {lead && <Text style={sh.sub}>{lead.name} · {lead.phone}</Text>}
+          <View style={sh.grid}>
             {Object.entries(STATUS).map(([key, cfg]) => {
               const isActive = lead?.status === key;
               return (
-                <TouchableOpacity
-                  key={key}
-                  style={[m.statusOpt, { backgroundColor: cfg.bg }, isActive && { borderColor: cfg.fg, borderWidth: 2 }]}
-                  onPress={() => !updating && onSelect(key)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={m.statusOptIcon}>{cfg.icon}</Text>
-                  <Text style={[m.statusOptLabel, { color: cfg.fg }]}>{cfg.label}</Text>
+                <TouchableOpacity key={key} activeOpacity={0.75}
+                  style={[sh.opt, { backgroundColor: cfg.bg }, isActive && { borderColor: cfg.fg, borderWidth: 2 }]}
+                  onPress={() => !updating && onSelect(key)}>
+                  <Text style={sh.optIcon}>{cfg.icon}</Text>
+                  <Text style={[sh.optLabel, { color: cfg.fg }]}>{cfg.label}</Text>
                   {isActive && (
-                    <View style={[m.checkBadge, { backgroundColor: cfg.fg }]}>
+                    <View style={[sh.check, { backgroundColor: cfg.fg }]}>
                       <Text style={{ color: '#fff', fontSize: 8, fontWeight: '900' }}>✓</Text>
                     </View>
                   )}
@@ -193,7 +191,7 @@ function StatusSheet({ lead, onClose, onSelect, updating }) {
 // ── Note Sheet ────────────────────────────────────────────────────────────────
 
 function NoteSheet({ lead, onClose, onSave }) {
-  const [text, setText] = useState('');
+  const [text, setText]     = useState('');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -206,34 +204,23 @@ function NoteSheet({ lead, onClose, onSave }) {
 
   return (
     <Modal visible={!!lead} transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={m.overlay}>
+      <View style={sh.overlay}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
-        <View style={m.sheet}>
-          <View style={m.handle} />
-          <Text style={m.title}>Add Note</Text>
-          {lead && <Text style={m.sub}>{lead.name} · {lead.phone}</Text>}
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            multiline
-            placeholder="Write your note here…"
-            placeholderTextColor={Colors.textMuted}
-            style={m.noteInput}
-            autoFocus
-            maxLength={500}
-            textAlignVertical="top"
-          />
-          <Text style={m.charCount}>{text.length}/500</Text>
-          <View style={m.btnRow}>
-            <TouchableOpacity style={m.cancelBtn} onPress={onClose} disabled={saving}>
-              <Text style={m.cancelText}>Cancel</Text>
+        <View style={sh.sheet}>
+          <View style={sh.handle} />
+          <Text style={sh.title}>Add Note</Text>
+          {lead && <Text style={sh.sub}>{lead.name} · {lead.phone}</Text>}
+          <TextInput value={text} onChangeText={setText} multiline
+            placeholder="Write your note…" placeholderTextColor={Colors.textMuted}
+            style={sh.input} autoFocus maxLength={500} textAlignVertical="top" />
+          <Text style={sh.charCnt}>{text.length}/500</Text>
+          <View style={sh.btnRow}>
+            <TouchableOpacity style={sh.cancelBtn} onPress={onClose} disabled={saving}>
+              <Text style={sh.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[m.saveBtn, (!text.trim() || saving) && { opacity: 0.5 }]}
-              onPress={handleSave}
-              disabled={!text.trim() || saving}
-            >
-              <Text style={m.saveText}>{saving ? 'Saving…' : 'Save Note'}</Text>
+            <TouchableOpacity style={[sh.saveBtn, (!text.trim()||saving) && { opacity:0.5 }]}
+              onPress={handleSave} disabled={!text.trim()||saving}>
+              <Text style={sh.saveTxt}>{saving ? 'Saving…' : 'Save Note'}</Text>
             </TouchableOpacity>
           </View>
           <View style={{ height: Platform.OS === 'ios' ? 20 : 8 }} />
@@ -243,47 +230,7 @@ function NoteSheet({ lead, onClose, onSave }) {
   );
 }
 
-// ── Sort Sheet ────────────────────────────────────────────────────────────────
-
-function SortSheet({ visible, value, onSelect, onClose }) {
-  const translateY = useRef(new Animated.Value(300)).current;
-  useEffect(() => {
-    Animated.spring(translateY, { toValue: visible ? 0 : 300, useNativeDriver: true, damping: 20, mass: 0.7 }).start();
-  }, [visible]);
-  if (!visible) return null;
-  return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <TouchableOpacity style={so.overlay} activeOpacity={1} onPress={onClose} />
-      <Animated.View style={[so.sheet, { transform: [{ translateY }] }]}>
-        <View style={so.handle} />
-        <Text style={so.title}>Sort Leads</Text>
-        {SORTS.map((s) => (
-          <TouchableOpacity
-            key={s.key}
-            style={so.row}
-            onPress={() => { onSelect(s.key); onClose(); }}
-          >
-            <Text style={[so.label, value === s.key && so.labelActive]}>{s.label}</Text>
-            {value === s.key && <Text style={so.check}>✓</Text>}
-          </TouchableOpacity>
-        ))}
-        <View style={{ height: 24 }} />
-      </Animated.View>
-    </Modal>
-  );
-}
-const so = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
-  sheet:   { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
-  handle:  { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 18 },
-  title:   { fontSize: 16, fontWeight: '700', color: Colors.text, marginBottom: 12 },
-  row:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  label:   { fontSize: 15, fontWeight: '500', color: Colors.textSec },
-  labelActive: { color: Colors.primary, fontWeight: '700' },
-  check:   { fontSize: 16, color: Colors.primary, fontWeight: '700' },
-});
-
-// ── Custom Date Sheet ────────────────────────────────────────────────────────
+// ── Custom Date Sheet ─────────────────────────────────────────────────────────
 
 function CustomDateSheet({ visible, from, to, onApply, onClose }) {
   const [seg, setSeg]     = useState('from');
@@ -304,63 +251,136 @@ function CustomDateSheet({ visible, from, to, onApply, onClose }) {
         <View style={cds.handle} />
         <Text style={cds.title}>Custom Date Range</Text>
         <View style={cds.segRow}>
-          {['from', 'to'].map((s) => {
-            const val = s === 'from' ? pFrom : pTo;
+          {['from', 'to'].map(sg => {
+            const val = sg === 'from' ? pFrom : pTo;
             return (
-              <TouchableOpacity key={s} style={[cds.seg, seg === s && cds.segActive]} onPress={() => setSeg(s)}>
-                <Text style={cds.segLabel}>{s.toUpperCase()}</Text>
-                <Text style={[cds.segValue, val && { color: Colors.primary }]}>{fmtDate(val)}</Text>
+              <TouchableOpacity key={sg} style={[cds.seg, seg === sg && cds.segActive]} onPress={() => setSeg(sg)}>
+                <Text style={cds.segLbl}>{sg.toUpperCase()}</Text>
+                <Text style={[cds.segVal, val && { color: Colors.primary }]}>{fmtDate(val)}</Text>
               </TouchableOpacity>
             );
           })}
         </View>
-        {(pFrom && pTo) && (
+        {pFrom && pTo && (
           <View style={cds.rangeSummary}>
-            <Text style={cds.rangeSummaryText}>📅 {fmtDate(pFrom)} → {fmtDate(pTo)}</Text>
+            <Text style={cds.rangeText}>📅 {fmtDate(pFrom)} → {fmtDate(pTo)}</Text>
           </View>
         )}
         <View style={cds.calWrap}>
           <MiniCalendar
             value={seg === 'from' ? pFrom : pTo}
-            onChange={(d) => {
+            onChange={d => {
               if (seg === 'from') { setPFrom(d); if (pTo && d > pTo) setPTo(null); setSeg('to'); }
               else { if (pFrom && d < pFrom) { setPFrom(d); setPTo(pFrom); } else setPTo(d); }
             }}
           />
         </View>
-        <TouchableOpacity
-          style={[cds.applyBtn, !pFrom && { opacity: 0.5 }]}
-          onPress={() => { onApply(pFrom, pTo); onClose(); }}
-          disabled={!pFrom}
-        >
-          <Text style={cds.applyText}>Apply Range</Text>
+        <TouchableOpacity style={[cds.applyBtn, !pFrom && { opacity:0.5 }]}
+          onPress={() => { onApply(pFrom, pTo); onClose(); }} disabled={!pFrom}>
+          <Text style={cds.applyTxt}>Apply Range</Text>
         </TouchableOpacity>
         <TouchableOpacity style={cds.clearBtn} onPress={() => { onApply(null, null); onClose(); }}>
-          <Text style={cds.clearText}>Clear Date Filter</Text>
+          <Text style={cds.clearTxt}>Clear Date Filter</Text>
         </TouchableOpacity>
         <View style={{ height: 24 }} />
       </Animated.View>
     </Modal>
   );
 }
-const cds = StyleSheet.create({
-  overlay:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
-  sheet:       { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
-  handle:      { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16 },
-  title:       { fontSize: 17, fontWeight: '700', color: Colors.text, marginBottom: 16 },
-  segRow:      { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  seg:         { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 12, backgroundColor: Colors.bg },
-  segActive:   { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
-  segLabel:    { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
-  segValue:    { fontSize: 15, fontWeight: '700', color: Colors.text },
-  rangeSummary:{ backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 12, alignSelf: 'center', borderWidth: 1, borderColor: Colors.primary },
-  rangeSummaryText: { fontSize: 13, fontWeight: '700', color: Colors.primary },
-  calWrap:     { borderRadius: 14, backgroundColor: Colors.bg, padding: 10, borderWidth: 1, borderColor: Colors.border, marginBottom: 14 },
-  applyBtn:    { backgroundColor: Colors.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginBottom: 10 },
-  applyText:   { fontSize: 15, fontWeight: '700', color: '#fff' },
-  clearBtn:    { paddingVertical: 10, alignItems: 'center' },
-  clearText:   { fontSize: 13, fontWeight: '600', color: Colors.textSec },
-});
+
+// ── Filter Sheet (date + attempts + sort) ─────────────────────────────────────
+
+function FilterSheet({ visible, datePreset, attemptsFilter, sort, customFrom, customTo,
+  onDateChange, onAttemptsChange, onSortChange, onCustomDate, onClearAll, onClose }) {
+  const translateY = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => {
+    Animated.spring(translateY, { toValue: visible ? 0 : 600, useNativeDriver: true, damping: 20, mass: 0.8 }).start();
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const hasCustom = datePreset === 'custom' && (customFrom || customTo);
+  const activeCount = (datePreset !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);
+
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <TouchableOpacity style={fs.overlay} activeOpacity={1} onPress={onClose} />
+      <Animated.View style={[fs.sheet, { transform: [{ translateY }] }]}>
+        <View style={fs.handle} />
+
+        {/* Header */}
+        <View style={fs.hdr}>
+          <Text style={fs.title}>Filters</Text>
+          {activeCount > 0 && (
+            <TouchableOpacity style={fs.clearAllBtn} onPress={onClearAll}>
+              <Text style={fs.clearAllTxt}>Clear all ✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+          {/* Date Range */}
+          <Text style={fs.sectionLabel}>DATE RANGE</Text>
+          <View style={fs.chipGroup}>
+            {DATE_PRESETS.map(dp => {
+              const active   = datePreset === dp.key;
+              const isCustom = dp.key === 'custom';
+              return (
+                <TouchableOpacity key={dp.key} activeOpacity={0.8}
+                  style={[fs.chip, active && (isCustom ? fs.chipCustom : fs.chipActive)]}
+                  onPress={() => { onDateChange(dp.key); if (isCustom) onCustomDate(); }}>
+                  <Text style={[fs.chipTxt, active && (isCustom ? fs.chipTxtCustom : fs.chipTxtActive)]}>
+                    {dp.label}
+                    {isCustom && hasCustom ? `: ${fmtDate(customFrom)}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Attempts */}
+          <Text style={fs.sectionLabel}>CALL ATTEMPTS</Text>
+          <View style={fs.chipGroup}>
+            {ATTEMPT_OPTIONS.map(opt => {
+              const active = attemptsFilter === opt.key;
+              return (
+                <TouchableOpacity key={opt.key} activeOpacity={0.8}
+                  style={[fs.chip, active && fs.chipActive]}
+                  onPress={() => onAttemptsChange(opt.key)}>
+                  <Text style={[fs.chipTxt, active && fs.chipTxtActive]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Sort */}
+          <Text style={fs.sectionLabel}>SORT BY</Text>
+          <View style={fs.sortGroup}>
+            {SORTS.map(s => {
+              const active = sort === s.key;
+              return (
+                <TouchableOpacity key={s.key} activeOpacity={0.8}
+                  style={[fs.sortRow, active && fs.sortRowActive]}
+                  onPress={() => onSortChange(s.key)}>
+                  <Text style={[fs.sortLabel, active && fs.sortLabelActive]}>{s.label}</Text>
+                  {active && <Text style={fs.sortCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={{ height: 8 }} />
+        </ScrollView>
+
+        <TouchableOpacity style={fs.doneBtn} onPress={onClose}>
+          <Text style={fs.doneTxt}>Done</Text>
+        </TouchableOpacity>
+        <View style={{ height: Platform.OS === 'ios' ? 24 : 12 }} />
+      </Animated.View>
+    </Modal>
+  );
+}
 
 // ── Main Screen ───────────────────────────────────────────────────────────────
 
@@ -379,9 +399,8 @@ export default function LeadsScreen() {
   const [noteTarget,     setNoteTarget]     = useState(null);
   const [statusTarget,   setStatusTarget]   = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [showSort,       setShowSort]       = useState(false);
+  const [showFilter,     setShowFilter]     = useState(false);
   const [showCustomDate, setShowCustomDate] = useState(false);
-  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const searchRef = useRef(null);
 
   const fetchLeads = async () => {
@@ -402,12 +421,11 @@ export default function LeadsScreen() {
     setRefreshing(false);
   };
 
-  // Filtered + sorted list
   const displayLeads = useMemo(() => {
-    let result = leads.filter((l) => {
+    let result = leads.filter(l => {
       if (search.trim()) {
         const q = search.toLowerCase();
-        if (!(l.name || '').toLowerCase().includes(q) && !(l.phone || '').includes(search.trim())) return false;
+        if (!(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
       }
       if (statusFilter !== 'all' && l.status !== statusFilter) return false;
       if (datePreset === 'custom') {
@@ -427,24 +445,22 @@ export default function LeadsScreen() {
       }
       return true;
     });
-
     result.sort((a, b) => {
       if (sort === 'oldest')   return new Date(a.createdAt) - new Date(b.createdAt);
-      if (sort === 'name_az')  return (a.name || '').localeCompare(b.name || '');
-      if (sort === 'attempts') return (b.attempts || 0) - (a.attempts || 0);
+      if (sort === 'name_az')  return (a.name||'').localeCompare(b.name||'');
+      if (sort === 'attempts') return (b.attempts||0) - (a.attempts||0);
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
     return result;
   }, [leads, search, statusFilter, datePreset, customFrom, customTo, attemptsFilter, sort]);
 
-  // Status counts: from base that excludes statusFilter (so badges show count if you click that status)
   const statusCounts = useMemo(() => {
     const acc = { all: 0 };
     for (const key of Object.keys(STATUS)) acc[key] = 0;
-    const base = leads.filter((l) => {
+    const base = leads.filter(l => {
       if (search.trim()) {
         const q = search.toLowerCase();
-        if (!(l.name || '').toLowerCase().includes(q) && !(l.phone || '').includes(search.trim())) return false;
+        if (!(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
       }
       if (datePreset === 'custom') {
         const created = new Date(l.createdAt);
@@ -473,7 +489,7 @@ export default function LeadsScreen() {
     setUpdatingStatus(true);
     try {
       await api.put(`/api/leads/${statusTarget._id}`, { status: newStatus });
-      setLeads((prev) => prev.map((l) => l._id === statusTarget._id ? { ...l, status: newStatus } : l));
+      setLeads(prev => prev.map(l => l._id === statusTarget._id ? { ...l, status: newStatus } : l));
       setStatusTarget(null);
     } catch { Alert.alert('Error', 'Failed to update status'); }
     finally { setUpdatingStatus(false); }
@@ -489,29 +505,28 @@ export default function LeadsScreen() {
   };
 
   const handleWhatsApp = useCallback((item) => {
-    const digits = (item.phone || '').replace(/\D/g, '');
+    const digits = (item.phone||'').replace(/\D/g,'');
     const phone  = digits.length === 10 ? `91${digits}` : digits;
     Linking.openURL(`whatsapp://send?phone=${phone}`).catch(() =>
-      Linking.openURL(`https://wa.me/${phone}`).catch(() => {})
+      Linking.openURL(`https://wa.me/${phone}`).catch(()=>{})
     );
   }, []);
-
-  const onNotePress   = useCallback((item) => setNoteTarget(item),   []);
-  const onStatusPress = useCallback((item) => setStatusTarget(item), []);
-
-  const renderItem = useCallback(({ item }) => (
-    <LeadCard item={item} onNote={onNotePress} onStatus={onStatusPress} onWhatsApp={handleWhatsApp} />
-  ), [onNotePress, onStatusPress, handleWhatsApp]);
-
-  const hasActiveFilters = datePreset !== 'all' || attemptsFilter !== 'all' || search.trim() || statusFilter !== 'all' || sort !== 'newest';
-  const activeCount      = (datePreset !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);
 
   const clearAll = () => {
     setStatusFilter('all'); setDatePreset('all'); setCustomFrom(null);
     setCustomTo(null); setAttemptsFilter('all'); setSearch(''); setSort('newest');
   };
 
-  const hasCustom = datePreset === 'custom' && (customFrom || customTo);
+  const filterActiveCount = (datePreset !== 'all' ? 1 : 0) + (attemptsFilter !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);
+  const hasActiveFilters  = filterActiveCount > 0 || search.trim() || statusFilter !== 'all';
+
+  const renderItem = useCallback(({ item }) => (
+    <LeadCard item={item}
+      onNote={item => setNoteTarget(item)}
+      onStatus={item => setStatusTarget(item)}
+      onWhatsApp={handleWhatsApp}
+    />
+  ), [handleWhatsApp]);
 
   return (
     <View style={s.root}>
@@ -520,114 +535,58 @@ export default function LeadsScreen() {
       {/* ── Header ── */}
       {showSearch ? (
         <View style={s.searchBar}>
-          <Text style={s.searchBarIcon}>🔍</Text>
-          <TextInput
-            ref={searchRef}
-            style={s.searchBarInput}
-            placeholder="Search name or phone…"
-            placeholderTextColor={Colors.textMuted}
-            value={search}
-            onChangeText={setSearch}
-            autoFocus
-          />
+          <Text style={s.searchIco}>🔍</Text>
+          <TextInput ref={searchRef} style={s.searchInput}
+            placeholder="Search name or phone…" placeholderTextColor={Colors.textMuted}
+            value={search} onChangeText={setSearch} autoFocus />
           <TouchableOpacity onPress={() => { setSearch(''); setShowSearch(false); }}>
             <Text style={s.searchClear}>✕</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={s.header}>
+        <View style={s.hdr}>
           <View>
             <Text style={s.preLabel}>PIPELINE</Text>
             <Text style={s.heading}>My Leads</Text>
           </View>
-          <View style={s.headerRight}>
+          <View style={s.hdrRight}>
             <View style={s.totalPill}>
-              <Text style={s.totalText}>{leads.length}</Text>
+              <Text style={s.totalTxt}>{leads.length}</Text>
             </View>
-            <TouchableOpacity style={s.iconBtn} onPress={() => setShowSearch(true)}>
-              <Text style={s.iconText}>🔍</Text>
+            <TouchableOpacity style={s.iconBtn} onPress={() => setShowSearch(true)} activeOpacity={0.8}>
+              <Text style={s.iconTxt}>🔍</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.iconBtn, sort !== 'newest' && s.iconBtnActive]}
-              onPress={() => setShowSort(true)}
-            >
-              <Text style={[s.iconText, sort !== 'newest' && { color: Colors.primary }]}>⇅</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.iconBtn, s.uploadBtn]} onPress={() => setShowBulkUpload(true)}>
-              <Text style={s.uploadBtnText}>⬆ Upload</Text>
+            <TouchableOpacity style={[s.iconBtn, filterActiveCount > 0 && s.iconBtnActive]}
+              onPress={() => setShowFilter(true)} activeOpacity={0.8}>
+              <Text style={[s.iconTxt, filterActiveCount > 0 && { color: Colors.primary }]}>⊘</Text>
+              {filterActiveCount > 0 && (
+                <View style={s.badge}>
+                  <Text style={s.badgeTxt}>{filterActiveCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* ── Date preset chips ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.dateRow}
-        style={s.dateRowWrap}
-      >
-        {DATE_PRESETS.map((dp) => {
-          const active   = datePreset === dp.key;
-          const isCustom = dp.key === 'custom';
-          return (
-            <TouchableOpacity
-              key={dp.key}
-              style={[s.dateChip, active && (isCustom ? s.dateChipCustom : s.dateChipActive)]}
-              onPress={() => { setDatePreset(dp.key); if (isCustom) setShowCustomDate(true); }}
-            >
-              <Text style={[s.dateChipText, active && (isCustom ? s.dateChipTextCustom : s.dateChipTextActive)]}>
-                {dp.label}{isCustom && hasCustom ? `: ${fmtDate(customFrom)}${customTo ? `→${fmtDate(customTo)}` : ''}` : ''}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* ── Attempts chips ── */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.attRow}
-        style={s.attRowWrap}
-      >
-        <Text style={s.attLabel}>Calls:</Text>
-        {ATTEMPT_OPTIONS.map((opt) => {
-          const active = attemptsFilter === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              style={[s.attChip, active && s.attChipActive]}
-              onPress={() => setAttemptsFilter(opt.key)}
-            >
-              <Text style={[s.attChipText, active && s.attChipTextActive]}>{opt.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {/* ── Status pills ── */}
+      {/* ── Status pills (always visible) ── */}
       <View style={s.statusWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.statusRow}>
-          <TouchableOpacity
-            style={[s.pill, statusFilter === 'all' && s.pillActive]}
-            onPress={() => setStatusFilter('all')}
-          >
-            <Text style={[s.pillText, statusFilter === 'all' && s.pillTextActive]}>
+          <TouchableOpacity style={[s.pill, statusFilter === 'all' && s.pillActive]}
+            onPress={() => setStatusFilter('all')} activeOpacity={0.8}>
+            <Text style={[s.pillTxt, statusFilter === 'all' && s.pillTxtActive]}>
               All · {statusCounts.all}
             </Text>
           </TouchableOpacity>
           {Object.entries(STATUS).map(([key, st]) => {
-            const active = statusFilter === key;
             if (!statusCounts[key]) return null;
+            const active = statusFilter === key;
             return (
-              <TouchableOpacity
-                key={key}
+              <TouchableOpacity key={key} activeOpacity={0.8}
                 style={[s.pill, active && { backgroundColor: st.bg, borderColor: st.fg, borderWidth: 1.5 }]}
-                onPress={() => setStatusFilter(active ? 'all' : key)}
-              >
+                onPress={() => setStatusFilter(active ? 'all' : key)}>
                 <Text style={s.pillIcon}>{st.icon}</Text>
-                <Text style={[s.pillText, active && { color: st.fg, fontWeight: '700' }]}>
+                <Text style={[s.pillTxt, active && { color: st.fg, fontWeight: '700' }]}>
                   {st.label} · {statusCounts[key]}
                 </Text>
               </TouchableOpacity>
@@ -636,48 +595,43 @@ export default function LeadsScreen() {
         </ScrollView>
       </View>
 
-      {/* ── Results summary / clear bar ── */}
+      {/* ── Active filter summary ── */}
       {hasActiveFilters && (
         <View style={s.summaryBar}>
-          <Text style={s.summaryText}>
+          <Text style={s.summaryTxt}>
             {displayLeads.length} of {leads.length} leads
-            {activeCount > 0 ? ` · ${activeCount} filter${activeCount !== 1 ? 's' : ''}` : ''}
+            {filterActiveCount > 0 ? ` · ${filterActiveCount} filter${filterActiveCount !== 1 ? 's' : ''}` : ''}
           </Text>
           <TouchableOpacity onPress={clearAll}>
-            <Text style={s.clearAllText}>Clear all ✕</Text>
+            <Text style={s.clearTxt}>Clear ✕</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* ── List ── */}
       {loading ? (
-        <View style={s.loadingWrap}>
+        <View style={s.loadWrap}>
           <ActivityIndicator color={Colors.primary} size="large" />
-          <Text style={s.loadingText}>Loading leads…</Text>
+          <Text style={s.loadTxt}>Loading leads…</Text>
         </View>
       ) : (
         <FlatList
           data={displayLeads}
-          keyExtractor={(item) => item._id}
+          keyExtractor={item => item._id}
           renderItem={renderItem}
-          contentContainerStyle={s.listContent}
+          contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           ListEmptyComponent={
             <View style={s.emptyWrap}>
-              <Text style={s.emptyIcon}>🎯</Text>
-              <Text style={s.emptyTitle}>{leads.length === 0 ? 'No leads yet' : 'No leads match'}</Text>
-              <Text style={s.emptyHint}>
-                {leads.length === 0 ? 'Upload leads via CSV or your manager will assign them' : 'Try different filters or search terms'}
+              <Text style={s.emptyIco}>🎯</Text>
+              <Text style={s.emptyTit}>{leads.length === 0 ? 'No leads yet' : 'No leads match'}</Text>
+              <Text style={s.emptyHnt}>
+                {leads.length === 0 ? 'Your assigned leads will appear here' : 'Try adjusting your filters'}
               </Text>
               {hasActiveFilters && (
-                <TouchableOpacity style={s.clearBtn} onPress={clearAll}>
-                  <Text style={s.clearBtnText}>Clear all filters</Text>
-                </TouchableOpacity>
-              )}
-              {leads.length === 0 && (
-                <TouchableOpacity style={s.uploadEmptyBtn} onPress={() => setShowBulkUpload(true)}>
-                  <Text style={s.uploadEmptyText}>⬆ Upload Leads via CSV</Text>
+                <TouchableOpacity style={s.clearBtn} onPress={clearAll} activeOpacity={0.8}>
+                  <Text style={s.clearBtnTxt}>Clear all filters</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -686,151 +640,165 @@ export default function LeadsScreen() {
       )}
 
       {/* ── Sheets ── */}
-      <StatusSheet
-        lead={statusTarget}
-        onClose={() => setStatusTarget(null)}
-        onSelect={handleUpdateStatus}
-        updating={updatingStatus}
+      <StatusSheet lead={statusTarget} onClose={() => setStatusTarget(null)}
+        onSelect={handleUpdateStatus} updating={updatingStatus} />
+      <NoteSheet lead={noteTarget} onClose={() => setNoteTarget(null)} onSave={handleSaveNote} />
+      <FilterSheet
+        visible={showFilter}
+        datePreset={datePreset}
+        attemptsFilter={attemptsFilter}
+        sort={sort}
+        customFrom={customFrom}
+        customTo={customTo}
+        onDateChange={v => { setDatePreset(v); }}
+        onAttemptsChange={setAttemptsFilter}
+        onSortChange={setSort}
+        onCustomDate={() => setShowCustomDate(true)}
+        onClearAll={() => { setDatePreset('all'); setCustomFrom(null); setCustomTo(null); setAttemptsFilter('all'); setSort('newest'); }}
+        onClose={() => setShowFilter(false)}
       />
-      <NoteSheet
-        lead={noteTarget}
-        onClose={() => setNoteTarget(null)}
-        onSave={handleSaveNote}
-      />
-      <SortSheet
-        visible={showSort}
-        value={sort}
-        onSelect={setSort}
-        onClose={() => setShowSort(false)}
-      />
-      <CustomDateSheet
-        visible={showCustomDate}
-        from={customFrom}
-        to={customTo}
+      <CustomDateSheet visible={showCustomDate} from={customFrom} to={customTo}
         onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); }}
-        onClose={() => setShowCustomDate(false)}
-      />
-      <BulkUploadModal
-        visible={showBulkUpload}
-        onClose={() => setShowBulkUpload(false)}
-        onUploaded={() => { setShowBulkUpload(false); fetchLeads(); }}
-      />
+        onClose={() => setShowCustomDate(false)} />
     </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const c = StyleSheet.create({
-  card:        { backgroundColor: '#fff', borderRadius: 16, marginBottom: 10, flexDirection: 'row', overflow: 'hidden', ...Shadows.card },
-  accent:      { width: 4 },
+const lc = StyleSheet.create({
+  wrap:        { backgroundColor: '#fff', borderRadius: 16, marginBottom: 10, flexDirection: 'row', overflow: 'hidden', ...Shadows.card },
+  bar:         { width: 4 },
   body:        { flex: 1, paddingHorizontal: 13, paddingVertical: 12 },
   topRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  avatar:      { width: 42, height: 42, borderRadius: 13, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
-  avatarLetter:{ fontSize: 17, fontWeight: '800' },
+  avatar:      { width: 44, height: 44, borderRadius: 14, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
+  avatarLetter:{ fontSize: 18, fontWeight: '800' },
   nameBlock:   { flex: 1, marginHorizontal: 10 },
   name:        { fontSize: 14, fontWeight: '700', color: Colors.text },
-  phone:       { fontSize: 11, color: Colors.textSec, marginTop: 2 },
-  badge:       { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 7, paddingVertical: 3, gap: 3, flexShrink: 0, maxWidth: 120 },
+  phone:       { fontSize: 12, color: Colors.textSec, marginTop: 2 },
+  badge:       { flexDirection: 'row', alignItems: 'center', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 4, gap: 3, flexShrink: 0, maxWidth: 130, borderWidth: 1 },
   badgeIcon:   { fontSize: 11 },
   badgeLabel:  { fontSize: 10, fontWeight: '700', flexShrink: 1 },
   callRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-  callText:    { flex: 1, fontSize: 12, color: Colors.textSec },
-  callRowRight:{ flexDirection: 'row', alignItems: 'center', gap: 6 },
-  attemptsTag: { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
-  attemptsTagText: { fontSize: 10, fontWeight: '700', color: '#3B82F6' },
-  noCallText:  { fontSize: 12, color: Colors.textMuted },
-  notePreview: { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
-  fuRow:       { marginBottom: 4 },
-  fuText:      { fontSize: 11, fontWeight: '600', color: '#7C3AED', backgroundColor: '#EDE9FE', alignSelf: 'flex-start', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 },
+  callInfo:    { flex: 1, fontSize: 12, color: Colors.textSec },
+  attBadge:    { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  attTxt:      { fontSize: 10, fontWeight: '700', color: '#1A6BFF' },
+  noCall:      { fontSize: 12, color: Colors.textMuted, marginBottom: 4 },
+  note:        { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
+  fuWrap:      { marginBottom: 4, alignSelf: 'flex-start' },
+  fuTxt:       { fontSize: 11, fontWeight: '600', color: '#7C3AED', backgroundColor: '#EDE9FE', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 },
   actions:     { flexDirection: 'row', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.divider },
-  btn:         { flex: 1, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  btn:         { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   btnCall:     { backgroundColor: Colors.primary },
-  btnCallText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  btnCallTxt:  { color: '#fff', fontSize: 12, fontWeight: '700' },
   btnGhost:    { backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  btnGhostText:{ color: Colors.textSec, fontSize: 11, fontWeight: '600' },
+  btnGhostTxt: { color: Colors.textSec, fontSize: 12, fontWeight: '600' },
 });
 
-const m = StyleSheet.create({
-  overlay:    { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
-  sheet:      { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 12 },
-  handle:     { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
-  title:      { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: 4 },
-  sub:        { fontSize: 13, color: Colors.textSec, marginBottom: 16 },
-  statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  statusOpt:  { width: '30%', borderRadius: 14, padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1.5, borderColor: 'transparent' },
-  statusOptIcon:  { fontSize: 22, marginBottom: 5 },
-  statusOptLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  checkBadge: { position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
-  noteInput:  { backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 14, color: Colors.text, fontSize: 14, textAlignVertical: 'top', minHeight: 110 },
-  charCount:  { color: Colors.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4, marginBottom: 16 },
-  btnRow:     { flexDirection: 'row', gap: 10 },
-  cancelBtn:  { flex: 1, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  cancelText: { color: Colors.textSec, fontSize: 14, fontWeight: '600' },
-  saveBtn:    { flex: 1, backgroundColor: Colors.primary, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  saveText:   { color: '#fff', fontSize: 14, fontWeight: '700' },
+const sh = StyleSheet.create({
+  overlay:   { flex: 1, backgroundColor: Colors.overlay, justifyContent: 'flex-end' },
+  sheet:     { backgroundColor: '#fff', borderTopLeftRadius: 26, borderTopRightRadius: 26, paddingHorizontal: 20, paddingTop: 12 },
+  handle:    { width: 40, height: 4, backgroundColor: Colors.border, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  title:     { fontSize: 18, fontWeight: '700', color: Colors.text, marginBottom: 4 },
+  sub:       { fontSize: 13, color: Colors.textSec, marginBottom: 16 },
+  grid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  opt:       { width: '30%', borderRadius: 14, padding: 12, alignItems: 'center', position: 'relative', borderWidth: 1.5, borderColor: 'transparent' },
+  optIcon:   { fontSize: 22, marginBottom: 5 },
+  optLabel:  { fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  check:     { position: 'absolute', top: 6, right: 6, width: 16, height: 16, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
+  input:     { backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, padding: 14, color: Colors.text, fontSize: 14, minHeight: 110 },
+  charCnt:   { color: Colors.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4, marginBottom: 16 },
+  btnRow:    { flexDirection: 'row', gap: 10 },
+  cancelBtn: { flex: 1, borderWidth: 1.5, borderColor: Colors.border, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
+  cancelTxt: { color: Colors.textSec, fontSize: 14, fontWeight: '600' },
+  saveBtn:   { flex: 1, backgroundColor: Colors.primary, borderRadius: 12, height: 48, alignItems: 'center', justifyContent: 'center' },
+  saveTxt:   { color: '#fff', fontSize: 14, fontWeight: '700' },
+});
+
+const cds = StyleSheet.create({
+  overlay:    { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
+  sheet:      { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
+  handle:     { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16 },
+  title:      { fontSize: 17, fontWeight: '700', color: Colors.text, marginBottom: 16 },
+  segRow:     { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  seg:        { flex: 1, borderRadius: 14, borderWidth: 1.5, borderColor: Colors.border, padding: 12, backgroundColor: Colors.bg },
+  segActive:  { borderColor: Colors.primary, backgroundColor: Colors.primaryLight },
+  segLbl:     { fontSize: 9, fontWeight: '800', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 3 },
+  segVal:     { fontSize: 15, fontWeight: '700', color: Colors.text },
+  rangeSummary: { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, marginBottom: 12, alignSelf: 'center', borderWidth: 1, borderColor: Colors.primary },
+  rangeText:  { fontSize: 13, fontWeight: '700', color: Colors.primary },
+  calWrap:    { borderRadius: 14, backgroundColor: Colors.bg, padding: 10, borderWidth: 1, borderColor: Colors.border, marginBottom: 14 },
+  applyBtn:   { backgroundColor: Colors.primary, borderRadius: 14, height: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  applyTxt:   { fontSize: 15, fontWeight: '700', color: '#fff' },
+  clearBtn:   { height: 40, alignItems: 'center', justifyContent: 'center' },
+  clearTxt:   { fontSize: 13, fontWeight: '600', color: Colors.textSec },
+});
+
+const fs = StyleSheet.create({
+  overlay:     { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.5)' },
+  sheet:       { position: 'absolute', bottom: 0, left: 0, right: 0, maxHeight: '85%', backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 12 },
+  handle:      { width: 38, height: 4, borderRadius: 2, backgroundColor: Colors.border, alignSelf: 'center', marginBottom: 16 },
+  hdr:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+  title:       { fontSize: 18, fontWeight: '800', color: Colors.text },
+  clearAllBtn: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#FEE2E2', borderRadius: 20 },
+  clearAllTxt: { fontSize: 12, fontWeight: '700', color: '#DC2626' },
+  sectionLabel:{ fontSize: 10, fontWeight: '800', color: Colors.textMuted, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 10, marginTop: 4 },
+  chipGroup:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  chip:        { height: 34, justifyContent: 'center', borderRadius: 999, paddingHorizontal: 13, backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border },
+  chipActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipCustom:  { backgroundColor: '#EDE9FE', borderColor: '#7C3AED' },
+  chipTxt:     { fontSize: 12, fontWeight: '600', color: Colors.textSec },
+  chipTxtActive:  { color: '#fff', fontWeight: '700' },
+  chipTxtCustom:  { color: '#7C3AED', fontWeight: '700' },
+  sortGroup:   { marginBottom: 20 },
+  sortRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  sortRowActive:{ },
+  sortLabel:   { fontSize: 14, fontWeight: '500', color: Colors.textSec },
+  sortLabelActive: { color: Colors.primary, fontWeight: '700' },
+  sortCheck:   { fontSize: 15, fontWeight: '700', color: Colors.primary },
+  doneBtn:     { backgroundColor: Colors.primary, borderRadius: 14, height: 50, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
+  doneTxt:     { fontSize: 15, fontWeight: '700', color: '#fff' },
 });
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bg },
 
-  header:      { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 18 : 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  preLabel:    { fontSize: 11, fontWeight: '700', color: Colors.primary, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
-  heading:     { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 2 },
-  totalPill:   { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
-  totalText:   { color: Colors.primary, fontSize: 13, fontWeight: '800' },
-  iconBtn:     { width: 36, height: 36, borderRadius: 11, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', alignItems: 'center', ...Shadows.sm },
-  iconBtnActive:{ backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
-  iconText:    { fontSize: 15 },
-  uploadBtn:   { width: 'auto', paddingHorizontal: 10, backgroundColor: '#059669' + '22', borderColor: '#059669' },
-  uploadBtnText: { fontSize: 11, fontWeight: '700', color: '#059669' },
+  hdr:       { backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: Platform.OS === 'android' ? 18 : 16, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  preLabel:  { fontSize: 10, fontWeight: '800', color: Colors.primary, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 2 },
+  heading:   { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.5 },
+  hdrRight:  { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  totalPill: { backgroundColor: Colors.primaryLight, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  totalTxt:  { color: Colors.primary, fontSize: 13, fontWeight: '800' },
+  iconBtn:   { width: 38, height: 38, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border, justifyContent: 'center', alignItems: 'center', ...Shadows.sm },
+  iconBtnActive: { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
+  iconTxt:   { fontSize: 16 },
+  badge:     { position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: 8, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  badgeTxt:  { fontSize: 8, fontWeight: '800', color: '#fff' },
 
-  searchBar:      { margin: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 13, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, height: 44, ...Shadows.sm },
-  searchBarIcon:  { fontSize: 14, marginRight: 8 },
-  searchBarInput: { flex: 1, fontSize: 14, color: Colors.text },
-  searchClear:    { fontSize: 14, color: Colors.textMuted, padding: 4 },
+  searchBar:   { margin: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 13, borderWidth: 1, borderColor: Colors.border, paddingHorizontal: 12, height: 44, ...Shadows.sm },
+  searchIco:   { fontSize: 14, marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.text },
+  searchClear: { fontSize: 14, color: Colors.textMuted, padding: 4 },
 
-  dateRowWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  dateRow:     { paddingHorizontal: 14, paddingVertical: 9, gap: 7 },
-  dateChip:    { borderRadius: 999, paddingHorizontal: 13, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1.5, borderColor: Colors.border },
-  dateChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  dateChipCustom: { backgroundColor: '#EDE9FE', borderColor: '#7C3AED' },
-  dateChipText:   { fontSize: 12, fontWeight: '600', color: Colors.textSec },
-  dateChipTextActive:  { color: '#fff', fontWeight: '700' },
-  dateChipTextCustom:  { color: '#7C3AED', fontWeight: '700' },
+  statusWrap:  { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  statusRow:   { paddingHorizontal: 14, paddingVertical: 9, gap: 7 },
+  pill:        { height: 34, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 11, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
+  pillActive:  { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  pillIcon:    { fontSize: 12 },
+  pillTxt:     { fontSize: 12, fontWeight: '500', color: Colors.textSec },
+  pillTxtActive: { color: '#fff', fontWeight: '700' },
 
-  attRowWrap:     { backgroundColor: '#FAFAFA', borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  attRow:         { paddingHorizontal: 14, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  attLabel:       { fontSize: 11, fontWeight: '700', color: Colors.textMuted, marginRight: 2 },
-  attChip:        { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5, backgroundColor: '#fff', borderWidth: 1, borderColor: Colors.border },
-  attChipActive:  { backgroundColor: '#0F172A', borderColor: '#0F172A' },
-  attChipText:    { fontSize: 11, fontWeight: '600', color: Colors.textSec },
-  attChipTextActive: { color: '#fff', fontWeight: '700' },
+  summaryBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: Colors.primaryLight },
+  summaryTxt: { fontSize: 11, color: Colors.primary, fontWeight: '600' },
+  clearTxt:   { fontSize: 11, color: Colors.primary, fontWeight: '700' },
 
-  statusWrap: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  statusRow:  { paddingHorizontal: 14, paddingVertical: 9, gap: 7 },
-  pill:       { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: Colors.bg, borderWidth: 1, borderColor: Colors.border },
-  pillActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  pillIcon:   { fontSize: 12 },
-  pillText:   { fontSize: 12, fontWeight: '500', color: Colors.textSec },
-  pillTextActive: { color: '#fff', fontWeight: '700' },
-
-  summaryBar:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 7, backgroundColor: Colors.primaryLight },
-  summaryText:  { fontSize: 11, color: Colors.primary, fontWeight: '600' },
-  clearAllText: { fontSize: 11, color: Colors.primary, fontWeight: '700' },
-
-  listContent: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 40 },
-
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
-  loadingText: { marginTop: 12, color: Colors.textMuted, fontSize: 14 },
-
-  emptyWrap:     { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
-  emptyIcon:     { fontSize: 52, marginBottom: 14 },
-  emptyTitle:    { fontSize: 17, fontWeight: '700', color: Colors.textSec },
-  emptyHint:     { fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
-  clearBtn:      { marginTop: 20, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 24, backgroundColor: Colors.primaryLight },
-  clearBtnText:  { fontSize: 13, fontWeight: '700', color: Colors.primary },
-  uploadEmptyBtn:{ marginTop: 12, paddingHorizontal: 24, paddingVertical: 11, borderRadius: 24, backgroundColor: '#D1FAE5', borderWidth: 1.5, borderColor: '#059669' },
-  uploadEmptyText: { fontSize: 13, fontWeight: '700', color: '#059669' },
+  list:      { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 40 },
+  loadWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 80 },
+  loadTxt:   { marginTop: 12, color: Colors.textMuted, fontSize: 14 },
+  emptyWrap: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 32 },
+  emptyIco:  { fontSize: 52, marginBottom: 14 },
+  emptyTit:  { fontSize: 17, fontWeight: '700', color: Colors.textSec },
+  emptyHnt:  { fontSize: 13, color: Colors.textMuted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
+  clearBtn:  { marginTop: 20, paddingHorizontal: 24, height: 42, borderRadius: 24, backgroundColor: Colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  clearBtnTxt: { fontSize: 13, fontWeight: '700', color: Colors.primary },
 });
