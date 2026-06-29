@@ -267,13 +267,14 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
           text: 'Add Lead',
           onPress: async () => {
             try {
-              await api.post('/api/leads', {
+              const res = await api.post('/api/leads', {
                 name,
                 phone:  call.contactNumber,
                 source: 'Call',
                 status: 'new',
               });
-              Alert.alert('✅ Added', `${name} added to your leads.`);
+              const msg = res.data?.message || 'Added to leads';
+              Alert.alert('✅ Done', `${name} — ${msg}.`);
             } catch (err) {
               const msg = err?.response?.data?.error || 'Failed to add lead';
               Alert.alert('Error', msg);
@@ -284,7 +285,6 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     );
   }, []);
   const [calls,       setCalls]       = useState([]);
-  const [filtered,    setFiltered]    = useState([]);
   const [typeFilter,  setTypeFilter]  = useState('all');
   const [sort,        setSort]        = useState('newest');
   const [search,      setSearch]      = useState('');
@@ -337,58 +337,35 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     } catch {} finally { setLoading(false); }
   };
 
-  // ── Filtering ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    let result = typeFilter === 'all' ? [...calls] : calls.filter((c) => c.callType === typeFilter);
-
+  // ── Filtering (all synchronous, no setState needed) ─────────────────────────
+  const countsBase = useMemo(() => {
+    let r = calls;
     if (datePreset === 'custom') {
-      if (customFrom) result = result.filter((c) => new Date(c.timestamp) >= customFrom);
+      if (customFrom) r = r.filter((c) => new Date(c.timestamp) >= customFrom);
       if (customTo) {
         const end = new Date(customTo); end.setHours(23,59,59,999);
-        result = result.filter((c) => new Date(c.timestamp) <= end);
+        r = r.filter((c) => new Date(c.timestamp) <= end);
       }
     } else {
       const b = getDateBoundary(datePreset);
-      if (b) result = result.filter((c) => new Date(c.timestamp) >= b);
+      if (b) r = r.filter((c) => new Date(c.timestamp) >= b);
     }
-
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter((c) =>
-        (c.contactName || '').toLowerCase().includes(q) || (c.contactNumber || '').includes(q)
-      );
+      r = r.filter((c) => (c.contactName||'').toLowerCase().includes(q) || (c.contactNumber||'').includes(q));
     }
+    return r;
+  }, [calls, datePreset, customFrom, customTo, search]);
 
-    result.sort((a, b) => {
+  const filtered = useMemo(() => {
+    let r = typeFilter === 'all' ? countsBase : countsBase.filter((c) => c.callType === typeFilter);
+    return [...r].sort((a, b) => {
       if (sort === 'oldest')   return new Date(a.timestamp) - new Date(b.timestamp);
       if (sort === 'longest')  return (b.duration || 0) - (a.duration || 0);
       if (sort === 'shortest') return (a.duration || 0) - (b.duration || 0);
       return new Date(b.timestamp) - new Date(a.timestamp);
     });
-    setFiltered(result);
-  }, [calls, typeFilter, search, sort, datePreset, customFrom, customTo]);
-
-  // ── Count base (respects date+search, not type) ───────────────────────────
-  const countsBase = useMemo(() => {
-    let result = [...calls];
-    if (datePreset === 'custom') {
-      if (customFrom) result = result.filter((c) => new Date(c.timestamp) >= customFrom);
-      if (customTo) {
-        const end = new Date(customTo); end.setHours(23,59,59,999);
-        result = result.filter((c) => new Date(c.timestamp) <= end);
-      }
-    } else {
-      const b = getDateBoundary(datePreset);
-      if (b) result = result.filter((c) => new Date(c.timestamp) >= b);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter((c) =>
-        (c.contactName || '').toLowerCase().includes(q) || (c.contactNumber || '').includes(q)
-      );
-    }
-    return result;
-  }, [calls, datePreset, customFrom, customTo, search]);
+  }, [countsBase, typeFilter, sort]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true); setSyncing(true);
@@ -400,22 +377,30 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     setSyncing(false); setRefreshing(false);
   }, [userId]);
 
-  const groups = useMemo(() => groupCallsByDate(filtered), [filtered]);
+  // Flatten into a single array so FlatList can virtualize every card individually
+  const flatData = useMemo(() => {
+    const groups = groupCallsByDate(filtered);
+    const items = [];
+    for (const g of groups) {
+      items.push({ _t: 'h', title: g.title, count: g.data.length, _key: `h_${g.title}` });
+      for (const call of g.data) {
+        items.push({ _t: 'c', call, _key: `${call.contactNumber}_${call.timestamp}` });
+      }
+    }
+    return items;
+  }, [filtered]);
 
-  const renderGroup = useCallback(({ item: group }) => (
-    <View>
-      <SectionHeader title={group.title} count={group.data.length} />
-      {group.data.map((call) => (
-        <CallCard
-          key={`${call.contactNumber}_${call.timestamp}`}
-          call={call}
-          onNote={onAddNote}
-          onFollowUp={onFollowUp}
-          onAddToLeads={handleAddToLeads}
-        />
-      ))}
-    </View>
-  ), [onAddNote, onFollowUp, handleAddToLeads]);
+  const renderItem = useCallback(({ item }) => {
+    if (item._t === 'h') return <SectionHeader title={item.title} count={item.count} />;
+    return (
+      <CallCard
+        call={item.call}
+        onNote={onAddNote}
+        onFollowUp={onFollowUp}
+        onAddToLeads={handleAddToLeads}
+      />
+    );
+  }, [onAddNote, onFollowUp, handleAddToLeads]);
 
   const firstName      = userName.split(' ')[0] || 'there';
   const filterActive   = (datePreset !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);
@@ -523,11 +508,15 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
         </ScrollView>
       ) : (
         <FlatList
-          data={groups}
-          keyExtractor={(g) => g.title}
-          renderItem={renderGroup}
+          data={flatData}
+          keyExtractor={(item) => item._key}
+          renderItem={renderItem}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={12}
+          windowSize={7}
+          initialNumToRender={15}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           onEndReached={() => hasMore && !loading && userId && fetchCalls(page + 1, userId)}
           onEndReachedThreshold={0.5}

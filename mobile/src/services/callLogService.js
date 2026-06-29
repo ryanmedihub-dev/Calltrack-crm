@@ -98,7 +98,7 @@ export async function syncCallLogs() {
   const sinceTimestamp = todayStart.getTime();
 
   let nativeLogs = await readNativeCallLogs(sinceTimestamp);
-  if (nativeLogs.length === 0) nativeLogs = await readLocalCallLogs_fallback(lastSync);
+  if (nativeLogs.length === 0) nativeLogs = await readLocalCallLogs_fallback(sinceTimestamp);
   if (nativeLogs.length === 0) return { synced: 0, message: 'No new calls to sync' };
 
   // Build list of local logs enriched by AfterCallModal (notes/status/followUp).

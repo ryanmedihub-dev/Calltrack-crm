@@ -3,341 +3,350 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   Animated, PanResponder, Linking, Alert, Dimensions,
 } from 'react-native';
-import { Colors, CALL_TYPE } from '../theme/colors';
-import { Shadows } from '../theme/shadows';
 import { formatDuration } from '../utils/formatDuration';
 import { getNote } from '../utils/callNotes';
 
-const SCREEN_W        = Dimensions.get('window').width;
-const SWIPE_THRESHOLD = 80;
+const { width: SW } = Dimensions.get('window');
+const SWIPE_THRESH  = 72;
 
-const STATUS_MAP = {
-  interested:     { label: 'Interested',     icon: '👍', color: '#16A34A', bg: '#DCFCE7' },
-  contacted:      { label: 'Contacted',      icon: '📞', color: '#1A6BFF', bg: '#EBF2FF' },
-  not_connected:  { label: 'Not Connected',  icon: '📵', color: '#94A3B8', bg: '#F1F5F9' },
-  not_interested: { label: 'Not Interested', icon: '👎', color: '#DC2626', bg: '#FEE2E2' },
-  follow_up:      { label: 'Follow Up',      icon: '📅', color: '#7C3AED', bg: '#EDE9FE' },
-  booking_done:   { label: 'Booking Done',   icon: '✅', color: '#059669', bg: '#D1FAE5' },
-  converted:      { label: 'Converted',      icon: '🎉', color: '#059669', bg: '#D1FAE5' },
-  lost:           { label: 'Lost',           icon: '💀', color: '#64748B', bg: '#F3F4F6' },
+// ── Palette ────────────────────────────────────────────────────────────────────
+
+const AVATAR_PALETTE = [
+  '#2563EB','#16A34A','#D97706','#DC2626',
+  '#7C3AED','#0891B2','#DB2777','#EA580C','#65A30D','#9333EA',
+];
+
+function hashColor(str) {
+  if (!str) return AVATAR_PALETTE[0];
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length];
+}
+
+const STATUS_CFG = {
+  interested:     { label: 'Interested',     color: '#16A34A', bg: '#DCFCE7' },
+  contacted:      { label: 'Contacted',      color: '#2563EB', bg: '#DBEAFE' },
+  not_connected:  { label: 'Not Connected',  color: '#64748B', bg: '#F1F5F9' },
+  not_interested: { label: 'Not Interested', color: '#DC2626', bg: '#FEE2E2' },
+  follow_up:      { label: 'Follow Up',      color: '#7C3AED', bg: '#EDE9FE' },
+  booking_done:   { label: 'Booking Done',   color: '#059669', bg: '#D1FAE5' },
+  converted:      { label: 'Converted',      color: '#059669', bg: '#D1FAE5' },
+  lost:           { label: 'Lost',           color: '#6B7280', bg: '#F3F4F6' },
 };
 
-const TYPE_ARROW = {
-  incoming: '↙',
-  outgoing: '↗',
-  missed:   '↙',
-  rejected: '✕',
+// Call type visual config
+const TYPE_CFG = {
+  incoming: { fg: '#16A34A', bg: '#DCFCE7', darkFg: '#166534', label: 'Incoming', arrow: '↙' },
+  outgoing: { fg: '#D97706', bg: '#FEF3C7', darkFg: '#92400E', label: 'Outgoing', arrow: '↗' },
+  missed:   { fg: '#DC2626', bg: '#FEE2E2', darkFg: '#991B1B', label: 'Missed',   arrow: '↙' },
+  rejected: { fg: '#7C3AED', bg: '#EDE9FE', darkFg: '#5B21B6', label: 'Rejected', arrow: '✕' },
 };
 
-function formatTime(ts) {
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function fmtTime(ts) {
   return new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
-function formatDateShort(ts) {
-  const d   = new Date(ts);
-  const now = new Date();
+function fmtDate(ts) {
+  const d = new Date(ts), now = new Date();
   const yest = new Date(now); yest.setDate(now.getDate() - 1);
   if (d.toDateString() === now.toDateString())  return null;
   if (d.toDateString() === yest.toDateString()) return 'Yesterday';
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
-function formatFollowUp(date) {
+function fmtFollowUp(date) {
   if (!date) return null;
-  const d    = new Date(date);
-  const now  = new Date();
-  const diff = Math.round((d - now) / (1000 * 60 * 60 * 24));
-  if (diff < 0) return `⚠ Overdue — ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
-  if (diff === 0) return '📅 Today';
-  if (diff === 1) return '📅 Tomorrow';
-  return `📅 ${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+  const d = new Date(date), diff = Math.round((d - Date.now()) / 86400000);
+  if (diff < 0)  return { text: `Overdue · ${d.toLocaleDateString('en-IN', { day:'numeric', month:'short' })}`, warn: true };
+  if (diff === 0) return { text: 'Today', warn: false };
+  if (diff === 1) return { text: 'Tomorrow', warn: false };
+  return { text: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), warn: false };
 }
 
-// ── Avatar ────────────────────────────────────────────────────────────────────
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
-const PALETTE = ['#2563EB','#16A34A','#D97706','#DC2626','#7C3AED','#0891B2','#DB2777','#65A30D'];
-
-function avatarColor(str) {
-  if (!str) return PALETTE[0];
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
-  return PALETTE[Math.abs(h) % PALETTE.length];
-}
-
-function Avatar({ name, number, size = 46, typeColor }) {
-  const letter = name
-    ? name.trim()[0].toUpperCase()
-    : number ? (number.replace(/\D/g,'')[0] || '?') : '?';
-  const bg = avatarColor(name || number);
+function Avatar({ name, number, tc, selected }) {
+  const display = name || number || '?';
+  const letter  = display.replace(/\D/g,'')[0] || display[0] || '?';
+  const color   = hashColor(display);
   return (
-    <View style={{ width: size, height: size, position: 'relative' }}>
-      <View style={[av.circle, { width: size, height: size, borderRadius: size / 2, backgroundColor: bg + '18', borderColor: bg + '40', borderWidth: 1.5 }]}>
-        <Text style={[av.letter, { color: bg, fontSize: size * 0.38 }]}>{letter}</Text>
+    <View style={av.wrap}>
+      <View style={[av.circle, { backgroundColor: color + '15', borderColor: color + '30' }]}>
+        <Text style={[av.letter, { color }]}>{letter.toUpperCase()}</Text>
       </View>
-      {/* Call-type micro badge */}
-      <View style={[av.badge, { backgroundColor: typeColor }]}>
-        <Text style={av.badgeTxt}>{letter ? '' : '?'}</Text>
+      {/* call-type dot */}
+      <View style={[av.dot, { backgroundColor: tc.fg }]}>
+        <Text style={av.dotTxt}>{tc.arrow}</Text>
       </View>
+      {selected && (
+        <View style={av.check}>
+          <Text style={av.checkTxt}>✓</Text>
+        </View>
+      )}
     </View>
   );
 }
 const av = StyleSheet.create({
-  circle:   { justifyContent: 'center', alignItems: 'center' },
-  letter:   { fontWeight: '800' },
-  badge:    { position: 'absolute', bottom: -1, right: -1, width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#fff' },
-  badgeTxt: { display: 'none' },
+  wrap:     { width: 46, height: 46, position: 'relative', flexShrink: 0 },
+  circle:   { width: 46, height: 46, borderRadius: 14, borderWidth: 1.5, justifyContent: 'center', alignItems: 'center' },
+  letter:   { fontSize: 18, fontWeight: '800', lineHeight: 22 },
+  dot:      { position: 'absolute', bottom: -3, right: -3, width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: '#fff', justifyContent: 'center', alignItems: 'center' },
+  dotTxt:   { fontSize: 7, fontWeight: '900', color: '#fff' },
+  check:    { position: 'absolute', inset: 0, borderRadius: 14, backgroundColor: '#1A6BFF', justifyContent: 'center', alignItems: 'center' },
+  checkTxt: { fontSize: 18, fontWeight: '900', color: '#fff' },
+});
+
+function ActionBtn({ icon, label, onPress, highlight }) {
+  return (
+    <TouchableOpacity style={[ab.btn, highlight && ab.btnHL]} onPress={onPress} activeOpacity={0.6}>
+      <Text style={ab.icon}>{icon}</Text>
+      <Text style={[ab.label, highlight && ab.labelHL]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+const ab = StyleSheet.create({
+  btn:     { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 2 },
+  btnHL:   { backgroundColor: '#F0FDF4' },
+  icon:    { fontSize: 15 },
+  label:   { fontSize: 9.5, fontWeight: '600', color: '#64748B', letterSpacing: 0.1 },
+  labelHL: { color: '#059669', fontWeight: '700' },
 });
 
 // ── CallCard ──────────────────────────────────────────────────────────────────
 
 function CallCard({ call, onNote, onDelete, onFollowUp, onAddToLeads, selected, onLongPress, onSelect }) {
   const [noteData, setNoteData] = useState({ note: '', tags: [] });
-  const [expanded, setExpanded] = useState(false);
-  const pressScale = useRef(new Animated.Value(1)).current;
+  const scale  = useRef(new Animated.Value(1)).current;
+  const slideX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => { getNote(call).then(setNoteData); }, [call]);
 
-  const onPressIn  = () => Animated.spring(pressScale, { toValue: 0.98,  useNativeDriver: true, speed: 40, bounciness: 0 }).start();
-  const onPressOut = () => Animated.spring(pressScale, { toValue: 1,     useNativeDriver: true, speed: 20, bounciness: 2 }).start();
+  // ── Press animations ──
+  const pressIn  = () => Animated.spring(scale, { toValue: 0.982, useNativeDriver: true, speed: 50, bounciness: 0 }).start();
+  const pressOut = () => Animated.spring(scale, { toValue: 1,     useNativeDriver: true, speed: 30, bounciness: 3 }).start();
 
   // ── Swipe ──
-  const translateX = useRef(new Animated.Value(0)).current;
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder:  (_, { dx, dy }) => Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.5,
-      onPanResponderMove:   (_, { dx }) => translateX.setValue(Math.max(-SCREEN_W * 0.45, Math.min(SCREEN_W * 0.45, dx))),
-      onPanResponderRelease: (_, { dx }) => {
-        if (dx < -SWIPE_THRESHOLD) {
-          Animated.timing(translateX, { toValue: -SCREEN_W, duration: 200, useNativeDriver: true }).start(() => {
-            translateX.setValue(0);
-            Alert.alert('Delete call?', call.contactName || call.contactNumber, [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Delete', style: 'destructive', onPress: () => onDelete?.(call) },
-            ]);
-          });
-        } else if (dx > SWIPE_THRESHOLD) {
-          Animated.timing(translateX, { toValue: SCREEN_W, duration: 200, useNativeDriver: true }).start(() => {
-            translateX.setValue(0);
-            onFollowUp?.(call);
-          });
-        } else {
-          Animated.spring(translateX, { toValue: 0, useNativeDriver: true, tension: 100 }).start();
-        }
-      },
-    })
-  ).current;
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder:  () => false,
+    onMoveShouldSetPanResponder:   (_, { dx, dy }) => Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.4,
+    onPanResponderMove:            (_, { dx }) => slideX.setValue(Math.max(-SW * 0.5, Math.min(SW * 0.5, dx))),
+    onPanResponderRelease:         (_, { dx }) => {
+      if (dx < -SWIPE_THRESH) {
+        Animated.timing(slideX, { toValue: -SW, duration: 180, useNativeDriver: true }).start(() => {
+          slideX.setValue(0);
+          Alert.alert('Delete?', call.contactName || call.contactNumber, [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Delete', style: 'destructive', onPress: () => onDelete?.(call) },
+          ]);
+        });
+      } else if (dx > SWIPE_THRESH) {
+        Animated.timing(slideX, { toValue: SW, duration: 180, useNativeDriver: true }).start(() => {
+          slideX.setValue(0);
+          onFollowUp?.(call);
+        });
+      } else {
+        Animated.spring(slideX, { toValue: 0, useNativeDriver: true, tension: 120, friction: 8 }).start();
+      }
+    },
+  })).current;
 
-  const swipeDeleteBg  = translateX.interpolate({ inputRange: [-120, -20, 0], outputRange: [1, 0.2, 0], extrapolate: 'clamp' });
-  const swipeFollowBg  = translateX.interpolate({ inputRange: [0, 20, 120],   outputRange: [0, 0.2, 1], extrapolate: 'clamp' });
+  const delOpacity = slideX.interpolate({ inputRange: [-100, -20, 0], outputRange: [1, 0.15, 0], extrapolate: 'clamp' });
+  const fuOpacity  = slideX.interpolate({ inputRange: [0, 20, 100],   outputRange: [0, 0.15, 1], extrapolate: 'clamp' });
 
-  const dialCall = () => Linking.openURL(`tel:${call.contactNumber}`).catch(() => {});
-  const whatsapp = () => {
-    const n = (call.contactNumber || '').replace(/\D/g, '');
-    Linking.openURL(`whatsapp://send?phone=${n}`).catch(() => Alert.alert('WhatsApp not installed'));
-  };
-
-  const toggle = () => selected ? onSelect?.(call) : setExpanded((v) => !v);
-
-  const typeConf    = CALL_TYPE[call.callType] || { fg: '#64748B', bg: '#F1F5F9', label: call.callType || 'Unknown', icon: '↕' };
-  const typeArrow   = TYPE_ARROW[call.callType] || '↕';
-  const statusConf  = STATUS_MAP[call.callStatus] || null;
-  const displayNote = call.notes || noteData.note || '';
-  const followLabel = formatFollowUp(noteData.followUp?.date);
-  const dateLabel   = formatDateShort(call.timestamp);
+  // ── Data ──
+  const tc          = TYPE_CFG[call.callType]    || { fg: '#64748B', bg: '#F1F5F9', darkFg: '#334155', label: 'Unknown', arrow: '?' };
+  const sc          = STATUS_CFG[call.callStatus] || null;
+  const note        = call.notes || noteData.note || '';
+  const followUp    = fmtFollowUp(noteData.followUp?.date);
+  const dateLabel   = fmtDate(call.timestamp);
   const dur         = call.duration > 0 ? formatDuration(call.duration) : null;
   const isMissed    = call.callType === 'missed' || call.callType === 'rejected';
+  const hasName     = call.contactName && call.contactName !== 'Unknown';
+  const displayName = hasName ? call.contactName : call.contactNumber;
+
+  const dial = () => Linking.openURL(`tel:${call.contactNumber}`).catch(() => {});
+  const wa   = () => {
+    const n = call.contactNumber.replace(/\D/g,'');
+    Linking.openURL(`whatsapp://send?phone=${n.length === 10 ? '91' + n : n}`)
+      .catch(() => Alert.alert('WhatsApp not installed'));
+  };
+  const handlePress = () => selected ? onSelect?.(call) : null;
 
   return (
-    <View style={s.wrapper}>
-      {/* Swipe backgrounds */}
-      <Animated.View style={[s.swipeBg, s.swipeBgRight, { opacity: swipeFollowBg }]}>
-        <Text style={s.swipeIcon}>📅</Text>
-        <Text style={[s.swipeLabel, { color: '#7C3AED' }]}>Follow-up</Text>
+    <View style={s.outer}>
+
+      {/* ── Swipe hint backgrounds ── */}
+      <Animated.View style={[s.swipeBg, s.swipeBgL, { opacity: delOpacity }]}>
+        <Text style={s.swipeHintL}>Delete</Text>
+        <Text style={s.swipeIconL}>🗑</Text>
       </Animated.View>
-      <Animated.View style={[s.swipeBg, s.swipeBgLeft, { opacity: swipeDeleteBg }]}>
-        <Text style={[s.swipeLabel, { color: '#DC2626' }]}>Delete</Text>
-        <Text style={s.swipeIcon}>🗑</Text>
+      <Animated.View style={[s.swipeBg, s.swipeBgR, { opacity: fuOpacity }]}>
+        <Text style={s.swipeIconR}>📅</Text>
+        <Text style={s.swipeHintR}>Follow-up</Text>
       </Animated.View>
 
-      {/* Card */}
+      {/* ── Card ── */}
       <Animated.View
-        style={[s.card, selected && s.cardSelected, { transform: [{ translateX }, { scale: pressScale }] }]}
-        {...panResponder.panHandlers}
+        style={[s.card, selected && s.cardSel, { transform: [{ translateX: slideX }, { scale }] }]}
+        {...pan.panHandlers}
       >
-        {/* Color bar */}
-        <View style={[s.bar, { backgroundColor: typeConf.fg }]} />
-
         <TouchableOpacity
-          style={{ flex: 1 }}
           activeOpacity={1}
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          onPress={toggle}
+          onPressIn={pressIn}
+          onPressOut={pressOut}
+          onPress={handlePress}
           onLongPress={() => onLongPress?.(call)}
-          delayLongPress={400}
+          delayLongPress={380}
         >
-          {/* ── Main row ── */}
-          <View style={s.row}>
-            {/* Avatar */}
-            <View style={{ position: 'relative' }}>
-              <Avatar
-                name={call.contactName !== 'Unknown' ? call.contactName : null}
-                number={call.contactNumber}
-                size={46}
-                typeColor={typeConf.fg}
-              />
-              {selected && (
-                <View style={s.selectMark}>
-                  <Text style={s.selectMarkTxt}>✓</Text>
-                </View>
-              )}
-            </View>
+          {/* ── Body ── */}
+          <View style={s.body}>
 
-            {/* Content */}
-            <View style={s.content}>
-              {/* Name + number */}
-              <View style={s.nameRow}>
-                <Text style={[s.name, isMissed && { color: '#DC2626' }]} numberOfLines={1}>
-                  {call.contactName && call.contactName !== 'Unknown' ? call.contactName : call.contactNumber}
+            {/* Left: Avatar */}
+            <Avatar
+              name={hasName ? call.contactName : null}
+              number={call.contactNumber}
+              tc={tc}
+              selected={selected}
+            />
+
+            {/* Center: Info */}
+            <View style={s.info}>
+
+              {/* Name + Time */}
+              <View style={s.topRow}>
+                <Text
+                  style={[s.name, isMissed && { color: tc.darkFg }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {displayName}
                 </Text>
+                <Text style={s.time}>{fmtTime(call.timestamp)}</Text>
               </View>
-              {call.contactName && call.contactName !== 'Unknown' && (
-                <Text style={s.number}>{call.contactNumber}</Text>
-              )}
 
-              {/* Type + duration pill */}
-              <View style={s.metaRow}>
-                <View style={[s.typePill, { backgroundColor: typeConf.bg }]}>
-                  <Text style={[s.typePillTxt, { color: typeConf.fg }]}>
-                    {typeArrow} {typeConf.label}{dur ? ` · ${dur}` : ''}
+              {/* Phone + Duration pill */}
+              <View style={s.midRow}>
+                {hasName
+                  ? <Text style={s.phone} numberOfLines={1}>{call.contactNumber}</Text>
+                  : <View style={{ flex: 1 }} />
+                }
+                <View style={[s.durPill, { backgroundColor: tc.bg }]}>
+                  <Text style={[s.durTxt, { color: tc.darkFg }]}>
+                    {tc.arrow}{'  '}{dur ?? tc.label}
                   </Text>
                 </View>
               </View>
+
+              {/* Date (if not today) */}
+              {!!dateLabel && (
+                <Text style={s.dateLbl}>{dateLabel}</Text>
+              )}
 
               {/* Status chip */}
-              {statusConf && (
-                <View style={[s.statusChip, { backgroundColor: statusConf.bg }]}>
-                  <Text style={[s.statusTxt, { color: statusConf.color }]}>
-                    {statusConf.icon} {statusConf.label}
-                  </Text>
+              {sc && (
+                <View style={[s.statusChip, { backgroundColor: sc.bg }]}>
+                  <View style={[s.statusDot, { backgroundColor: sc.color }]} />
+                  <Text style={[s.statusTxt, { color: sc.color }]}>{sc.label}</Text>
                 </View>
               )}
 
               {/* Note preview */}
-              {!!displayNote && !statusConf && (
-                <Text style={s.notePrev} numberOfLines={1}>💬 {displayNote}</Text>
+              {!!note && (
+                <Text style={s.noteTxt} numberOfLines={1}>"{note}"</Text>
               )}
 
-              {/* Follow-up chip */}
-              {!!followLabel && (
-                <View style={[s.followChip, followLabel.startsWith('⚠') && { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' }]}>
-                  <Text style={[s.followTxt, followLabel.startsWith('⚠') && { color: '#B45309' }]}>{followLabel}</Text>
+              {/* Follow-up */}
+              {!!followUp && (
+                <View style={[s.followRow, followUp.warn && s.followRowWarn]}>
+                  <Text style={s.followIcon}>📅</Text>
+                  <Text style={[s.followTxt, followUp.warn && s.followTxtWarn]}>
+                    {followUp.warn ? 'Overdue · ' : ''}{followUp.text}
+                  </Text>
                 </View>
               )}
-            </View>
 
-            {/* Right column */}
-            <View style={s.rightCol}>
-              <Text style={s.time}>{formatTime(call.timestamp)}</Text>
-              {dateLabel && <Text style={s.dateLabel}>{dateLabel}</Text>}
-              <Text style={s.expandHint}>{expanded ? '▲' : '▼'}</Text>
             </View>
           </View>
 
-          {/* ── Expanded actions ── */}
-          {expanded && (
-            <View style={s.actionsWrap}>
-              {/* Row 1 */}
-              <View style={s.actionRow}>
-                <TouchableOpacity style={[s.btn, s.btnBlue]} onPress={dialCall} activeOpacity={0.85}>
-                  <Text style={s.btnIconPrimary}>📞</Text>
-                  <Text style={s.btnLblPrimary}>Call</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[s.btn, s.btnGreen]} onPress={whatsapp} activeOpacity={0.85}>
-                  <Text style={s.btnIconPrimary}>💬</Text>
-                  <Text style={s.btnLblPrimary}>WhatsApp</Text>
-                </TouchableOpacity>
-              </View>
-              {/* Row 2 */}
-              <View style={s.actionRow}>
-                <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={() => onNote?.(call)} activeOpacity={0.85}>
-                  <Text style={s.btnIcon}>📝</Text>
-                  <Text style={s.btnLbl}>Add Note</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[s.btn, s.btnGhost]} onPress={() => onFollowUp?.(call)} activeOpacity={0.85}>
-                  <Text style={s.btnIcon}>📅</Text>
-                  <Text style={s.btnLbl}>Follow-up</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[s.btn, s.btnEmerald]} onPress={() => onAddToLeads?.(call)} activeOpacity={0.85}>
-                  <Text style={s.btnIconPrimary}>➕</Text>
-                  <Text style={s.btnLblPrimary}>Lead</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
+          {/* ── Action bar ── */}
+          <View style={s.bar}>
+            <ActionBtn icon="📞" label="Call"    onPress={dial} />
+            <View style={s.sep} />
+            <ActionBtn icon="💬" label="WA"      onPress={wa} />
+            <View style={s.sep} />
+            <ActionBtn icon="📝" label="Note"    onPress={() => onNote?.(call)} />
+            <View style={s.sep} />
+            <ActionBtn icon="📅" label="Follow"  onPress={() => onFollowUp?.(call)} />
+            <View style={s.sep} />
+            <ActionBtn icon="✚"  label="Lead"    onPress={() => onAddToLeads?.(call)} highlight />
+          </View>
+
         </TouchableOpacity>
       </Animated.View>
     </View>
   );
 }
 
+// ── Styles ─────────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
-  wrapper: { marginBottom: 9, position: 'relative' },
+  outer: { marginBottom: 10, position: 'relative' },
 
-  swipeBg:      { position: 'absolute', inset: 0, borderRadius: 16, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20 },
-  swipeBgLeft:  { backgroundColor: '#FEE2E2', justifyContent: 'flex-end' },
-  swipeBgRight: { backgroundColor: '#EDE9FE', justifyContent: 'flex-start' },
-  swipeIcon:    { fontSize: 22 },
-  swipeLabel:   { fontSize: 13, fontWeight: '700', marginHorizontal: 6 },
+  // Swipe reveal panels
+  swipeBg:   { position: 'absolute', inset: 0, borderRadius: 18, alignItems: 'center', flexDirection: 'row', paddingHorizontal: 18 },
+  swipeBgL:  { backgroundColor: '#FEE2E2', justifyContent: 'flex-end' },
+  swipeBgR:  { backgroundColor: '#EDE9FE', justifyContent: 'flex-start' },
+  swipeHintL:{ fontSize: 12, fontWeight: '700', color: '#DC2626', marginRight: 6 },
+  swipeHintR:{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginLeft: 6 },
+  swipeIconL:{ fontSize: 18 },
+  swipeIconR:{ fontSize: 18 },
 
-  card:         { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', flexDirection: 'row', ...Shadows.card },
-  cardSelected: { borderWidth: 2, borderColor: Colors.primary },
+  // Card shell
+  card: {
+    backgroundColor: '#fff',
+    borderRadius:    18,
+    overflow:        'hidden',
+    shadowColor:     '#0F172A',
+    shadowOffset:    { width: 0, height: 2 },
+    shadowOpacity:   0.07,
+    shadowRadius:    8,
+    elevation:       3,
+  },
+  cardSel: { borderWidth: 2, borderColor: '#1A6BFF' },
 
-  bar: { width: 4, alignSelf: 'stretch' },
+  // Body section
+  body:   { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 14, paddingTop: 14, paddingBottom: 12, gap: 12 },
+  info:   { flex: 1, minWidth: 0 },
 
-  row:     { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 12, paddingVertical: 13, gap: 11 },
-  content: { flex: 1 },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
+  name:   { fontSize: 15, fontWeight: '700', color: '#0F172A', letterSpacing: -0.3, flex: 1 },
+  time:   { fontSize: 11, fontWeight: '600', color: '#94A3B8', flexShrink: 0 },
 
-  nameRow: { flexDirection: 'row', alignItems: 'center' },
-  name:    { fontSize: 14.5, fontWeight: '700', color: '#0F172A', letterSpacing: -0.2, flexShrink: 1 },
-  number:  { fontSize: 11.5, color: '#94A3B8', marginTop: 1 },
+  midRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 2 },
+  phone:  { fontSize: 12, color: '#64748B', flex: 1 },
 
-  metaRow:  { flexDirection: 'row', marginTop: 5, flexWrap: 'wrap', gap: 5 },
-  typePill: { borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  typePillTxt: { fontSize: 10.5, fontWeight: '700', letterSpacing: 0.1 },
+  durPill: { borderRadius: 20, paddingHorizontal: 9, paddingVertical: 3, flexShrink: 0 },
+  durTxt:  { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
 
-  statusChip: { alignSelf: 'flex-start', marginTop: 5, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
-  statusTxt:  { fontSize: 10.5, fontWeight: '700' },
+  dateLbl: { fontSize: 10.5, color: '#94A3B8', fontWeight: '500', marginTop: 2 },
 
-  notePrev: { fontSize: 11, color: '#64748B', marginTop: 5, fontStyle: 'italic' },
+  statusChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3, marginTop: 6, gap: 5 },
+  statusDot:  { width: 6, height: 6, borderRadius: 3 },
+  statusTxt:  { fontSize: 11, fontWeight: '700' },
 
-  followChip: { alignSelf: 'flex-start', marginTop: 5, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0' },
-  followTxt:  { fontSize: 10.5, fontWeight: '600', color: '#16A34A' },
+  noteTxt: { fontSize: 11.5, color: '#64748B', fontStyle: 'italic', marginTop: 5, lineHeight: 15 },
 
-  rightCol:  { alignItems: 'flex-end', gap: 4, paddingTop: 1 },
-  time:      { fontSize: 11.5, fontWeight: '600', color: '#475569' },
-  dateLabel: { fontSize: 10, color: '#94A3B8', fontWeight: '500' },
-  expandHint:{ fontSize: 9, color: '#CBD5E1', marginTop: 2 },
+  followRow:     { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6, alignSelf: 'flex-start', backgroundColor: '#F0FDF4', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  followRowWarn: { backgroundColor: '#FEF3C7' },
+  followIcon:    { fontSize: 11 },
+  followTxt:     { fontSize: 11, fontWeight: '600', color: '#16A34A' },
+  followTxtWarn: { color: '#92400E' },
 
-  selectMark:    { position: 'absolute', top: -4, right: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primary, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: '#fff' },
-  selectMarkTxt: { color: '#fff', fontSize: 10, fontWeight: '900' },
-
-  // Expanded actions
-  actionsWrap: { paddingHorizontal: 12, paddingBottom: 13, paddingTop: 2, gap: 7 },
-  actionRow:   { flexDirection: 'row', gap: 7 },
-
-  btn:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, height: 38, borderRadius: 10 },
-
-  btnBlue:    { backgroundColor: Colors.primary },
-  btnGreen:   { backgroundColor: '#25D366' },
-  btnEmerald: { backgroundColor: '#059669' },
-  btnGhost:   { backgroundColor: '#F8F9FB', borderWidth: 1.5, borderColor: '#E2E8F0' },
-
-  btnIconPrimary: { fontSize: 13 },
-  btnLblPrimary:  { fontSize: 12, fontWeight: '700', color: '#fff' },
-  btnIcon:        { fontSize: 13 },
-  btnLbl:         { fontSize: 12, fontWeight: '600', color: '#475569' },
+  // Action bar
+  bar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#F1F5F9', backgroundColor: '#FAFBFF' },
+  sep: { width: 1, backgroundColor: '#F1F5F9', alignSelf: 'stretch' },
 });
 
 export default memo(CallCard);

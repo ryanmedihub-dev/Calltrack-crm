@@ -10,6 +10,23 @@ const { logAction } = require('../lib/audit');
 router.post('/', protect, async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone) || req.body.phone;
+    if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+
+    // Handle existing phone gracefully
+    const existing = await Lead.findOne({ phone });
+    if (existing) {
+      const ownedBySelf  = existing.assignedTo?.toString() === req.user._id.toString();
+      const isUnassigned = !existing.assignedTo;
+      if (ownedBySelf) return res.json({ success: true, data: existing, message: 'Already in your leads' });
+      if (isUnassigned) {
+        existing.assignedTo = req.user._id;
+        existing.changelog.push({ changedBy: req.user._id, changedByName: req.user.name, action: 'assigned', details: { source: 'manual' } });
+        await existing.save();
+        return res.json({ success: true, data: existing, message: 'Lead claimed' });
+      }
+      return res.status(409).json({ success: false, error: 'Lead is already assigned to another team member' });
+    }
+
     const lead = await Lead.create({
       ...req.body,
       phone,

@@ -421,47 +421,11 @@ export default function LeadsScreen() {
     setRefreshing(false);
   };
 
-  const displayLeads = useMemo(() => {
-    let result = leads.filter(l => {
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        if (!(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
-      }
-      if (statusFilter !== 'all' && l.status !== statusFilter) return false;
-      if (datePreset === 'custom') {
-        const created = new Date(l.createdAt);
-        if (customFrom && created < customFrom) return false;
-        if (customTo) { const end = new Date(customTo); end.setHours(23,59,59,999); if (created > end) return false; }
-      } else {
-        const b = getDateBoundary(datePreset);
-        if (b && new Date(l.createdAt) < b) return false;
-      }
-      if (attemptsFilter !== 'all') {
-        const att = l.attempts || 0;
-        if (attemptsFilter === '0'   && att !== 0)             return false;
-        if (attemptsFilter === '1-2' && (att < 1 || att > 2)) return false;
-        if (attemptsFilter === '3-5' && (att < 3 || att > 5)) return false;
-        if (attemptsFilter === '6+'  && att < 6)              return false;
-      }
-      return true;
-    });
-    result.sort((a, b) => {
-      if (sort === 'oldest')   return new Date(a.createdAt) - new Date(b.createdAt);
-      if (sort === 'name_az')  return (a.name||'').localeCompare(b.name||'');
-      if (sort === 'attempts') return (b.attempts||0) - (a.attempts||0);
-      return new Date(b.createdAt) - new Date(a.createdAt);
-    });
-    return result;
-  }, [leads, search, statusFilter, datePreset, customFrom, customTo, attemptsFilter, sort]);
-
-  const statusCounts = useMemo(() => {
-    const acc = { all: 0 };
-    for (const key of Object.keys(STATUS)) acc[key] = 0;
+  const { displayLeads, statusCounts } = useMemo(() => {
+    // Single pass: base filter (no status) → counts, then filter by status → sorted display
+    const q = search.trim().toLowerCase();
     const base = leads.filter(l => {
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        if (!(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
-      }
+      if (q && !(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
       if (datePreset === 'custom') {
         const created = new Date(l.createdAt);
         if (customFrom && created < customFrom) return false;
@@ -479,10 +443,24 @@ export default function LeadsScreen() {
       }
       return true;
     });
-    acc.all = base.length;
-    for (const l of base) if (acc[l.status] !== undefined) acc[l.status]++;
-    return acc;
-  }, [leads, search, datePreset, customFrom, customTo, attemptsFilter]);
+
+    // Counts from base
+    const counts = { all: base.length };
+    for (const key of Object.keys(STATUS)) counts[key] = 0;
+    for (const l of base) if (counts[l.status] !== undefined) counts[l.status]++;
+
+    // Display: apply status filter on base, then sort
+    const display = (statusFilter === 'all' ? base : base.filter(l => l.status === statusFilter))
+      .slice()
+      .sort((a, b) => {
+        if (sort === 'oldest')   return new Date(a.createdAt) - new Date(b.createdAt);
+        if (sort === 'name_az')  return (a.name||'').localeCompare(b.name||'');
+        if (sort === 'attempts') return (b.attempts||0) - (a.attempts||0);
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+
+    return { displayLeads: display, statusCounts: counts };
+  }, [leads, search, statusFilter, datePreset, customFrom, customTo, attemptsFilter, sort]);
 
   const handleUpdateStatus = async (newStatus) => {
     if (!statusTarget || updatingStatus) return;
@@ -621,6 +599,10 @@ export default function LeadsScreen() {
           renderItem={renderItem}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          initialNumToRender={12}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
           ListEmptyComponent={
             <View style={s.emptyWrap}>
