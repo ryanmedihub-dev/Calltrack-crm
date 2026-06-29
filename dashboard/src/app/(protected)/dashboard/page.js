@@ -9,6 +9,26 @@ import {
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
 
+/* ── Timezone helpers ─────────────────────────────── */
+const TIMEZONES = [
+  { label: 'IST (India)', value: 'Asia/Kolkata' },
+  { label: 'UTC',         value: 'UTC' },
+  { label: 'EST (US)',    value: 'America/New_York' },
+  { label: 'PST (US)',    value: 'America/Los_Angeles' },
+  { label: 'GST (Gulf)',  value: 'Asia/Dubai' },
+];
+
+function fmtDate(ts, tz) {
+  return new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: tz });
+}
+function fmtTime(ts, tz) {
+  return new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+}
+function todayInTZ(tz) {
+  return new Date().toLocaleDateString('en-CA', { timeZone: tz });
+}
+
+/* ── Icons ───────────────────────────────────────── */
 function Ico({ size = 18, children }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -30,6 +50,8 @@ const ChevronIco = () => <Ico size={13}><polyline points="9 18 15 12 9 6"/></Ico
 const CloseIco   = () => <Ico size={15}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Ico>;
 const TrendUpIco = () => <Ico size={12}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></Ico>;
 const TrendDnIco = () => <Ico size={12}><polyline points="1 6 10.5 15.5 15.5 10.5 23 18"/><polyline points="7 18 1 18 1 12"/></Ico>;
+const GlobeIco   = () => <Ico size={14}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></Ico>;
+const LeadIco    = () => <Ico size={16}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="23" y1="11" x2="17" y2="11"/><line x1="20" y1="8" x2="20" y2="14"/></Ico>;
 
 function trend(cur, prev) {
   if (!prev || prev === 0) return null;
@@ -37,15 +59,15 @@ function trend(cur, prev) {
 }
 
 const KPI = [
-  { key: 'totalCalls',    label: 'Total Calls',   Icon: PhoneIco,  grad: 'linear-gradient(135deg,#2563EB,#3B82F6)', light: '#EFF6FF', href: '/calls' },
-  { key: 'incoming',      label: 'Incoming',       Icon: InIco,     grad: 'linear-gradient(135deg,#16A34A,#22C55E)', light: '#F0FDF4', href: '/calls?callType=incoming' },
-  { key: 'outgoing',      label: 'Outgoing',       Icon: OutIco,    grad: 'linear-gradient(135deg,#D97706,#F59E0B)', light: '#FFFBEB', href: '/calls?callType=outgoing' },
-  { key: 'missed',        label: 'Missed',         Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', light: '#FFF1F2', href: '/calls?callType=missed' },
-  { key: 'connectedCalls',label: 'Connected',      Icon: CheckIco,  grad: 'linear-gradient(135deg,#0D9488,#14B8A6)', light: '#F0FDFA', href: '/calls' },
-  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco,  grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', light: '#F5F3FF', href: '/calls' },
+  { key: 'totalCalls',    label: 'Total Calls',   Icon: PhoneIco,  grad: 'linear-gradient(135deg,#2563EB,#3B82F6)', href: '/calls' },
+  { key: 'incoming',      label: 'Incoming',       Icon: InIco,     grad: 'linear-gradient(135deg,#16A34A,#22C55E)', href: '/calls?callType=incoming' },
+  { key: 'outgoing',      label: 'Outgoing',       Icon: OutIco,    grad: 'linear-gradient(135deg,#D97706,#F59E0B)', href: '/calls?callType=outgoing' },
+  { key: 'missed',        label: 'Missed',         Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', href: '/calls?callType=missed' },
+  { key: 'connectedCalls',label: 'Connected',      Icon: CheckIco,  grad: 'linear-gradient(135deg,#0D9488,#14B8A6)', href: '/calls' },
+  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco,  grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', href: '/calls' },
 ];
 
-function KpiCard({ label, value, Icon, grad, light, href, delta, idx }) {
+function KpiCard({ label, value, Icon, grad, href, delta, idx }) {
   const card = (
     <div className="page-card p-4 cursor-pointer group animate-fade-in-up"
       style={{ animationDelay: `${idx * 0.05}s`, transition: 'transform 0.18s, box-shadow 0.18s' }}
@@ -76,12 +98,12 @@ function KpiCard({ label, value, Icon, grad, light, href, delta, idx }) {
 
 function PeriodPanel({ title, data }) {
   const rows = [
-    { label: 'Total Calls',    val: data?.totalCalls,     color: '#2563EB' },
-    { label: 'Incoming',       val: data?.incoming,       color: '#16A34A' },
-    { label: 'Outgoing',       val: data?.outgoing,       color: '#D97706' },
-    { label: 'Missed',         val: data?.missed,         color: '#DC2626' },
-    { label: 'Connected',      val: data?.connectedCalls, color: '#0D9488' },
-    { label: 'Working Hours',  val: data?.workingHours,   color: '#475569' },
+    { label: 'Total Calls',   val: data?.totalCalls,     color: '#2563EB' },
+    { label: 'Incoming',      val: data?.incoming,       color: '#16A34A' },
+    { label: 'Outgoing',      val: data?.outgoing,       color: '#D97706' },
+    { label: 'Missed',        val: data?.missed,         color: '#DC2626' },
+    { label: 'Connected',     val: data?.connectedCalls, color: '#0D9488' },
+    { label: 'Working Hours', val: data?.workingHours,   color: '#475569' },
   ];
   return (
     <div className="page-card p-4">
@@ -185,12 +207,23 @@ const ChartTip = ({ active, payload, label }) => {
   );
 };
 
+const LEAD_STATUSES = [
+  { key: 'new',        label: 'New',        color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
+  { key: 'contacted',  label: 'Contacted',  color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
+  { key: 'qualified',  label: 'Qualified',  color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
+  { key: 'converted',  label: 'Converted',  color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
+  { key: 'lost',       label: 'Lost',       color: '#DC2626', bg: '#FFF1F2', border: '#FECACA' },
+];
+
 export default function DashboardPage() {
   const [stats,      setStats]      = useState(null);
   const [liveFeed,   setLiveFeed]   = useState([]);
   const [employees,  setEmployees]  = useState([]);
   const [leadModal,  setLeadModal]  = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [timezone,   setTimezone]   = useState('Asia/Kolkata');
+  const [tzOpen,     setTzOpen]     = useState(false);
+  const [leadStats,  setLeadStats]  = useState({});
   const channelRef = useRef(null);
 
   const fetchStats = async (spin = false) => {
@@ -200,8 +233,24 @@ export default function DashboardPage() {
     finally { setRefreshing(false); }
   };
 
+  const fetchLeadStats = async () => {
+    try {
+      const results = await Promise.all(
+        LEAD_STATUSES.map(s =>
+          api.get('/api/leads', { params: { status: s.key, limit: 1 } })
+            .then(r => ({ key: s.key, count: r.data.data?.total ?? 0 }))
+            .catch(() => ({ key: s.key, count: 0 }))
+        )
+      );
+      const map = {};
+      results.forEach(r => { map[r.key] = r.count; });
+      setLeadStats(map);
+    } catch {}
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchLeadStats();
     api.get('/api/employees').then(r=>setEmployees(r.data.data)).catch(()=>{});
     api.get('/api/calls/realtime').then(r=>setLiveFeed((r.data.data||[]).slice(0,30))).catch(()=>{});
     const interval = setInterval(fetchStats, 30000);
@@ -227,9 +276,17 @@ export default function DashboardPage() {
   ].filter(d => d.value > 0) : [];
 
   const greeting = (() => {
-    const h = new Date().getHours();
-    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+    const h = new Date().toLocaleString('en-US', { timeZone: timezone, hour: 'numeric', hour12: false });
+    const hr = parseInt(h);
+    return hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
   })();
+
+  const todayLabel = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: timezone
+  });
+
+  const tzLabel = TIMEZONES.find(t => t.value === timezone)?.label || timezone;
+  const totalLeads = Object.values(leadStats).reduce((a, b) => a + b, 0);
 
   return (
     <div className="space-y-5">
@@ -237,24 +294,100 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between flex-wrap gap-3 animate-fade-in">
         <div>
           <h2 className="text-lg font-bold" style={{ color: '#0F172A', letterSpacing: '-0.02em' }}>{greeting}</h2>
-          <p className="text-sm mt-0.5" style={{ color: '#94A3B8' }}>
-            {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          </p>
+          <p className="text-sm mt-0.5" style={{ color: '#94A3B8' }}>{todayLabel}</p>
         </div>
-        <button onClick={() => fetchStats(true)} disabled={refreshing}
-          className="btn-secondary text-xs py-1.5 px-3">
-          <span className={refreshing ? 'animate-spin' : ''}><RefreshIco /></span>
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Timezone selector */}
+          <div className="relative">
+            <button onClick={() => setTzOpen(o => !o)}
+              className="btn-secondary text-xs py-1.5 px-3 gap-1.5">
+              <GlobeIco />
+              {tzLabel}
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            {tzOpen && (
+              <div className="absolute right-0 top-full mt-1 z-30 rounded-xl overflow-hidden"
+                style={{ background: '#fff', border: '1px solid #E2E8F0', boxShadow: '0 8px 30px rgba(0,0,0,0.12)', minWidth: 180 }}>
+                {TIMEZONES.map(tz => (
+                  <button key={tz.value} onClick={() => { setTimezone(tz.value); setTzOpen(false); }}
+                    className="w-full text-left px-4 py-2.5 text-xs transition-colors"
+                    style={{
+                      color: timezone === tz.value ? '#2563EB' : '#374151',
+                      background: timezone === tz.value ? '#EFF6FF' : '',
+                      fontWeight: timezone === tz.value ? 600 : 400,
+                    }}
+                    onMouseEnter={e => { if (timezone !== tz.value) e.currentTarget.style.background = '#F8FAFC'; }}
+                    onMouseLeave={e => { if (timezone !== tz.value) e.currentTarget.style.background = ''; }}>
+                    {tz.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={() => fetchStats(true)} disabled={refreshing}
+            className="btn-secondary text-xs py-1.5 px-3">
+            <span className={refreshing ? 'animate-spin' : ''}><RefreshIco /></span>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* KPI */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 stagger">
         {KPI.map((cfg, i) => (
           <KpiCard key={cfg.key} idx={i} label={cfg.label} value={today?.[cfg.key]}
-            Icon={cfg.Icon} grad={cfg.grad} light={cfg.light} href={cfg.href}
+            Icon={cfg.Icon} grad={cfg.grad} href={cfg.href}
             delta={cfg.key !== 'uniqueClients' ? trend(today?.[cfg.key], yest?.[cfg.key]) : null} />
         ))}
+      </div>
+
+      {/* Lead Status Counts */}
+      <div className="animate-fade-in-up" style={{ animationDelay: '0.08s' }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md flex items-center justify-center" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+              <LeadIco />
+            </div>
+            <h3 className="text-sm font-bold" style={{ color: '#0F172A' }}>Lead Pipeline</h3>
+            <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: '#F1F5F9', color: '#64748B' }}>
+              {totalLeads} total
+            </span>
+          </div>
+          <Link href="/leads" className="text-xs font-semibold transition-opacity"
+            style={{ color: '#2563EB' }}
+            onMouseEnter={e=>e.currentTarget.style.opacity='0.7'}
+            onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
+            View all →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+          {LEAD_STATUSES.map((s, i) => {
+            const count = leadStats[s.key] ?? 0;
+            const pct = totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0;
+            return (
+              <Link href={`/leads?status=${s.key}`} key={s.key}>
+                <div className="page-card p-4 cursor-pointer transition-all"
+                  style={{ animationDelay: `${i * 0.04}s` }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(0,0,0,0.08)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-[0.07em]" style={{ color: s.color }}>{s.label}</span>
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+                      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>
+                      {pct}%
+                    </span>
+                  </div>
+                  <p className="text-2xl font-extrabold tabular-nums leading-none" style={{ color: '#0F172A', letterSpacing: '-0.03em' }}>
+                    {leadStats[s.key] === undefined ? '—' : count}
+                  </p>
+                  <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: '#F1F5F9' }}>
+                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: s.color }} />
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </div>
 
       {/* Charts row */}
@@ -264,7 +397,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-sm" style={{ color: '#0F172A' }}>Calls Per Hour</h3>
-              <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>Today's activity breakdown</p>
+              <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>Today's activity · {tzLabel}</p>
             </div>
             <span className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
               style={{ background: 'rgba(22,163,74,0.08)', color: '#16A34A', border: '1px solid rgba(22,163,74,0.20)' }}>
@@ -370,7 +503,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>Live Call Feed</h3>
-              <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Streaming in real time</p>
+              <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Streaming in real time · {tzLabel}</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full"
@@ -397,7 +530,7 @@ export default function DashboardPage() {
                     <th>Contact</th>
                     <th>Type</th>
                     <th>Duration</th>
-                    <th>Time</th>
+                    <th>Time ({tzLabel})</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -422,7 +555,7 @@ export default function DashboardPage() {
                         {log.duration?`${Math.floor(log.duration/60)}m ${log.duration%60}s`:'—'}
                       </td>
                       <td className="text-xs" style={{ color:'#94A3B8' }}>
-                        {new Date(log.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                        {fmtTime(log.timestamp, timezone)}
                       </td>
                       <td>
                         {!log.hasLead&&(

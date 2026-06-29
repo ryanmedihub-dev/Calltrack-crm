@@ -121,7 +121,7 @@ export default function EmployeeDetailPage() {
       <div className="flex gap-2 flex-wrap">
         {TYPE_CHIPS.map(t=>(
           <button key={t} onClick={()=>applyFilter({ callType:t })}
-            className="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all"
+            className="px-3.5 h-8 flex items-center rounded-full text-xs font-semibold transition-all"
             style={filters.callType===t
               ? (t===''?activeChip:{ background:TYPE_COLORS[t]?.color||'#2563EB', color:'#fff', border:`1px solid ${TYPE_COLORS[t]?.color||'#2563EB'}` })
               : (t===''?idleChip:{ background:TYPE_COLORS[t]?.bg||'#F1F5F9', color:TYPE_COLORS[t]?.color||'#64748B', border:`1px solid ${TYPE_COLORS[t]?.border||'#E2E8F0'}` })}>

@@ -91,15 +91,13 @@ export async function syncCallLogs() {
   if (__DEV__ && console.tron) {
     console.tron.log('🔄 syncCallLogs triggered');
   }
-  const lastSyncRaw = await AsyncStorage.getItem(LAST_SYNC_KEY);
-  let lastSync      = lastSyncRaw ? parseInt(lastSyncRaw, 10) : 0;
 
-  // First install: cap to last 30 days only
-  if (lastSync === 0) {
-    lastSync = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  }
+  // Only sync today's calls — midnight local time
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const sinceTimestamp = todayStart.getTime();
 
-  let nativeLogs = await readNativeCallLogs(lastSync);
+  let nativeLogs = await readNativeCallLogs(sinceTimestamp);
   if (nativeLogs.length === 0) nativeLogs = await readLocalCallLogs_fallback(lastSync);
   if (nativeLogs.length === 0) return { synced: 0, message: 'No new calls to sync' };
 
@@ -123,10 +121,8 @@ export async function syncCallLogs() {
     if (!enriched) return log;
     return {
       ...log,
-      notes:        enriched.notes        || log.notes,
-      callStatus:   enriched.status       || enriched.callStatus  || log.callStatus,
-      callTags:     enriched.tags         || enriched.callTags    || log.callTags,
-      followUpDate: enriched.followUpDate || log.followUpDate,
+      notes:      enriched.notes      || log.notes,
+      callStatus: enriched.status     || enriched.callStatus || log.callStatus,
     };
   });
 
@@ -186,9 +182,8 @@ export async function flushPendingEnriches() {
 
         if (matched) {
           await api.patch(`/api/calls/${matched._id}/notes`, {
-            notes:      enrich.notes || undefined,
-            callTags:   enrich.tags?.length ? enrich.tags : undefined,
-            callStatus: enrich.status || undefined,
+            notes:      enrich.notes   || undefined,
+            callStatus: enrich.status  || undefined,
           });
           await AsyncStorage.removeItem(key);
         }

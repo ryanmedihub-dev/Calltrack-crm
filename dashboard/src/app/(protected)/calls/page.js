@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
@@ -11,20 +11,123 @@ function formatDuration(sec) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
+function todayIST() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
 function Ico({ size = 14, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
 }
-const CloseIco = () => <Ico><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Ico>;
-const NoteIco  = () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></Ico>;
-const ExportIco= () => <Ico><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Ico>;
+const CloseIco   = () => <Ico><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></Ico>;
+const NoteIco    = () => <Ico><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></Ico>;
+const ExportIco  = () => <Ico><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Ico>;
+const FilterIco  = () => <Ico><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></Ico>;
+const ChevDnIco  = () => <Ico size={12}><polyline points="6 9 12 15 18 9"/></Ico>;
+const SearchIco  = () => <Ico><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Ico>;
+const CalIco     = () => <Ico><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Ico>;
 
-const TYPE_COLORS = {
-  '':        { active:'#0F172A', bg:'#0F172A', idle:'#64748B', idleBg:'#fff', border:'#E2E8F0' },
-  incoming:  { active:'#16A34A', bg:'#22C55E', idle:'#16A34A', idleBg:'rgba(22,163,74,0.06)', border:'rgba(22,163,74,0.25)' },
-  outgoing:  { active:'#D97706', bg:'#F59E0B', idle:'#D97706', idleBg:'rgba(217,119,6,0.06)', border:'rgba(217,119,6,0.25)' },
-  missed:    { active:'#DC2626', bg:'#EF4444', idle:'#DC2626', idleBg:'rgba(220,38,38,0.06)', border:'rgba(220,38,38,0.25)' },
-  rejected:  { active:'#7C3AED', bg:'#8B5CF6', idle:'#7C3AED', idleBg:'rgba(124,58,237,0.06)', border:'rgba(124,58,237,0.25)' },
-};
+const CALL_TYPES = [
+  { v: 'incoming', l: 'Incoming', color: '#16A34A', bg: 'rgba(22,163,74,0.08)', border: 'rgba(22,163,74,0.25)' },
+  { v: 'outgoing', l: 'Outgoing', color: '#D97706', bg: 'rgba(217,119,6,0.08)', border: 'rgba(217,119,6,0.25)' },
+  { v: 'missed',   l: 'Missed',   color: '#DC2626', bg: 'rgba(220,38,38,0.08)', border: 'rgba(220,38,38,0.25)' },
+  { v: 'rejected', l: 'Rejected', color: '#7C3AED', bg: 'rgba(124,58,237,0.08)', border: 'rgba(124,58,237,0.25)' },
+];
+
+const DURATION_OPTS = [
+  { v: '', l: 'Any Duration' },
+  { v: '0-30',   l: '< 30s' },
+  { v: '30-120', l: '30s – 2m' },
+  { v: '120-300',l: '2m – 5m' },
+  { v: '300-',   l: '> 5m' },
+];
+
+const DATE_PRESETS = [
+  { v: 'today',     l: 'Today' },
+  { v: 'yesterday', l: 'Yesterday' },
+  { v: 'thisweek',  l: 'This Week' },
+  { v: 'thismonth', l: 'This Month' },
+  { v: 'custom',    l: 'Custom' },
+];
+
+function presetToDates(preset) {
+  const now = new Date();
+  const d = (date) => date.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const inIST = (offsetDays = 0) => {
+    const dt = new Date(now);
+    dt.setDate(dt.getDate() + offsetDays);
+    return d(dt);
+  };
+  switch (preset) {
+    case 'today':     return { startDate: inIST(0), endDate: inIST(0) };
+    case 'yesterday': return { startDate: inIST(-1), endDate: inIST(-1) };
+    case 'thisweek': {
+      const day = now.getDay();
+      return { startDate: inIST(-day), endDate: inIST(0) };
+    }
+    case 'thismonth': {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { startDate: d(first), endDate: inIST(0) };
+    }
+    default: return { startDate: '', endDate: '' };
+  }
+}
+
+/* Multi-select dropdown */
+function MultiSelect({ label, options, selected, onChange, placeholder = 'All' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = (v) => {
+    onChange(selected.includes(v) ? selected.filter(x=>x!==v) : [...selected, v]);
+  };
+
+  const label2 = selected.length === 0
+    ? placeholder
+    : selected.length === 1
+      ? options.find(o=>o.value===selected[0])?.label || selected[0]
+      : `${selected.length} selected`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>{label}</label>
+      <button type="button" onClick={()=>setOpen(o=>!o)}
+        className="form-input flex items-center justify-between gap-2 cursor-pointer text-left"
+        style={{ minWidth: 140 }}>
+        <span style={{ color: selected.length ? '#0F172A' : '#94A3B8', fontSize: 13 }}>{label2}</span>
+        <ChevDnIco />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-30 rounded-xl py-1 overflow-hidden"
+          style={{ background:'#fff', border:'1px solid #E2E8F0', boxShadow:'0 8px 30px rgba(0,0,0,0.12)', minWidth:180 }}>
+          {options.map(opt=>(
+            <label key={opt.value} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors"
+              style={{ fontSize:13, color:'#374151' }}
+              onMouseEnter={e=>e.currentTarget.style.background='#F8FAFC'}
+              onMouseLeave={e=>e.currentTarget.style.background=''}>
+              <input type="checkbox" checked={selected.includes(opt.value)} onChange={()=>toggle(opt.value)}
+                className="rounded" style={{ accentColor:'#2563EB' }} />
+              {opt.label}
+            </label>
+          ))}
+          {selected.length > 0 && (
+            <div style={{ borderTop:'1px solid #F1F5F9', padding:'8px 16px' }}>
+              <button onClick={()=>{ onChange([]); setOpen(false); }}
+                className="text-xs font-semibold" style={{ color:'#EF4444' }}>
+                Clear all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CreateLeadModal({ call, employees, onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -91,28 +194,49 @@ function CreateLeadModal({ call, employees, onClose, onCreated }) {
 }
 
 export default function CallLogsPage() {
-  const [calls,     setCalls]     = useState([]);
-  const [total,     setTotal]     = useState(0);
-  const [pages,     setPages]     = useState(1);
-  const [page,      setPage]      = useState(1);
-  const [employees, setEmployees] = useState([]);
-  const [expanded,  setExpanded]  = useState(null);
-  const [leadCall,  setLeadCall]  = useState(null);
-  const [noteModal, setNoteModal] = useState(null);
-  const [noteText,  setNoteText]  = useState('');
+  const [calls,      setCalls]      = useState([]);
+  const [total,      setTotal]      = useState(0);
+  const [pages,      setPages]      = useState(1);
+  const [page,       setPage]       = useState(1);
+  const [employees,  setEmployees]  = useState([]);
+  const [expanded,   setExpanded]   = useState(null);
+  const [leadCall,   setLeadCall]   = useState(null);
+  const [noteModal,  setNoteModal]  = useState(null);
+  const [noteText,   setNoteText]   = useState('');
+  const [showFilter, setShowFilter] = useState(true);
 
-  const [filters, setFilters] = useState(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search);
-      return { employeeId: p.get('employeeId')||'', callType: p.get('callType')||'', startDate: p.get('startDate')||today, endDate: p.get('endDate')||today, search: p.get('search')||'' };
+  const today = todayIST();
+
+  const [datePreset,    setDatePreset]    = useState('today');
+  const [selectedTypes, setSelectedTypes] = useState([]);
+  const [selectedEmps,  setSelectedEmps]  = useState([]);
+  const [duration,      setDuration]      = useState('');
+  const [search,        setSearch]        = useState('');
+  const [customStart,   setCustomStart]   = useState(today);
+  const [customEnd,     setCustomEnd]     = useState(today);
+  const [tags,          setTags]          = useState('');
+
+  const buildFilters = () => {
+    const dates = datePreset === 'custom'
+      ? { startDate: customStart, endDate: customEnd }
+      : presetToDates(datePreset);
+
+    const params = { ...dates };
+    if (search)                  params.search     = search;
+    if (selectedTypes.length)    params.callType   = selectedTypes.join(',');
+    if (selectedEmps.length)     params.employeeId = selectedEmps.join(',');
+    if (tags)                    params.tags       = tags;
+    if (duration) {
+      const [min, max] = duration.split('-');
+      if (min) params.durationMin = min;
+      if (max) params.durationMax = max;
     }
-    return { employeeId:'', callType:'', startDate: today, endDate: today, search:'' };
-  });
+    return params;
+  };
 
-  const fetchCalls = async (p = page, f = filters) => {
+  const fetchCalls = async (p = page, overrideParams = null) => {
     try {
-      const params = { page:p, limit:20, ...Object.fromEntries(Object.entries(f).filter(([,v])=>v)) };
+      const params = { page: p, limit: 20, ...(overrideParams ?? buildFilters()) };
       const res = await api.get('/api/calls', { params });
       setCalls(res.data.data.calls);
       setTotal(res.data.data.total);
@@ -123,18 +247,28 @@ export default function CallLogsPage() {
   useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data.data)).catch(()=>{}); }, []);
   useEffect(() => { fetchCalls(); }, [page]);
 
-  const applyFilter = (patch) => {
-    const next = { ...filters, ...patch };
-    setFilters(next); setPage(1); fetchCalls(1, next);
+  const applyFilters = () => { setPage(1); fetchCalls(1); };
+
+  const resetFilters = () => {
+    setDatePreset('today');
+    setSelectedTypes([]);
+    setSelectedEmps([]);
+    setDuration('');
+    setSearch('');
+    setCustomStart(today);
+    setCustomEnd(today);
+    setTags('');
+    setPage(1);
+    fetchCalls(1, { startDate: today, endDate: today });
   };
 
   const handleExport = async () => {
     try {
-      const params = Object.fromEntries(Object.entries(filters).filter(([,v])=>v));
+      const params = buildFilters();
       const res = await api.get('/api/calls/export', { params, responseType:'blob' });
       const url = URL.createObjectURL(new Blob([res.data],{type:'text/csv'}));
       const a = document.createElement('a'); a.href = url;
-      a.download = `calls_${new Date().toISOString().slice(0,10)}.csv`;
+      a.download = `calls_${today}.csv`;
       a.click(); URL.revokeObjectURL(url);
       toast.success('Export downloaded');
     } catch { toast.error('Export failed'); }
@@ -150,65 +284,148 @@ export default function CallLogsPage() {
     } catch { toast.error('Failed to save'); }
   };
 
+  const activeFilterCount = [
+    selectedTypes.length > 0,
+    selectedEmps.length > 0,
+    duration !== '',
+    tags !== '',
+    datePreset !== 'today',
+  ].filter(Boolean).length;
+
+  const empOptions = employees.map(e => ({ value: e._id, label: e.name }));
+
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-bold" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>Call Logs</h2>
           <p className="text-sm mt-0.5" style={{ color:'#94A3B8' }}>{total.toLocaleString()} total records</p>
         </div>
-        <button onClick={handleExport} className="btn-secondary text-xs py-1.5 px-3">
-          <ExportIco /> Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={()=>setShowFilter(f=>!f)}
+            className="btn-secondary text-xs py-1.5 px-3 relative">
+            <FilterIco />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-white"
+                style={{ background:'#2563EB' }}>
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+          <button onClick={handleExport} className="btn-secondary text-xs py-1.5 px-3">
+            <ExportIco /> Export CSV
+          </button>
+        </div>
       </div>
 
-      {/* Type chips */}
-      <div className="flex gap-2 flex-wrap">
-        {[{v:'',l:'All Types'},{v:'incoming',l:'Incoming'},{v:'outgoing',l:'Outgoing'},{v:'missed',l:'Missed'},{v:'rejected',l:'Rejected'}].map(({v,l})=>{
-          const active = filters.callType === v;
-          const c = TYPE_COLORS[v];
-          return (
-            <button key={v} onClick={()=>applyFilter({callType:v})}
-              className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
-              style={active
-                ? { background:c.bg, color:'#fff', border:`1px solid ${c.bg}` }
-                : { background:c.idleBg, color:c.idle, border:`1px solid ${c.border}` }}>
-              {l}
-            </button>
-          );
-        })}
-      </div>
+      {/* Filter panel */}
+      {showFilter && (
+        <div className="page-card p-4 space-y-4 animate-slide-down">
+          {/* Date preset row */}
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-2" style={{ color:'#64748B' }}>
+              <CalIco /> Date Range
+            </label>
+            <div className="flex flex-wrap gap-2 items-center">
+              {DATE_PRESETS.map(p=>(
+                <button key={p.v} onClick={()=>setDatePreset(p.v)}
+                  className="px-3 h-8 rounded-full text-xs font-semibold transition-all"
+                  style={datePreset===p.v
+                    ? { background:'#2563EB', color:'#fff', border:'1px solid #2563EB' }
+                    : { background:'#fff', color:'#64748B', border:'1px solid #E2E8F0' }}>
+                  {p.l}
+                </button>
+              ))}
+              {datePreset === 'custom' && (
+                <div className="flex items-center gap-2 ml-2">
+                  <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)}
+                    className="form-input" style={{ width:140, padding:'6px 10px', fontSize:12 }} />
+                  <span className="text-xs" style={{ color:'#94A3B8' }}>to</span>
+                  <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)}
+                    className="form-input" style={{ width:140, padding:'6px 10px', fontSize:12 }} />
+                </div>
+              )}
+            </div>
+          </div>
 
-      {/* Filter bar */}
-      <div className="page-card p-4 flex flex-wrap gap-3 items-end">
-        <div className="flex-1 min-w-44">
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>Search</label>
-          <input value={filters.search} placeholder="Number, name, employee…"
-            onChange={e=>setFilters({...filters,search:e.target.value})}
-            onKeyDown={e=>e.key==='Enter'&&applyFilter({})}
-            className="form-input" />
+          {/* Filter controls row */}
+          <div className="flex flex-wrap gap-3 items-end">
+            {/* Search */}
+            <div className="flex-1 min-w-44">
+              <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>Search</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color:'#94A3B8', pointerEvents:'none' }}><SearchIco /></span>
+                <input value={search} placeholder="Number, name, employee…"
+                  onChange={e=>setSearch(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&applyFilters()}
+                  className="form-input" style={{ paddingLeft:34 }} />
+              </div>
+            </div>
+
+            {/* Call Type multi-select */}
+            <MultiSelect
+              label="Call Type"
+              options={CALL_TYPES.map(t=>({ value:t.v, label:t.l }))}
+              selected={selectedTypes}
+              onChange={setSelectedTypes}
+              placeholder="All Types"
+            />
+
+            {/* Agent multi-select */}
+            <MultiSelect
+              label="Agent"
+              options={empOptions}
+              selected={selectedEmps}
+              onChange={setSelectedEmps}
+              placeholder="All Agents"
+            />
+
+            {/* Duration */}
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>Duration</label>
+              <select value={duration} onChange={e=>setDuration(e.target.value)}
+                className="form-input" style={{ minWidth:130 }}>
+                {DURATION_OPTS.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+              </select>
+            </div>
+
+            {/* Tags */}
+            <div className="min-w-32">
+              <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>Tags</label>
+              <input value={tags} placeholder="e.g. hot-lead"
+                onChange={e=>setTags(e.target.value)}
+                className="form-input" />
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2 pb-0.5">
+              <button onClick={resetFilters} className="btn-secondary text-xs py-1.5 px-3">Reset</button>
+              <button onClick={applyFilters} className="btn-primary text-xs py-1.5 px-4">Apply</button>
+            </div>
+          </div>
+
+          {/* Active type chips */}
+          {selectedTypes.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {selectedTypes.map(t=>{
+                const cfg = CALL_TYPES.find(c=>c.v===t);
+                return cfg ? (
+                  <span key={t} className="flex items-center gap-1.5 px-2.5 h-7 rounded-full text-xs font-semibold"
+                    style={{ background:cfg.bg, color:cfg.color, border:`1px solid ${cfg.border}` }}>
+                    {cfg.l}
+                    <button onClick={()=>setSelectedTypes(prev=>prev.filter(x=>x!==t))}
+                      className="opacity-60 hover:opacity-100 transition-opacity">
+                      <CloseIco />
+                    </button>
+                  </span>
+                ) : null;
+              })}
+            </div>
+          )}
         </div>
-        <div className="min-w-40">
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>Employee</label>
-          <select value={filters.employeeId} onChange={e=>applyFilter({employeeId:e.target.value})} className="form-input">
-            <option value="">All Employees</option>
-            {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>From</label>
-          <input type="date" value={filters.startDate} onChange={e=>applyFilter({startDate:e.target.value})} className="form-input" style={{ width:150 }} />
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-[0.07em] mb-1.5" style={{ color:'#64748B' }}>To</label>
-          <input type="date" value={filters.endDate} onChange={e=>applyFilter({endDate:e.target.value})} className="form-input" style={{ width:150 }} />
-        </div>
-        <div className="flex gap-2 pb-0.5">
-          <button onClick={()=>applyFilter({employeeId:'',callType:'',startDate:'',endDate:'',search:''})} className="btn-secondary text-xs py-1.5">Reset</button>
-          <button onClick={()=>applyFilter({})} className="btn-primary text-xs py-1.5">Apply</button>
-        </div>
-      </div>
+      )}
 
       {/* Table */}
       <div className="page-card overflow-hidden">
@@ -219,7 +436,7 @@ export default function CallLogsPage() {
                 <th>#</th>
                 <th>Employee</th>
                 <th>Contact</th>
-                <th>Date & Time</th>
+                <th>Date & Time (IST)</th>
                 <th>Duration</th>
                 <th>Type</th>
                 <th>Notes</th>
@@ -252,10 +469,10 @@ export default function CallLogsPage() {
                     </td>
                     <td onClick={e=>e.stopPropagation()}>
                       <p className="text-xs font-medium" style={{ color:'#0F172A' }}>
-                        {new Date(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+                        {new Date(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
                       </p>
                       <p className="text-[11px]" style={{ color:'#94A3B8' }}>
-                        {new Date(log.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                        {new Date(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
                       </p>
                     </td>
                     <td className="font-medium text-xs" style={{ color:'#475569' }}>{formatDuration(log.duration)}</td>
@@ -290,11 +507,17 @@ export default function CallLogsPage() {
                   {expanded === log._id && (
                     <tr key={log._id+'_exp'}>
                       <td colSpan={8} className="animate-slide-down" style={{ background:'#F8FAFC', padding:'12px 16px' }}>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                          {[{l:'Contact Name',v:log.contactName||'—'},{l:'Full Number',v:log.contactNumber},{l:'Duration',v:formatDuration(log.duration)},{l:'Notes',v:log.notes||'—'}].map(({l,v})=>(
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+                          {[
+                            {l:'Contact Name', v:log.contactName||'—'},
+                            {l:'Full Number',  v:log.contactNumber},
+                            {l:'Duration',     v:formatDuration(log.duration)},
+                            {l:'Call Type',    v:log.callType||'—'},
+                            {l:'Notes',        v:log.notes||'—'},
+                          ].map(({l,v})=>(
                             <div key={l} className="page-card p-3">
                               <p className="font-semibold mb-1" style={{ color:'#94A3B8' }}>{l}</p>
-                              <p style={{ color:'#0F172A' }}>{v}</p>
+                              <p className="font-medium" style={{ color:'#0F172A' }}>{v}</p>
                             </div>
                           ))}
                         </div>
@@ -311,6 +534,9 @@ export default function CallLogsPage() {
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                       </div>
                       <p className="text-sm" style={{ color:'#94A3B8' }}>No call logs found</p>
+                      <button onClick={resetFilters} className="text-xs font-semibold" style={{ color:'#2563EB' }}>
+                        Clear filters
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -354,7 +580,7 @@ export default function CallLogsPage() {
       {leadCall && (
         <CreateLeadModal call={leadCall} employees={employees}
           onClose={()=>setLeadCall(null)}
-          onCreated={()=>fetchCalls(page,filters)} />
+          onCreated={()=>fetchCalls(page)} />
       )}
     </div>
   );

@@ -17,7 +17,6 @@ function fmtDuration(seconds) {
 }
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
-// offsetDays=0 → today IST, -1 → yesterday IST, etc.
 function getISTDateBounds(offsetDays = 0) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   const nowIST = new Date(Date.now() + IST_OFFSET_MS);
@@ -58,32 +57,31 @@ async function computePeriodStats(start, end) {
       }}
     ]),
 
-    // Calls per hour bucket
     CallLog.aggregate([
       { $match: match },
       { $group: { _id: { $hour: '$timestamp' }, count: { $sum: 1 } } }
     ]),
 
-    // Per-employee: count + working-hours span + top dialers
+    // Per-employee stats — lookup User for name
     CallLog.aggregate([
       { $match: match },
       { $group: {
         _id:   '$employeeId',
-        name:  { $first: '$employeeName' },
         count: { $sum: 1 },
         first: { $min: '$timestamp' },
         last:  { $max: '$timestamp' }
       }},
+      { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'userInfo' } },
+      { $addFields: { name: { $arrayElemAt: ['$userInfo.name', 0] } } },
+      { $project: { userInfo: 0 } },
       { $sort: { count: -1 } }
     ]),
 
-    // notPickupByClient: outgoing with 0 duration
     CallLog.aggregate([
       { $match: { ...match, callType: 'outgoing', $or: [{ duration: 0 }, { duration: null }, { duration: { $exists: false } }] } },
       { $count: 'count' }
     ]),
 
-    // neverAttended: missed contacts that have no outgoing call in same period
     CallLog.aggregate([
       { $match: match },
       { $group: {
@@ -147,6 +145,16 @@ async function computePeriodStats(start, end) {
   };
 }
 
+// Enrich a raw CallLog lean object with computed employeeName/employeePhone
+// (populated employeeId comes from .populate('employeeId', 'name phone'))
+function enrichWithEmployee(doc) {
+  return {
+    ...doc,
+    employeeName:  doc.employeeId?.name  || 'Unknown',
+    employeePhone: doc.employeeId?.phone || '',
+  };
+}
+
 // POST /api/calls/sync — employee sends batch of call logs
 router.post('/sync', protect, async (req, res) => {
   try {
@@ -155,7 +163,7 @@ router.post('/sync', protect, async (req, res) => {
       return res.status(400).json({ success: false, error: 'calls array required' });
     }
 
-    // Capture follow-up dates from raw payload before schema strips unknown fields
+    // Capture follow-up dates from raw payload — used to update Lead.followUpDate
     const followUpMap = {};
     calls.forEach((c) => {
       if (c.followUpDate && c.contactNumber) {
@@ -164,16 +172,17 @@ router.post('/sync', protect, async (req, res) => {
     });
 
     const docs = calls.map((c) => ({
-      ...c,
       contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
+      contactName:   c.contactName,
+      callType:      c.callType,
+      duration:      c.duration,
+      timestamp:     c.timestamp,
+      notes:         c.notes,
+      callStatus:    c.callStatus,
       employeeId:    req.user._id,
-      employeeName:  req.user.name,
-      employeePhone: req.user.phone || '',
-      deviceId:      req.user.deviceId || c.deviceId || '',
       synced:        true
     }));
 
-    // ordered:false lets all non-duplicate docs insert; catch duplicate-key errors
     let inserted = [];
     try {
       inserted = await CallLog.insertMany(docs, { ordered: false });
@@ -185,19 +194,18 @@ router.post('/sync', protect, async (req, res) => {
       }
     }
 
-    // For docs that already existed (skipped by insertMany), update their
-    // enriched fields (notes, callStatus, callTags) if the employee just added them.
+    // For docs that already existed (skipped by insertMany), update enriched fields
+    // (notes, callStatus) if the employee just added them.
     const insertedKeys = new Set(
       inserted.map((d) => `${d.contactNumber}_${Math.floor(new Date(d.timestamp).getTime() / 60000)}`)
     );
     for (const doc of docs) {
-      if (!doc.notes && !doc.callStatus && (!doc.callTags || !doc.callTags.length)) continue;
+      if (!doc.notes && !doc.callStatus) continue;
       const docKey = `${doc.contactNumber}_${Math.floor(new Date(doc.timestamp).getTime() / 60000)}`;
-      if (insertedKeys.has(docKey)) continue; // newly inserted — already has enriched data
+      if (insertedKeys.has(docKey)) continue;
       const enrichedSet = {};
-      if (doc.notes)                       enrichedSet.notes       = doc.notes;
-      if (doc.callStatus)                  enrichedSet.callStatus  = doc.callStatus;
-      if (doc.callTags && doc.callTags.length) enrichedSet.callTags = doc.callTags;
+      if (doc.notes)      enrichedSet.notes      = doc.notes;
+      if (doc.callStatus) enrichedSet.callStatus = doc.callStatus;
       if (!Object.keys(enrichedSet).length) continue;
       const ts = new Date(doc.timestamp).getTime();
       await CallLog.updateOne(
@@ -210,7 +218,7 @@ router.post('/sync', protect, async (req, res) => {
       ).catch(() => {});
     }
 
-    // Auto-link to lead if phone number matches and update lead call stats
+    // Auto-link to lead and update lead call stats / callLogs array
     const phoneToLead = {};
     const phones = inserted.map((l) => l.contactNumber).filter(Boolean);
     if (phones.length) {
@@ -222,87 +230,45 @@ router.post('/sync', protect, async (req, res) => {
       const lead = phoneToLead[log.contactNumber];
 
       if (lead) {
-        // ── Existing lead: update call stats + push note if present ──────
+        // Existing lead: update call stats + add callLog reference
         await CallLog.findByIdAndUpdate(log._id, { leadId: lead._id });
 
+        const fuDate = followUpMap[log.contactNumber];
         const updateData = {
           $inc: { attempts: 1 },
           $set: {
             lastCallAt:            log.timestamp,
             lastCallType:          log.callType,
             lastCallDuration:      log.duration || 0,
-            lastCallEmployee:      log.employeeName,
-            lastCallEmployeePhone: log.employeePhone,
+            lastCallEmployee:      req.user.name,
+            lastCallEmployeePhone: req.user.phone || '',
+          },
+          $addToSet: { callLogs: log._id },
+          $push: {
+            changelog: {
+              changedBy:     req.user._id,
+              changedByName: req.user.name,
+              action:        'call_linked',
+              details: {
+                callType:   log.callType,
+                duration:   log.duration || 0,
+                timestamp:  log.timestamp,
+                notes:      log.notes     || null,
+                callStatus: log.callStatus || null,
+              }
+            }
           }
         };
 
         if ((log.duration || 0) > 0) updateData.$inc.connectedCallCount = 1;
-
-        // Follow-up date
-        const fuDate = followUpMap[log.contactNumber];
         if (fuDate) updateData.$set.followUpDate = new Date(fuDate);
-
-        // Push note to lead's notes array if employee added one
-        if (log.notes && log.notes.trim()) {
-          updateData.$push = {
-            notes: {
-              text:    log.notes.trim(),
-              addedBy: log.employeeId,
-              addedAt: new Date(log.timestamp)
-            }
-          };
-        }
-
-        // Sync callStatus to lastCallSummary field for quick reference
         if (log.callStatus) updateData.$set.lastCallSummary = log.callStatus;
+        if (log.notes && log.notes.trim()) updateData.$set.lastCallNote = log.notes.trim();
 
         await Lead.findByIdAndUpdate(lead._id, updateData);
 
-      } else {
-        // ── New number: auto-create lead ──────────────────────────────────
-        const isConnected = (log.duration || 0) > 0;
-
-        // Only auto-create if connected call or employee explicitly added input
-        const hasEmployeeInput = !!(log.notes?.trim() || log.callStatus || (log.callTags && log.callTags.length));
-
-        if (isConnected || hasEmployeeInput) {
-          try {
-            const fuDate = followUpMap[log.contactNumber];
-            const initialNotes = (log.notes && log.notes.trim())
-              ? [{ text: log.notes.trim(), addedBy: log.employeeId, addedAt: new Date(log.timestamp) }]
-              : [];
-
-            const newLead = await Lead.create({
-              name:                  log.contactName && log.contactName !== 'Unknown'
-                                       ? log.contactName
-                                       : log.contactNumber,
-              phone:                 log.contactNumber,
-              status:                'new',
-              source:                'Call',
-              capturedBy:            log.employeeName,
-              assignedTo:            log.employeeId,
-              attempts:              1,
-              lastCallAt:            log.timestamp,
-              lastCallType:          log.callType,
-              lastCallDuration:      log.duration || 0,
-              lastCallEmployee:      log.employeeName,
-              lastCallEmployeePhone: log.employeePhone,
-              lastCallSummary:       log.callStatus || null,
-              connectedCallCount:    isConnected ? 1 : 0,
-              followUpDate:          fuDate ? new Date(fuDate) : null,
-              notes:                 initialNotes,
-            });
-
-            await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
-
-          } catch (leadErr) {
-            // Duplicate phone (race condition) — silently skip
-            if (leadErr.code !== 11000) {
-              console.error('Auto lead create error:', leadErr.message);
-            }
-          }
-        }
       }
+      // No number in system — call log saved, lead is created only when employee explicitly submits via the app
     }
 
     const pusher = getPusher();
@@ -311,18 +277,17 @@ router.post('/sync', protect, async (req, res) => {
         channel: 'managers',
         name: 'new_call_log',
         data: {
-          _id:          log._id.toString(),
-          employeeId:   log.employeeId.toString(),
-          employeeName: log.employeeName,
-          callType:     log.callType,
-          duration:     log.duration,
-          timestamp:    log.timestamp,
+          _id:           log._id.toString(),
+          employeeId:    log.employeeId.toString(),
+          employeeName:  req.user.name,
+          callType:      log.callType,
+          duration:      log.duration,
+          timestamp:     log.timestamp,
           contactNumber: log.contactNumber,
-          contactName:  log.contactName,
-          hasLead:      !!phoneToLead[log.contactNumber]
+          contactName:   log.contactName,
+          hasLead:       !!phoneToLead[log.contactNumber]
         }
       }));
-      // Pusher batch limit is 10 events per call
       for (let i = 0; i < events.length; i += 10) {
         await pusher.triggerBatch(events.slice(i, i + 10));
       }
@@ -358,14 +323,14 @@ router.get('/', protect, isManager, async (req, res) => {
       filter.$or = [
         { contactNumber: { $regex: search, $options: 'i' } },
         { contactName:   { $regex: search, $options: 'i' } },
-        { employeeName:  { $regex: search, $options: 'i' } }
       ];
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [calls, total] = await Promise.all([
-      CallLog.find(filter).sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)),
+    const [callsRaw, total] = await Promise.all([
+      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter)
     ]);
+    const calls = callsRaw.map(enrichWithEmployee);
     return res.json({
       success: true,
       data: { calls, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) }
@@ -398,7 +363,6 @@ router.get('/stats', protect, isManager, async (req, res) => {
         today:     { ...todayStats,     date: fmtDate(todayStart) },
         yesterday: { ...yesterdayStats, date: fmtDate(ystStart) },
         lastWeek:  lastWeekStats,
-        // legacy fields
         totalToday:     todayStats.totalCalls,
         missedToday:    todayStats.missed,
         incomingToday:  todayStats.incoming,
@@ -418,8 +382,8 @@ router.get('/stats', protect, isManager, async (req, res) => {
 // GET /api/calls/realtime — latest 50 calls
 router.get('/realtime', protect, isManager, async (req, res) => {
   try {
-    const calls = await CallLog.find().sort({ timestamp: -1 }).limit(50);
-    return res.json({ success: true, data: calls });
+    const callsRaw = await CallLog.find().populate('employeeId', 'name phone').sort({ timestamp: -1 }).limit(50).lean();
+    return res.json({ success: true, data: callsRaw.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -510,17 +474,16 @@ router.get('/export', protect, isManager, async (req, res) => {
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="calls.csv"');
-    res.write('Date,Time,Employee,Employee Phone,Contact Name,Contact Number,Type,Duration (s),Notes\n');
+    res.write('Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n');
 
-    const cursor = CallLog.find(filter).sort({ timestamp: -1 }).lean().cursor();
+    const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1 }).lean().cursor();
     for await (const doc of cursor) {
       const d   = new Date(doc.timestamp);
       const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
       res.write([
         d.toLocaleDateString('en-IN'),
         d.toLocaleTimeString('en-IN'),
-        esc(doc.employeeName),
-        doc.employeePhone || '',
+        esc(doc.employeeId?.name),
         esc(doc.contactName),
         doc.contactNumber || '',
         doc.callType || '',
@@ -535,41 +498,51 @@ router.get('/export', protect, isManager, async (req, res) => {
   }
 });
 
-// GET /api/calls/pending-followups — all calls with a future followUpDate for this employee
+// GET /api/calls/pending-followups — leads with a future followUpDate assigned to this employee
 router.get('/pending-followups', protect, async (req, res) => {
   try {
-    const calls = await CallLog.find({
-      employeeId:   req.user._id,
+    const leads = await Lead.find({
+      assignedTo:  req.user._id,
       followUpDate: { $gt: new Date() },
     }).sort({ followUpDate: 1 }).limit(200).lean();
-    return res.json({ success: true, data: calls });
+
+    // Map to shape the mobile client expects
+    const data = leads.map((l) => ({
+      _id:           l._id,
+      contactName:   l.name,
+      contactNumber: l.phone,
+      followUpDate:  l.followUpDate,
+      notes:         l.lastCallNote || '',
+    }));
+
+    return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// PATCH /api/calls/:id/notes — add notes, tags, status, followUpDate to a call log
+// PATCH /api/calls/:id/notes — add notes or status to a call log
 router.patch('/:id/notes', protect, async (req, res) => {
   try {
-    const { notes, callTags, callStatus, followUpDate } = req.body;
+    const { notes, callStatus } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
     if (req.user.role !== 'manager' && !isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
-    if (notes        !== undefined) call.notes       = notes;
-    if (callTags     !== undefined) call.callTags    = callTags;
-    if (callStatus   !== undefined) call.callStatus  = callStatus;
-    if (followUpDate !== undefined) call.followUpDate = followUpDate ? new Date(followUpDate) : null;
+    if (notes      !== undefined) call.notes      = notes;
+    if (callStatus !== undefined) call.callStatus = callStatus;
     await call.save();
 
-    // Propagate followUpDate to linked lead so it shows on the leads screen
-    if (followUpDate !== undefined && call.leadId) {
-      await Lead.findByIdAndUpdate(
-        call.leadId,
-        { $set: { followUpDate: followUpDate ? new Date(followUpDate) : null } }
-      ).catch(() => {});
+    // Propagate callStatus/notes to linked lead's tracking fields
+    if (call.leadId) {
+      const leadUpdate = {};
+      if (callStatus) leadUpdate.lastCallSummary = callStatus;
+      if (notes && notes.trim()) leadUpdate.lastCallNote = notes.trim();
+      if (Object.keys(leadUpdate).length) {
+        await Lead.findByIdAndUpdate(call.leadId, { $set: leadUpdate }).catch(() => {});
+      }
     }
 
     return res.json({ success: true, data: call });
@@ -578,7 +551,7 @@ router.patch('/:id/notes', protect, async (req, res) => {
   }
 });
 
-// DELETE /api/calls/:id — employee can delete own call, manager can delete any
+// DELETE /api/calls/:id
 router.delete('/:id', protect, async (req, res) => {
   try {
     const call = await CallLog.findById(req.params.id);
@@ -612,8 +585,8 @@ router.get('/employee/:id', protect, async (req, res) => {
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const mongoose = require('mongoose');
-    const [calls, total, [agg]] = await Promise.all([
-      CallLog.find(filter).sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)),
+    const [callsRaw, total, [agg]] = await Promise.all([
+      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter),
       CallLog.aggregate([
         { $match: { employeeId: new mongoose.Types.ObjectId(req.params.id) } },
@@ -625,6 +598,7 @@ router.get('/employee/:id', protect, async (req, res) => {
         }}
       ])
     ]);
+    const calls = callsRaw.map(enrichWithEmployee);
     const stats = agg
       ? { total: agg.total, missed: agg.missed, avgDuration: agg.total > 0 ? Math.round(agg.totalDuration / agg.total) : 0 }
       : { total: 0, missed: 0, avgDuration: 0 };

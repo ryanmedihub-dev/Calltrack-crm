@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, RefreshControl, StatusBar, Modal, ScrollView,
-  Animated, Platform, ActivityIndicator,
+  Animated, Platform, ActivityIndicator, Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import CallCard from '../components/CallCard';
 import MiniCalendar from '../components/MiniCalendar';
 import { CallCardSkeleton } from '../components/SkeletonLoader';
@@ -256,6 +256,33 @@ const fs = StyleSheet.create({
 // ── Main screen ────────────────────────────────────────────────────────────────
 
 export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
+  const handleAddToLeads = useCallback(async (call) => {
+    const name = call.contactName && call.contactName !== 'Unknown' ? call.contactName : call.contactNumber;
+    Alert.alert(
+      'Add to Leads',
+      `Add "${name}" (${call.contactNumber}) to your leads?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add Lead',
+          onPress: async () => {
+            try {
+              await api.post('/api/leads', {
+                name,
+                phone:  call.contactNumber,
+                source: 'Call',
+                status: 'new',
+              });
+              Alert.alert('✅ Added', `${name} added to your leads.`);
+            } catch (err) {
+              const msg = err?.response?.data?.error || 'Failed to add lead';
+              Alert.alert('Error', msg);
+            }
+          },
+        },
+      ]
+    );
+  }, []);
   const [calls,       setCalls]       = useState([]);
   const [filtered,    setFiltered]    = useState([]);
   const [typeFilter,  setTypeFilter]  = useState('all');
@@ -384,10 +411,11 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
           call={call}
           onNote={onAddNote}
           onFollowUp={onFollowUp}
+          onAddToLeads={handleAddToLeads}
         />
       ))}
     </View>
-  ), [onAddNote, onFollowUp]);
+  ), [onAddNote, onFollowUp, handleAddToLeads]);
 
   const firstName      = userName.split(' ')[0] || 'there';
   const filterActive   = (datePreset !== 'all' ? 1 : 0) + (sort !== 'newest' ? 1 : 0);

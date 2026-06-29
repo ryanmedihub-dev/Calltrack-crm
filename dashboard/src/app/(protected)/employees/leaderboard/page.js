@@ -80,7 +80,7 @@ export default function LeaderboardPage() {
         <div className="flex gap-0.5 p-1 rounded-xl" style={{ background:'#fff', border:'1px solid #E2E8F0' }}>
           {PERIODS.map(p=>(
             <button key={p.key} onClick={()=>setPeriod(p.key)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              className="px-3.5 h-8 flex items-center rounded-lg text-xs font-semibold transition-all"
               style={period===p.key ? { background:'#2563EB', color:'#fff', boxShadow:'0 2px 6px rgba(37,99,235,0.25)' } : { color:'#94A3B8' }}>
               {p.label}
             </button>

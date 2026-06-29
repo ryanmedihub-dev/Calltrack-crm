@@ -52,8 +52,8 @@ export async function getPendingFollowUps() {
         contactName:   call.contactName   || '',
         contactNumber: call.contactNumber || '',
         followUp:      { date: call.followUpDate, done: false },
-        note:          call.notes     || '',
-        tags:          call.callTags  || [],
+        note:          call.notes || '',
+        tags:          [],
       }));
     }
   } catch {}

@@ -130,7 +130,14 @@ export default function PostCallScreen({ call, onDone }) {
     await syncCallLogs();
     await flushPendingEnriches().catch(() => {});
 
-    // Update matching lead on backend
+    // Read current user from AsyncStorage
+    let userId;
+    try {
+      const userStr = await AsyncStorage.getItem('user');
+      userId = userStr ? JSON.parse(userStr)?._id : undefined;
+    } catch {}
+
+    // Find matching lead → update, or create new one
     try {
       const callDigits = digitsOnly(call.contactNumber);
       const findMatch  = (leads) =>
@@ -151,10 +158,46 @@ export default function PostCallScreen({ call, onDone }) {
       }
 
       if (lead) {
+        // Existing lead — update call outcome
         await api.put(`/api/leads/${lead._id}`, {
           ...(status       && { status }),
           ...(note.trim()  && { lastCallNote: note.trim() }),
           ...(status       && { lastCallSummary: status }),
+          ...(followUpDate && { followUpDate }),
+        });
+      } else if (status || note.trim() || followUpDate) {
+        // No lead exists — create one from this call
+        const contactName = call.contactName && call.contactName !== 'Unknown'
+          ? call.contactName
+          : call.contactNumber;
+
+        // Find the synced call log id via employee-accessible endpoint
+        let callId;
+        if (userId) {
+          try {
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const logsRes = await api.get(`/api/calls/employee/${userId}`, {
+              params: { startDate: today.toISOString(), limit: 50 }
+            }).catch(() => null);
+            const logs = logsRes?.data?.data?.calls || [];
+            const ts   = new Date(call.timestamp).getTime();
+            const matched = logs.find((c) => {
+              const d = digitsOnly(c.contactNumber);
+              const samePhone = d.endsWith(callDigits) || callDigits.endsWith(d);
+              return samePhone && Math.abs(new Date(c.timestamp).getTime() - ts) < 180_000;
+            });
+            callId = matched?._id;
+          } catch {}
+        }
+
+        await api.post('/api/leads/from-call', {
+          name:       contactName,
+          phone:      call.contactNumber,
+          source:     'Call',
+          status:     status || 'contacted',
+          assignedTo: userId,
+          callId,
+          ...(note.trim()  && { lastCallNote: note.trim() }),
           ...(followUpDate && { followUpDate }),
         });
       }

@@ -15,7 +15,6 @@ function fmtDuration(seconds) {
   return `${s}s`;
 }
 
-// Returns the UTC timestamp of IST midnight for today (offsetDays=0) or any offset.
 function istDayStart(offsetDays = 0) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   const nowIST = new Date(Date.now() + IST_OFFSET_MS);
@@ -23,6 +22,10 @@ function istDayStart(offsetDays = 0) {
   nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
   return new Date(nowIST.getTime() - IST_OFFSET_MS);
 }
+
+// Helper: get employee display name from a populated call doc
+function empName(c)  { return c.employeeId?.name  || 'Unknown'; }
+function empPhone(c) { return c.employeeId?.phone || ''; }
 
 // GET /api/reports/periodic — full periodic report
 router.get('/periodic', protect, isManager, async (req, res) => {
@@ -43,7 +46,10 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     if (employeeId) filter.employeeId = employeeId;
     if (callType) filter.callType = callType;
 
-    const calls = await CallLog.find(filter).sort({ timestamp: -1 }).lean();
+    const calls = await CallLog.find(filter)
+      .populate('employeeId', 'name phone')
+      .sort({ timestamp: -1 })
+      .lean();
 
     const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
     calls.forEach((c) => { if (byType[c.callType]) byType[c.callType].push(c); });
@@ -61,9 +67,10 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     // Employee summary map
     const empSummary = {};
     calls.forEach((c) => {
-      const id = c.employeeId.toString();
+      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
+      if (!id) return;
       if (!empSummary[id]) empSummary[id] = {
-        employeeId: id, employeeName: c.employeeName,
+        employeeId: id, employeeName: empName(c),
         totalCalls: 0, totalDuration: 0,
         incoming: 0, incomingConnected: 0, incomingDuration: 0,
         outgoing: 0, outgoingConnected: 0, outgoingDuration: 0,
@@ -91,16 +98,17 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       if (new Date(c.timestamp) > new Date(e.lastSyncTime)) e.lastSyncTime = c.timestamp;
     });
 
-    // Add neverAttended to employee summary
     const empMissedNums = {};
     const empOutgoingNums = {};
     byType.missed.forEach((c) => {
-      const id = c.employeeId.toString();
+      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
+      if (!id) return;
       if (!empMissedNums[id]) empMissedNums[id] = new Set();
       empMissedNums[id].add(c.contactNumber);
     });
     byType.outgoing.forEach((c) => {
-      const id = c.employeeId.toString();
+      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
+      if (!id) return;
       if (!empOutgoingNums[id]) empOutgoingNums[id] = new Set();
       empOutgoingNums[id].add(c.contactNumber);
     });
@@ -114,12 +122,11 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 
     const employeeSummaryList = Object.values(empSummary).map((e) => ({
       ...e,
-      totalDuration: fmtDuration(e.totalDuration),
+      totalDuration:    fmtDuration(e.totalDuration),
       incomingDuration: fmtDuration(e.incomingDuration),
       outgoingDuration: fmtDuration(e.outgoingDuration)
     }));
 
-    // Summary tab
     if (tab === 'summary') {
       return res.json({
         success: true,
@@ -129,9 +136,9 @@ router.get('/periodic', protect, isManager, async (req, res) => {
           summary: {
             incoming: { calls: byType.incoming.length, duration: fmtDuration(incomingDuration) },
             outgoing: { calls: byType.outgoing.length, duration: fmtDuration(outgoingDuration) },
-            missed: { calls: byType.missed.length, duration: '—' },
+            missed:   { calls: byType.missed.length,   duration: '—' },
             rejected: { calls: byType.rejected.length, duration: '—' },
-            total: { calls: calls.length, duration: fmtDuration(totalDuration) }
+            total:    { calls: calls.length, duration: fmtDuration(totalDuration) }
           },
           sidebarStats: {
             neverAttended: neverAttendedNums.length,
@@ -144,7 +151,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
           pieData: [
             { name: 'Incoming', value: byType.incoming.length, color: '#34C759' },
             { name: 'Outgoing', value: byType.outgoing.length, color: '#FF9500' },
-            { name: 'Missed', value: byType.missed.length, color: '#FF3B30' },
+            { name: 'Missed',   value: byType.missed.length,   color: '#FF3B30' },
             { name: 'Rejected', value: byType.rejected.length, color: '#7C3AED' }
           ].filter(d => d.value > 0),
           employeeSummary: employeeSummaryList
@@ -152,7 +159,6 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       });
     }
 
-    // Day-wise analysis
     if (tab === 'daywise') {
       const dayMap = {};
       calls.forEach((c) => {
@@ -166,7 +172,6 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       return res.json({ success: true, data: { daywise } });
     }
 
-    // Hourly analysis
     if (tab === 'hourly') {
       const hourly = Array.from({ length: 24 }, (_, h) => ({
         hour: h, label: `${String(h).padStart(2,'0')}:00`,
@@ -181,7 +186,6 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       return res.json({ success: true, data: { hourly: hourly.map(h => ({ ...h, duration: fmtDuration(h.duration) })) } });
     }
 
-    // Never attended
     if (tab === 'neverAttended') {
       const numMap = {};
       byType.missed.forEach((c) => {
@@ -190,7 +194,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
           missedCount: 0, lastMissedAt: c.timestamp, employees: new Set()
         };
         numMap[c.contactNumber].missedCount++;
-        numMap[c.contactNumber].employees.add(c.employeeName);
+        numMap[c.contactNumber].employees.add(empName(c));
         if (new Date(c.timestamp) > new Date(numMap[c.contactNumber].lastMissedAt)) {
           numMap[c.contactNumber].lastMissedAt = c.timestamp;
         }
@@ -209,12 +213,11 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       });
     }
 
-    // Not pickup by client
     if (tab === 'notPickupByClient') {
       const pageNum = parseInt(page), pageSize = parseInt(limit);
       const records = notPickupByClientCalls.map((c) => ({
         _id: c._id, contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
-        employeeName: c.employeeName, timestamp: c.timestamp, callType: c.callType
+        employeeName: empName(c), timestamp: c.timestamp, callType: c.callType
       }));
       return res.json({
         success: true,
@@ -226,7 +229,6 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       });
     }
 
-    // Unique clients
     if (tab === 'uniqueClients') {
       const clientMap = {};
       calls.forEach((c) => {
@@ -242,7 +244,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
         cl.totalDuration += c.duration || 0;
         if ((c.duration || 0) > 0) cl.connectedCalls++;
         if (cl[c.callType] !== undefined) cl[c.callType]++;
-        cl.employees.add(c.employeeName);
+        cl.employees.add(empName(c));
         if (new Date(c.timestamp) > new Date(cl.lastCallAt)) cl.lastCallAt = c.timestamp;
       });
       const records = Object.values(clientMap).map((c) => ({
@@ -259,11 +261,11 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       });
     }
 
-    // Call history
     if (tab === 'callHistory') {
       const pageNum = parseInt(page), pageSize = parseInt(limit);
       const total = await CallLog.countDocuments(filter);
       const historyCalls = await CallLog.find(filter)
+        .populate('employeeId', 'name phone')
         .sort({ timestamp: -1 })
         .skip((pageNum - 1) * pageSize)
         .limit(pageSize)
@@ -272,14 +274,13 @@ router.get('/periodic', protect, isManager, async (req, res) => {
         success: true,
         data: {
           total,
-          calls: historyCalls,
+          calls: historyCalls.map(c => ({ ...c, employeeName: empName(c), employeePhone: empPhone(c) })),
           pages: Math.ceil(total / pageSize),
           page: pageNum
         }
       });
     }
 
-    // Analysis tab — employee-wise breakdown
     return res.json({
       success: true,
       data: {
@@ -310,7 +311,11 @@ router.get('/client', protect, isManager, async (req, res) => {
       filter.timestamp = { $gte: start, $lte: now };
     }
 
-    const calls = await CallLog.find(filter).sort({ timestamp: -1 }).lean();
+    const calls = await CallLog.find(filter)
+      .populate('employeeId', 'name phone')
+      .sort({ timestamp: -1 })
+      .lean();
+
     const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
     calls.forEach((c) => { if (byType[c.callType]) byType[c.callType].push(c); });
 
@@ -322,9 +327,10 @@ router.get('/client', protect, isManager, async (req, res) => {
     if (tab === 'summary') {
       const empSummary = {};
       calls.forEach((c) => {
-        const id = c.employeeId.toString();
+        const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
+        if (!id) return;
         if (!empSummary[id]) empSummary[id] = {
-          employeeId: id, employeeName: c.employeeName, employeePhone: c.employeePhone || '',
+          employeeId: id, employeeName: empName(c), employeePhone: empPhone(c),
           totalCalls: 0, totalDuration: 0,
           incomingTotal: 0, incomingConnected: 0, incomingDuration: 0,
           outgoingTotal: 0, outgoingConnected: 0, outgoingDuration: 0,
@@ -359,20 +365,20 @@ router.get('/client', protect, isManager, async (req, res) => {
           summary: {
             incoming: { calls: byType.incoming.length, duration: fmtDuration(byType.incoming.reduce((s, c) => s + (c.duration || 0), 0)) },
             outgoing: { calls: byType.outgoing.length, duration: fmtDuration(byType.outgoing.reduce((s, c) => s + (c.duration || 0), 0)) },
-            missed: { calls: byType.missed.length },
+            missed:   { calls: byType.missed.length },
             rejected: { calls: byType.rejected.length },
-            total: { calls: calls.length, duration: fmtDuration(totalDuration) }
+            total:    { calls: calls.length, duration: fmtDuration(totalDuration) }
           },
           sidebarStats: { neverAttended, notPickupByClient, connectedCalls },
           pieData: [
             { name: 'Incoming', value: byType.incoming.length, color: '#34C759' },
             { name: 'Outgoing', value: byType.outgoing.length, color: '#FF9500' },
-            { name: 'Missed', value: byType.missed.length, color: '#FF3B30' },
+            { name: 'Missed',   value: byType.missed.length,   color: '#FF3B30' },
             { name: 'Rejected', value: byType.rejected.length, color: '#7C3AED' }
           ].filter((d) => d.value > 0),
           employeeSummary: Object.values(empSummary).map((e) => ({
             ...e,
-            totalDuration: fmtDuration(e.totalDuration),
+            totalDuration:    fmtDuration(e.totalDuration),
             incomingDuration: fmtDuration(e.incomingDuration),
             outgoingDuration: fmtDuration(e.outgoingDuration)
           }))
@@ -380,13 +386,16 @@ router.get('/client', protect, isManager, async (req, res) => {
       });
     }
 
-    // Call history tab
     const pageNum = parseInt(page), pageSize = parseInt(limit);
     return res.json({
       success: true,
       data: {
         total: calls.length,
-        calls: calls.slice((pageNum - 1) * pageSize, pageNum * pageSize),
+        calls: calls.slice((pageNum - 1) * pageSize, pageNum * pageSize).map(c => ({
+          ...c,
+          employeeName:  empName(c),
+          employeePhone: empPhone(c),
+        })),
         pages: Math.ceil(calls.length / pageSize)
       }
     });

@@ -155,7 +155,7 @@ export default function ScriptsPage() {
           const active = filter===cat;
           return (
             <button key={cat} onClick={()=>setFilter(cat)}
-              className="px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all"
+              className="px-3.5 h-8 flex items-center rounded-full text-xs font-semibold transition-all"
               style={active
                 ? { background:'#2563EB', color:'#fff', border:'1px solid #2563EB' }
                 : { background:'#fff', color:'#64748B', border:'1px solid #E2E8F0' }}

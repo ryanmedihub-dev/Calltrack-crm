@@ -22,11 +22,15 @@ export async function getTrackedSimId() {
 export async function setTrackedSim(subscriptionId, slotIndex = -1) {
   await AsyncStorage.setItem(SIM_PREF_KEY,  String(subscriptionId));
   await AsyncStorage.setItem(SLOT_PREF_KEY, String(slotIndex));
+  // Push both values into native SharedPreferences so CallTrackService can filter
   CallLogModule?.setTrackedSim(subscriptionId);
+  CallLogModule?.setTrackedSimSlot(slotIndex);
 }
 
-// Call this on every app start to restore the saved preference into native
+// Call this on every app start to restore the saved preference into native SharedPreferences
 export async function applyTrackedSim() {
-  const id = await getTrackedSimId();
+  const id   = await getTrackedSimId();
+  const slot = await AsyncStorage.getItem(SLOT_PREF_KEY);
   CallLogModule?.setTrackedSim(id);
+  CallLogModule?.setTrackedSimSlot(slot !== null ? parseInt(slot, 10) : -1);
 }
