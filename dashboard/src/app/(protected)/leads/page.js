@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import Pagination from '../../../components/Pagination';
+import { parseUTC } from '../../../lib/timezone';
 
 const VALID_STATUSES = new Set(['new','contacted','not_connected','interested','not_interested','follow_up','booking_done','converted','lost']);
 const STATUS_ALIASES = {
@@ -221,11 +222,11 @@ const CHANGELOG_ICONS = {
 
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+  return parseUTC(d).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric', timeZone:'Asia/Kolkata' });
 }
 function fmtDateTime(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  return parseUTC(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', timeZone:'Asia/Kolkata' });
 }
 function fmtDur(sec) {
   if (!sec) return '—';

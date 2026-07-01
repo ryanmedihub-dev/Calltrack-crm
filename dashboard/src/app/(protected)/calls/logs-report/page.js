@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import api from '../../../../lib/api';
+import { parseUTC } from '../../../../lib/timezone';
 import CallTypeBadge from '../../../../components/CallTypeBadge';
 import Pagination from '../../../../components/Pagination';
 import toast from 'react-hot-toast';
@@ -16,10 +17,10 @@ function todayIST() {
 }
 
 function fmtDate(ts) {
-  return new Date(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric', timeZone:'Asia/Kolkata' });
+  return parseUTC(ts).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric', timeZone:'Asia/Kolkata' });
 }
 function fmtTime(ts) {
-  return new Date(ts).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Kolkata' });
+  return parseUTC(ts).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Kolkata' });
 }
 
 function Ico({ size = 14, children }) {

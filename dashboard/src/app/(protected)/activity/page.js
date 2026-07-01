@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
+import { parseUTC } from '../../../lib/timezone';
 
 const ACTION_CONFIG = {
   'lead.create': { label:'Lead Created',  color:'#16A34A', bg:'rgba(22,163,74,0.08)',  icon:'➕' },
@@ -17,7 +18,9 @@ function getActionCfg(action) {
 function groupByDate(logs) {
   const map = {};
   logs.forEach(log => {
-    const date = new Date(log.createdAt).toLocaleDateString('en-IN',{ weekday:'short', day:'numeric', month:'short', year:'numeric' });
+    const date = parseUTC(log.createdAt).toLocaleDateString('en-IN',{
+      weekday:'short', day:'numeric', month:'short', year:'numeric', timeZone:'Asia/Kolkata',
+    });
     if (!map[date]) map[date]=[];
     map[date].push(log);
   });
@@ -25,7 +28,7 @@ function groupByDate(logs) {
 }
 
 function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString('en-IN',{ hour:'2-digit', minute:'2-digit' });
+  return parseUTC(ts).toLocaleTimeString('en-IN',{ hour:'2-digit', minute:'2-digit', timeZone:'Asia/Kolkata' });
 }
 
 function buildDescription(log) {

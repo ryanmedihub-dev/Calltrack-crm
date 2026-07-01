@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { parseUTC } from '../../../../lib/timezone';
 
 const HISTORY_KEY = 'calltrack_export_history';
 
@@ -202,7 +203,7 @@ export default function ExportCenterPage() {
                     <td className="font-mono text-xs" style={{ color:'#475569' }}>{h.filename}</td>
                     <td className="text-xs" style={{ color:'#94A3B8' }}>{h.dateFrom} → {h.dateTo}</td>
                     <td className="text-xs" style={{ color:'#94A3B8' }}>
-                      {new Date(h.exportedAt).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+                      {parseUTC(h.exportedAt).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
                     </td>
                   </tr>
                 ))}

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../../../../lib/api';
+import { fmtTime } from '../../../../lib/timezone';
 
 const PERIODS = [
   { key:'today', label:'Today' },
@@ -173,10 +174,10 @@ export default function LeaderboardPage() {
                           </div>
                         </td>
                         <td style={{ textAlign:'right' }} className="text-xs tabular-nums" style2={{ color:'#94A3B8' }}>
-                          <span style={{ color:'#94A3B8' }}>{d.first ? new Date(d.first).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—'}</span>
+                          <span style={{ color:'#94A3B8' }}>{d.first ? fmtTime(d.first) : '—'}</span>
                         </td>
                         <td style={{ textAlign:'right' }}>
-                          <span className="text-xs tabular-nums" style={{ color:'#94A3B8' }}>{d.last ? new Date(d.last).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—'}</span>
+                          <span className="text-xs tabular-nums" style={{ color:'#94A3B8' }}>{d.last ? fmtTime(d.last) : '—'}</span>
                         </td>
                       </tr>
                     );

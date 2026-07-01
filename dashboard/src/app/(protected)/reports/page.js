@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import api from '../../../lib/api';
 import Pagination from '../../../components/Pagination';
 import CallTypeBadge from '../../../components/CallTypeBadge';
+import { parseUTC } from '../../../lib/timezone';
 
 const TABS = [
   { key: 'summary',           label: 'Summary'         },
@@ -18,11 +19,11 @@ const TABS = [
 
 function fmtDate(d) {
   if (!d) return '—';
-  return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return parseUTC(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 }
 
 function fmtTime(d) {
-  return new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return parseUTC(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 }
 
 const ChartTip = ({ active, payload, label }) => {
@@ -331,7 +332,7 @@ function EmployeeSummaryTable({ rows }) {
               <TD right color="#7C3AED">{e.rejected}</TD>
               <TD right>{e.neverAttended}</TD>
               <TD right>{e.notPickupByClient}</TD>
-              <TD color="#94A3B8">{e.lastSyncTime?new Date(e.lastSyncTime).toLocaleString():'—'}</TD>
+              <TD color="#94A3B8">{e.lastSyncTime?parseUTC(e.lastSyncTime).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'—'}</TD>
             </TR>
           ))}
         </tbody>

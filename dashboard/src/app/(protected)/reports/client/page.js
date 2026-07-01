@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../../lib/api';
 import Pagination from '../../../../components/Pagination';
+import { parseUTC } from '../../../../lib/timezone';
 
 const DURATION_OPTIONS = [
   { value:'all',       label:'All Time' },
@@ -234,7 +235,7 @@ function ClientSummaryTab({ data, CallBadge }) {
                     <td style={{ textAlign:'right', color:'#94A3B8' }}>{e.neverAttended}</td>
                     <td style={{ textAlign:'right', color:'#94A3B8' }}>{e.notPickupByClient}</td>
                     <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                      {e.lastSyncTime?new Date(e.lastSyncTime).toLocaleString():'—'}
+                      {e.lastSyncTime?parseUTC(e.lastSyncTime).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'—'}
                     </td>
                   </tr>
                 ))}
@@ -265,10 +266,10 @@ function ClientHistoryTab({ data, page, onPage, CallBadge }) {
                 <td className="text-xs" style={{ color:'#94A3B8' }}>{(page-1)*50+i+1}</td>
                 <td className="text-xs font-medium" style={{ color:'#475569' }}>{log.employeeName}</td>
                 <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                  {new Date(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})}
+                  {parseUTC(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
                 </td>
                 <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                  {new Date(log.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                  {parseUTC(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
                 </td>
                 <td className="text-xs font-medium" style={{ color:'#475569' }}>
                   {log.duration?`${Math.floor(log.duration/60)}m ${log.duration%60}s`:'—'}

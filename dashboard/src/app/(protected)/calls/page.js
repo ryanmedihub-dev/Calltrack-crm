@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
 import Pagination from '../../../components/Pagination';
+import { parseUTC } from '../../../lib/timezone';
 
 function formatDuration(sec) {
   if (!sec) return '—';
@@ -469,10 +470,10 @@ export default function CallLogsPage() {
                     </td>
                     <td onClick={e=>e.stopPropagation()}>
                       <p className="text-xs font-medium" style={{ color:'#0F172A' }}>
-                        {new Date(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
+                        {parseUTC(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
                       </p>
                       <p className="text-[11px]" style={{ color:'#94A3B8' }}>
-                        {new Date(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
+                        {parseUTC(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
                       </p>
                     </td>
                     <td className="font-medium text-xs" style={{ color:'#475569' }}>{formatDuration(log.duration)}</td>

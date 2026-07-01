@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
+import { parseUTC } from '../../../lib/timezone';
 
 const READ_KEY  = 'calltrack_notif_read';
 const PREF_KEY  = 'ct_notif_prefs';
@@ -51,7 +52,7 @@ function buildNotifications(calls, leads) {
         id:`missed_${c._id}`, type:'missed',
         color:'#EF4444', bg:'rgba(220,38,38,0.08)', icon:'📵',
         title:`Missed call from ${c.contactName||c.contactNumber}`,
-        body:`${c.employeeName} · ${new Date(c.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}`,
+        body:`${c.employeeName} · ${parseUTC(c.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}`,
         time:c.timestamp,
       });
     });

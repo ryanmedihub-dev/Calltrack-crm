@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import api from '../../../../lib/api';
+import { fmtDate, fmtTime } from '../../../../lib/timezone';
 import Pagination from '../../../../components/Pagination';
 
 function formatDuration(sec) {
@@ -157,8 +158,8 @@ export default function EmployeeDetailPage() {
                 <td><CallBadge type={log.callType}/></td>
                 <td className="font-medium text-sm" style={{ color:'#475569' }}>{formatDuration(log.duration)}</td>
                 <td>
-                  <p className="text-xs" style={{ color:'#475569' }}>{new Date(log.timestamp).toLocaleDateString()}</p>
-                  <p className="text-xs" style={{ color:'#94A3B8' }}>{new Date(log.timestamp).toLocaleTimeString()}</p>
+                  <p className="text-xs" style={{ color:'#475569' }}>{fmtDate(log.timestamp)}</p>
+                  <p className="text-xs" style={{ color:'#94A3B8' }}>{fmtTime(log.timestamp)}</p>
                 </td>
                 <td>
                   {log.leadStatus

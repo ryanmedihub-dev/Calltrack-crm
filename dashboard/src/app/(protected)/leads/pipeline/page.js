@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { parseUTC } from '../../../../lib/timezone';
 
 const COLUMNS = [
   { key:'new',            label:'New',            color:'#64748B', bg:'#F8FAFC' },
@@ -25,7 +26,7 @@ function LeadCard({ lead, onClick }) {
       {lead.followUpDate && (
         <div className="mt-2 text-[10px] px-2 py-0.5 rounded-lg font-semibold"
           style={{ background:'rgba(217,119,6,0.08)', color:'#92400E', border:'1px solid rgba(217,119,6,0.22)' }}>
-          Follow-up {new Date(lead.followUpDate).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}
+          Follow-up {parseUTC(lead.followUpDate).toLocaleDateString('en-IN',{day:'numeric',month:'short',timeZone:'Asia/Kolkata'})}
         </div>
       )}
       {lead.lastCallNote && (
@@ -84,7 +85,7 @@ function LeadModal({ lead, onClose, onUpdate }) {
             {lead.followUpDate && (
               <div className="col-span-2">
                 <span className="font-medium" style={{ color:'#0F172A' }}>Follow-up:</span>{' '}
-                {new Date(lead.followUpDate).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+                {parseUTC(lead.followUpDate).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
               </div>
             )}
           </div>

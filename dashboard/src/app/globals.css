@@ -138,14 +138,14 @@ input:-webkit-autofill:focus {
 /* ── Table ─────────────────────────────────────── */
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table thead th {
-  padding: 10px 14px;
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-  color: #64748B; background: #F8FAFC;
-  border-bottom: 1px solid #E2E8F0; white-space: nowrap; text-align: left;
+  padding: 11px 16px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  color: #94A3B8; background: #fff;
+  border-bottom: 1.5px solid #E2E8F0; white-space: nowrap; text-align: left;
 }
-.data-table tbody td { padding: 11px 14px; font-size: 13px; color: #374151; border-bottom: 1px solid #F1F5F9; }
+.data-table tbody td { padding: 12px 16px; font-size: 13px; color: #374151; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
 .data-table tbody tr { transition: background 0.1s; }
-.data-table tbody tr:hover { background: #F8FAFC; }
+.data-table tbody tr:hover { background: #FAFBFC; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
 /* ── Badge ─────────────────────────────────────── */
@@ -166,8 +166,32 @@ input:-webkit-autofill:focus {
 /* ── Filter bar ────────────────────────────────── */
 .filter-bar {
   background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
-  padding: 16px 20px; margin-bottom: 16px;
+  padding: 16px 20px;
 }
+
+/* ── Filter panel (date-range style like Periodic Reports) ── */
+.filter-panel {
+  background: #fff; border: 1px solid #E2E8F0; border-radius: 12px;
+  padding: 20px 24px;
+}
+.filter-panel-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.filter-panel-field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 140px; }
+.filter-panel-field label { font-size: 11px; font-weight: 600; color: #64748B; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+.filter-panel-divider { height: 1px; background: #F1F5F9; margin: 14px 0; }
+.filter-apply-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 22px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  background: #2563EB; color: #fff; border: none; cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s; white-space: nowrap;
+}
+.filter-apply-btn:hover { background: #1D4ED8; box-shadow: 0 4px 12px rgba(37,99,235,0.28); }
+.filter-reset-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  background: #fff; color: #374151; border: 1px solid #E2E8F0; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s; white-space: nowrap;
+}
+.filter-reset-btn:hover { border-color: #CBD5E1; background: #F8FAFC; }
 
 /* ── Tab nav ───────────────────────────────────── */
 .tab-nav { display: flex; border-bottom: 1.5px solid #E2E8F0; margin-bottom: 20px; gap: 0; }
