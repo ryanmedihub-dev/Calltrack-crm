@@ -1,11 +1,11 @@
 'use client';
-import { useEffect, useState, useRef, Fragment } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import { triggerServerExport } from '../../../lib/downloads';
 import CallTypeBadge from '../../../components/CallTypeBadge';
-import Pagination from '../../../components/Pagination';
 import { parseUTC } from '../../../lib/timezone';
+import { DataTable } from '../../../components/report-shared';
 
 function formatDuration(sec) {
   if (!sec) return '—';
@@ -200,6 +200,7 @@ export default function CallLogsPage() {
   const [total,      setTotal]      = useState(0);
   const [pages,      setPages]      = useState(1);
   const [page,       setPage]       = useState(1);
+  const [limit,      setLimit]      = useState(20);
   const [employees,  setEmployees]  = useState([]);
   const [expanded,   setExpanded]   = useState(null);
   const [leadCall,   setLeadCall]   = useState(null);
@@ -238,7 +239,7 @@ export default function CallLogsPage() {
 
   const fetchCalls = async (p = page, overrideParams = null) => {
     try {
-      const params = { page: p, limit: 20, ...(overrideParams ?? buildFilters()) };
+      const params = { page: p, limit, ...(overrideParams ?? buildFilters()) };
       const res = await api.get('/api/calls', { params });
       setCalls(res.data.data.calls);
       setTotal(res.data.data.total);
@@ -247,7 +248,7 @@ export default function CallLogsPage() {
   };
 
   useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data.data)).catch(()=>{}); }, []);
-  useEffect(() => { fetchCalls(); }, [page]);
+  useEffect(() => { fetchCalls(); }, [page, limit]);
 
   const applyFilters = () => { setPage(1); fetchCalls(1); };
 
@@ -424,124 +425,123 @@ export default function CallLogsPage() {
       )}
 
       {/* Table */}
-      <div className="page-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth:860 }}>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Employee</th>
-                <th>Contact</th>
-                <th>Date & Time (IST)</th>
-                <th>Duration</th>
-                <th>Type</th>
-                <th>Notes</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {calls.map((log,idx)=>(
-                <Fragment key={log._id}>
-                  <tr className="cursor-pointer"
-                    onClick={()=>setExpanded(expanded===log._id?null:log._id)}>
-                    <td style={{ color:'#CBD5E1' }}>{(page-1)*20+idx+1}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                          style={{ background:'#2563EB' }}>
-                          {(log.employeeName||'?')[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-xs font-semibold" style={{ color:'#0F172A' }}>{log.employeeName}</p>
-                          {log.employeePhone&&<p className="text-[11px]" style={{ color:'#94A3B8' }}>{log.employeePhone}</p>}
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <p className="text-xs font-medium" style={{ color:'#0F172A' }}>
-                        {log.contactName&&log.contactName!=='Unknown'?log.contactName:log.contactNumber}
-                      </p>
-                      {log.contactName&&log.contactName!=='Unknown'&&<p className="text-[11px]" style={{ color:'#94A3B8' }}>{log.contactNumber}</p>}
-                    </td>
-                    <td onClick={e=>e.stopPropagation()}>
-                      <p className="text-xs font-medium" style={{ color:'#0F172A' }}>
-                        {parseUTC(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
-                      </p>
-                      <p className="text-[11px]" style={{ color:'#94A3B8' }}>
-                        {parseUTC(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
-                      </p>
-                    </td>
-                    <td className="font-medium text-xs" style={{ color:'#475569' }}>{formatDuration(log.duration)}</td>
-                    <td onClick={e=>e.stopPropagation()}><CallTypeBadge type={log.callType}/></td>
-                    <td className="max-w-[120px]" onClick={e=>e.stopPropagation()}>
-                      <p className="text-xs truncate" style={{ color:log.notes?'#374151':'#CBD5E1' }}>{log.notes||'—'}</p>
-                    </td>
-                    <td onClick={e=>e.stopPropagation()}>
-                      <div className="flex items-center gap-2">
-                        <button onClick={()=>{setNoteModal(log);setNoteText(log.notes||'');}}
-                          className="text-xs font-semibold transition-opacity" style={{ color:'#2563EB' }}
-                          onMouseEnter={e=>e.currentTarget.style.opacity='0.7'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
-                          <NoteIco />
-                        </button>
-                        {!log.leadId ? (
-                          <button onClick={()=>setLeadCall(log)}
-                            className="text-[11px] font-semibold px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                            style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}
-                            onMouseEnter={e=>{e.currentTarget.style.background='#2563EB';e.currentTarget.style.color='#fff';}}
-                            onMouseLeave={e=>{e.currentTarget.style.background='#EFF6FF';e.currentTarget.style.color='#2563EB';}}>
-                            + Lead
-                          </button>
-                        ) : (
-                          <span className="text-[11px] px-2 py-0.5 rounded font-medium"
-                            style={{ background:'rgba(22,163,74,0.08)', color:'#16A34A', border:'1px solid rgba(22,163,74,0.22)' }}>
-                            Linked
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                  {expanded === log._id && (
-                    <tr key={log._id+'_exp'}>
-                      <td colSpan={8} className="animate-slide-down" style={{ background:'#F8FAFC', padding:'12px 16px' }}>
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-                          {[
-                            {l:'Contact Name', v:log.contactName||'—'},
-                            {l:'Full Number',  v:log.contactNumber},
-                            {l:'Duration',     v:formatDuration(log.duration)},
-                            {l:'Call Type',    v:log.callType||'—'},
-                            {l:'Notes',        v:log.notes||'—'},
-                          ].map(({l,v})=>(
-                            <div key={l} className="page-card p-3">
-                              <p className="font-semibold mb-1" style={{ color:'#94A3B8' }}>{l}</p>
-                              <p className="font-medium" style={{ color:'#0F172A' }}>{v}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-              {calls.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:'#EFF6FF', color:'#2563EB' }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                      </div>
-                      <p className="text-sm" style={{ color:'#94A3B8' }}>No call logs found</p>
-                      <button onClick={resetFilters} className="text-xs font-semibold" style={{ color:'#2563EB' }}>
-                        Clear filters
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <Pagination page={page} pages={pages} onPage={setPage} />
+      <DataTable
+        serverMode
+        page={page}
+        totalPages={pages}
+        totalCount={total}
+        onPageChange={setPage}
+        onPageSizeChange={(n) => { setLimit(n); setPage(1); }}
+        pageSize={limit}
+        emptyTitle="No call logs found"
+        emptyHint="Try widening your date range or clearing filters."
+        renderExpanded={(log) => (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
+            {[
+              { l: 'Contact Name', v: log.contactName || '—' },
+              { l: 'Full Number',  v: log.contactNumber },
+              { l: 'Duration',     v: formatDuration(log.duration) },
+              { l: 'Call Type',    v: log.callType || '—' },
+              { l: 'Notes',        v: log.notes || '—' },
+            ].map(({ l, v }) => (
+              <div key={l} className="page-card p-3">
+                <p className="font-semibold mb-1" style={{ color: '#94A3B8' }}>{l}</p>
+                <p className="font-medium" style={{ color: '#0F172A' }}>{v}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        expandedId={expanded}
+        onToggleExpand={(id) => setExpanded((e) => (e === id ? null : id))}
+        columns={[
+          {
+            key: '__srNo', label: '#', sortable: false, searchable: false,
+            render: (log, i) => <span style={{ color: '#CBD5E1' }}>{(page - 1) * limit + i + 1}</span>,
+          },
+          {
+            key: 'employeeName', label: 'Employee',
+            render: (log) => (
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                  style={{ background: '#2563EB' }}>
+                  {(log.employeeName || '?')[0].toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-xs font-semibold" style={{ color: '#0F172A' }}>{log.employeeName}</p>
+                  {log.employeePhone && <p className="text-[11px]" style={{ color: '#94A3B8' }}>{log.employeePhone}</p>}
+                </div>
+              </div>
+            ),
+          },
+          {
+            key: 'contactNumber', label: 'Contact',
+            render: (log) => (
+              <>
+                <p className="text-xs font-medium" style={{ color: '#0F172A' }}>
+                  {log.contactName && log.contactName !== 'Unknown' ? log.contactName : log.contactNumber}
+                </p>
+                {log.contactName && log.contactName !== 'Unknown' && <p className="text-[11px]" style={{ color: '#94A3B8' }}>{log.contactNumber}</p>}
+              </>
+            ),
+          },
+          {
+            key: 'timestamp', label: 'Date & Time (IST)',
+            render: (log) => (
+              <div onClick={(e) => e.stopPropagation()}>
+                <p className="text-xs font-medium" style={{ color: '#0F172A' }}>
+                  {parseUTC(log.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
+                </p>
+                <p className="text-[11px]" style={{ color: '#94A3B8' }}>
+                  {parseUTC(log.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}
+                </p>
+              </div>
+            ),
+          },
+          {
+            key: 'duration', label: 'Duration',
+            render: (log) => <span className="font-medium text-xs" style={{ color: '#475569' }}>{formatDuration(log.duration)}</span>,
+          },
+          {
+            key: 'callType', label: 'Type',
+            render: (log) => <div onClick={(e) => e.stopPropagation()}><CallTypeBadge type={log.callType} /></div>,
+          },
+          {
+            key: 'notes', label: 'Notes', className: 'max-w-[120px]',
+            render: (log) => (
+              <div onClick={(e) => e.stopPropagation()}>
+                <p className="text-xs truncate" style={{ color: log.notes ? '#374151' : '#CBD5E1' }}>{log.notes || '—'}</p>
+              </div>
+            ),
+          },
+          {
+            key: 'actions', label: 'Actions', sortable: false, searchable: false,
+            render: (log) => (
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => { setNoteModal(log); setNoteText(log.notes || ''); }}
+                  className="text-xs font-semibold transition-opacity" style={{ color: '#2563EB' }}
+                  onMouseEnter={(e) => e.currentTarget.style.opacity = '0.7'} onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}>
+                  <NoteIco />
+                </button>
+                {!log.leadId ? (
+                  <button onClick={() => setLeadCall(log)}
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded transition-colors whitespace-nowrap"
+                    style={{ background: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = '#2563EB'; e.currentTarget.style.color = '#fff'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = '#EFF6FF'; e.currentTarget.style.color = '#2563EB'; }}>
+                    + Lead
+                  </button>
+                ) : (
+                  <span className="text-[11px] px-2 py-0.5 rounded font-medium"
+                    style={{ background: 'rgba(22,163,74,0.08)', color: '#16A34A', border: '1px solid rgba(22,163,74,0.22)' }}>
+                    Linked
+                  </span>
+                )}
+              </div>
+            ),
+          },
+        ]}
+        rows={calls}
+      />
 
       {/* Note modal */}
       {noteModal && (

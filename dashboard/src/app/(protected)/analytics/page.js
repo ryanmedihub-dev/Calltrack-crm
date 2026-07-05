@@ -9,6 +9,7 @@ import {
 import api from '../../../lib/api';
 import { utcHourToISTLabel } from '../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DataTable } from '../../../components/report-shared';
 
 /* ── Icons ───────────────────────────────────────── */
 const Ico = ({ size = 16, children, className = '' }) => (
@@ -320,6 +321,13 @@ export default function AnalyticsPage() {
     Yesterday: q.yest,
     fullMark: 100,
   }));
+
+  const agentRows = employees.map((emp) => {
+    const dialerData = stats?.topDialers?.find((dd) => dd.employeeId === emp._id);
+    const callCount = dialerData?.count ?? 0;
+    const connRate = callCount > 0 ? Math.round((dialerData?.connected || 0) / callCount * 100) : null;
+    return { ...emp, callCount, connRate, missedCount: dialerData?.missed };
+  });
 
   if (loading) {
     return (
@@ -766,91 +774,78 @@ export default function AnalyticsPage() {
               </span>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">#</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Agent</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">Role</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Calls</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">Conn. Rate</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Missed</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {employees.map((emp, i) => {
-                  const dialerData = stats?.topDialers?.find((d) => d.employeeId === emp._id);
-                  const callCount = dialerData?.count ?? 0;
-                  const connR = callCount > 0 ? `${Math.round((dialerData?.connected || 0) / callCount * 100)}%` : '—';
-                  return (
-                    <motion.tr
-                      key={emp._id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.02 }}
-                      className="hover:bg-gray-50/50 transition-colors duration-150"
+          <div className="px-2 pb-2">
+            <DataTable
+              loading={loading}
+              rows={agentRows}
+              emptyTitle="No employees yet"
+              columns={[
+                {
+                  key: '__idx', label: '#', align: 'left', sortable: false, searchable: false, width: 48,
+                  render: (_emp, i) => <span className="text-sm font-medium text-gray-400">{i + 1}</span>,
+                },
+                {
+                  key: 'name', label: 'Agent',
+                  render: (emp, i) => (
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md"
+                        style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
+                      >
+                        {emp.name?.[0]?.toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
+                        <p className="text-xs text-gray-400 hidden sm:block">{emp.email}</p>
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'role', label: 'Role',
+                  render: (emp) => (
+                    <span
+                      className="text-xs font-medium px-2.5 py-1 rounded-full capitalize"
+                      style={{ background: '#EFF6FF', color: '#2563EB' }}
                     >
-                      <td className="px-6 py-3 text-sm font-medium text-gray-400">{i + 1}</td>
-                      <td className="px-6 py-3">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md"
-                            style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
-                          >
-                            {emp.name?.[0]?.toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
-                            <p className="text-xs text-gray-400 hidden sm:block">{emp.email}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-3 hidden md:table-cell">
-                        <span
-                          className="text-xs font-medium px-2.5 py-1 rounded-full capitalize"
-                          style={{ background: '#EFF6FF', color: '#2563EB' }}
-                        >
-                          {emp.role}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-right">
-                        <span
-                          className="font-bold tabular-nums text-base"
-                          style={{ color: callCount > 0 ? '#2563EB' : '#CBD5E1' }}
-                        >
-                          {callCount}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-right hidden sm:table-cell">
-                        <span className="text-sm font-semibold text-green-600">{connR}</span>
-                      </td>
-                      <td className="px-6 py-3 text-right hidden lg:table-cell">
-                        <span className="text-sm font-semibold text-red-500">{dialerData?.missed ?? '—'}</span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <span
-                          className={`text-xs font-medium px-2.5 py-1 rounded-full ${emp.isActive
-                              ? 'bg-green-50 text-green-600 border border-green-100'
-                              : 'bg-gray-100 text-gray-500 border border-gray-200'
-                            }`}
-                        >
-                          {emp.isActive ? '🟢 Active' : '⚪ Inactive'}
-                        </span>
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-                {employees.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
-                      No employees yet
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                      {emp.role}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'callCount', label: 'Calls', align: 'right',
+                  render: (emp) => (
+                    <span
+                      className="font-bold tabular-nums text-base"
+                      style={{ color: emp.callCount > 0 ? '#2563EB' : '#CBD5E1' }}
+                    >
+                      {emp.callCount}
+                    </span>
+                  ),
+                },
+                {
+                  key: 'connRate', label: 'Conn. Rate', align: 'right', searchable: false,
+                  render: (emp) => <span className="text-sm font-semibold text-green-600">{emp.connRate != null ? `${emp.connRate}%` : '—'}</span>,
+                },
+                {
+                  key: 'missedCount', label: 'Missed', align: 'right', searchable: false,
+                  render: (emp) => <span className="text-sm font-semibold text-red-500">{emp.missedCount ?? '—'}</span>,
+                },
+                {
+                  key: 'isActive', label: 'Status', searchable: false,
+                  render: (emp) => (
+                    <span
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full ${emp.isActive
+                          ? 'bg-green-50 text-green-600 border border-green-100'
+                          : 'bg-gray-100 text-gray-500 border border-gray-200'
+                        }`}
+                    >
+                      {emp.isActive ? '🟢 Active' : '⚪ Inactive'}
+                    </span>
+                  ),
+                },
+              ]}
+            />
           </div>
         </motion.div>
       </div>

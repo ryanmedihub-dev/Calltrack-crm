@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
+const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
@@ -100,44 +101,95 @@ router.get('/assigned', protect, async (req, res) => {
 });
 
 // POST /api/leads/bulk-upload (must be before /:id routes)
+// Powers the multi-step "Import Leads" wizard: field-mapped rows arrive already
+// normalized by the frontend; this route only handles assignment + duplicate policy + insert.
 const VALID_STATUSES = new Set([
   'new','contacted','not_connected','interested',
   'not_interested','follow_up','booking_done','converted','lost',
 ]);
+const MAX_BULK_UPLOAD = 5000;
+
 router.post('/bulk-upload', protect, async (req, res) => {
   try {
-    const { leads: rows } = req.body;
+    const {
+      leads: rows,
+      assignment = { mode: 'employee', employeeIds: [], autoSplit: false },
+      duplicateStrategy = 'skip', // 'skip' | 'replace'
+      defaultStatus = 'new',
+      tags: globalTags = []
+    } = req.body;
+
     if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(400).json({ success: false, error: 'No leads provided' });
     }
-    if (rows.length > 1000) {
-      return res.status(400).json({ success: false, error: 'Maximum 1000 leads per upload' });
+    if (rows.length > MAX_BULK_UPLOAD) {
+      return res.status(400).json({ success: false, error: `Maximum ${MAX_BULK_UPLOAD} leads per upload` });
     }
 
-    let inserted = 0, skipped = 0, errors = 0;
+    const status = VALID_STATUSES.has(defaultStatus) ? defaultStatus : 'new';
+
+    // Resolve assignment targets up front
+    let employeeIds = [];
+    if (assignment.mode === 'employee') {
+      const ids = Array.isArray(assignment.employeeIds) ? assignment.employeeIds : [];
+      const validEmployees = await User.find({ _id: { $in: ids }, role: 'employee' }).select('_id').lean();
+      employeeIds = validEmployees.map((e) => e._id.toString());
+      if (!employeeIds.length) {
+        return res.status(400).json({ success: false, error: 'Select at least one valid employee to assign leads to' });
+      }
+    }
+    const tagOnly = assignment.mode === 'tag' ? String(assignment.tag || '').trim() : '';
+
+    let inserted = 0, updated = 0, skipped = 0, errors = 0;
+    let cursor = 0; // round-robin pointer across employeeIds
 
     for (const row of rows) {
       try {
-        const name   = (row.name  || '').trim();
-        const phone  = normalizePhone((row.phone || '').toString().trim()) || (row.phone || '').replace(/\D/g, '');
-        const status = VALID_STATUSES.has(row.status) ? row.status : 'new';
+        const name  = (row.name || '').trim();
+        const phone = normalizePhone((row.phone || '').toString().trim()) || (row.phone || '').replace(/\D/g, '');
+        if (!name || !/^[6-9]\d{9}$/.test(phone)) { errors++; continue; }
 
-        if (!name || !phone) { errors++; continue; }
+        const rowTags = Array.isArray(row.tags) ? row.tags.map((t) => String(t).trim()).filter(Boolean) : [];
+        const mergedTags = [...new Set([...rowTags, ...globalTags, ...(tagOnly ? [tagOnly] : [])])];
 
-        const exists = await Lead.exists({ phone });
-        if (exists) { skipped++; continue; }
+        const assignedTo = assignment.mode === 'employee'
+          ? (assignment.autoSplit ? employeeIds[cursor++ % employeeIds.length] : employeeIds[0])
+          : null; // tag-only mode leaves the lead unassigned for manual pickup
+
+        const existing = await Lead.findOne({ phone });
+
+        if (existing) {
+          if (duplicateStrategy === 'replace') {
+            existing.assignedTo = assignedTo || existing.assignedTo;
+            existing.tags = [...new Set([...(existing.tags || []), ...mergedTags])];
+            existing.changelog.push({
+              changedBy: req.user._id,
+              changedByName: req.user.name,
+              action: 'assigned',
+              details: { source: 'bulk_upload_replace' }
+            });
+            await existing.save();
+            updated++;
+          } else {
+            // 'skip' (Keep existing and ignore new assignments) — leave the lead untouched
+            skipped++;
+          }
+          continue;
+        }
 
         await Lead.create({
           name,
           phone,
+          email: row.email || undefined,
+          source: row.source || 'bulk_upload',
+          tags: mergedTags,
           status,
-          source:     'bulk_upload',
-          assignedTo: req.user._id,
+          assignedTo,
           changelog: [{
-            changedBy:     req.user._id,
+            changedBy: req.user._id,
             changedByName: req.user.name,
-            action:        'created',
-            details:       { source: 'bulk_upload' }
+            action: 'created',
+            details: { source: 'bulk_upload' }
           }]
         });
         inserted++;
@@ -147,7 +199,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, inserted, skipped, errors });
+    return res.json({ success: true, data: { inserted, updated, skipped, errors, total: rows.length } });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

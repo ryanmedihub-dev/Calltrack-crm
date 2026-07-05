@@ -3,11 +3,11 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../../../../lib/api';
+import { DataTable } from '../../../../components/report-shared';
 
 function Ico({ size=16, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
 }
-const SearchIco  = () => <Ico size={13}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Ico>;
 const UsersIco   = ({s=16}) => <Ico size={s}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></Ico>;
 const ChevronIco = () => <Ico size={13}><polyline points="9 18 15 12 9 6"/></Ico>;
 const ChartTip   = ({ active, payload, label }) => {
@@ -26,22 +26,8 @@ const STATUS_STYLES = {
 
 export default function EmployeesOverviewPage() {
   const [employees, setEmployees] = useState([]);
-  const [stats,     setStats]     = useState({});
   const [loading,   setLoading]   = useState(true);
-  const [search,    setSearch]    = useState('');
-  const [status,    setStatus]    = useState('');
-  const [sort,      setSort]      = useState('calls');
   const [callStats, setCallStats] = useState(null);
-
-  const filtered = employees.filter(e => {
-    const matchSearch = !search || e.name?.toLowerCase().includes(search.toLowerCase()) || e.phone?.includes(search);
-    const matchStatus = !status || (e.workingStatus || e.status || 'active') === status;
-    return matchSearch && matchStatus;
-  }).sort((a,b) => {
-    if (sort==='name')  return (a.name||'').localeCompare(b.name||'');
-    if (sort==='calls') return (stats[b._id]?.total||0) - (stats[a._id]?.total||0);
-    return 0;
-  });
 
   useEffect(() => {
     (async () => {
@@ -64,6 +50,10 @@ export default function EmployeesOverviewPage() {
   const chartData = employees
     .map(e => ({ name: (e.name||'').split(' ')[0], calls: callStats?.today?.topDialers?.find(d=>d.employeeId===e._id)?.count || 0 }))
     .sort((a,b) => b.calls-a.calls).slice(0,10);
+
+  const tableRows = employees
+    .map(e => ({ ...e, todayCalls: callStats?.today?.topDialers?.find(d=>d.employeeId===e._id)?.count||0 }))
+    .sort((a,b) => b.todayCalls-a.todayCalls);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -112,88 +102,63 @@ export default function EmployeesOverviewPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="filter-bar flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[180px]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color:'#94A3B8' }}><SearchIco/></span>
-          <input className="form-input pl-8 text-xs" placeholder="Search by name or phone…"
-            value={search} onChange={e => setSearch(e.target.value)}/>
-        </div>
-        <select className="form-input text-xs w-36" value={status} onChange={e => setStatus(e.target.value)}>
-          <option value="">All Status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="on_leave">On Leave</option>
-        </select>
-        <select className="form-input text-xs w-32" value={sort} onChange={e => setSort(e.target.value)}>
-          <option value="calls">Sort: Calls</option>
-          <option value="name">Sort: Name</option>
-        </select>
-      </div>
-
       {/* Table */}
       <div className="page-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth:680 }}>
-            <thead>
-              <tr><th>Employee</th><th>Phone</th><th>Role</th><th>Today Calls</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({length:8}).map((_,i)=>(
-                  <tr key={i}>{Array.from({length:6}).map((_,j)=><td key={j}><div className="skeleton h-4 rounded"/></td>)}</tr>
-                ))
-              ) : filtered.length===0 ? (
-                <tr><td colSpan={6}>
-                  <div className="flex flex-col items-center py-14 gap-3">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:'#EFF6FF', color:'#2563EB' }}>
-                      <UsersIco s={22}/>
+        <div className="px-5 py-4">
+          <DataTable
+            loading={loading}
+            rows={tableRows}
+            emptyTitle="No employees found"
+            columns={[
+              {
+                key: 'name', label: 'Employee',
+                render: (e) => (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                      style={{ background:'linear-gradient(135deg,#2563EB,#60A5FA)' }}>
+                      {(e.name||'?').slice(0,2).toUpperCase()}
                     </div>
-                    <p className="text-sm" style={{ color:'#94A3B8' }}>No employees found</p>
+                    <div>
+                      <p className="font-semibold text-xs" style={{ color:'#0F172A' }}>{e.name||'—'}</p>
+                      <p className="text-[11px]" style={{ color:'#94A3B8' }}>{e.email||''}</p>
+                    </div>
                   </div>
-                </td></tr>
-              ) : filtered.map((e,i) => {
-                const ws = e.workingStatus||e.status||'active';
-                const ss = STATUS_STYLES[ws]||STATUS_STYLES.active;
-                const todayCalls = callStats?.today?.topDialers?.find(d=>d.employeeId===e._id)?.count||0;
-                return (
-                  <tr key={e._id||i}>
-                    <td>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                          style={{ background:'linear-gradient(135deg,#2563EB,#60A5FA)' }}>
-                          {(e.name||'?').slice(0,2).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-xs" style={{ color:'#0F172A' }}>{e.name||'—'}</p>
-                          <p className="text-[11px]" style={{ color:'#94A3B8' }}>{e.email||''}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="font-mono text-xs" style={{ color:'#475569' }}>{e.phone||'—'}</td>
-                    <td className="text-xs capitalize" style={{ color:'#64748B' }}>{e.role||'Agent'}</td>
-                    <td>
-                      <span className="font-bold tabular-nums text-sm" style={{ color: todayCalls>0?'#2563EB':'#94A3B8' }}>{todayCalls}</span>
-                    </td>
-                    <td>
-                      <span className="badge capitalize" style={{ background:ss.bg, color:ss.color, border:`1px solid ${ss.border}` }}>
-                        {ws.replace('_',' ')}
-                      </span>
-                    </td>
-                    <td>
-                      <Link href={`/employees/${e._id}`}
-                        className="text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-all"
-                        style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}
-                        onMouseEnter={ev=>{ev.currentTarget.style.background='#2563EB';ev.currentTarget.style.color='#fff';}}
-                        onMouseLeave={ev=>{ev.currentTarget.style.background='#EFF6FF';ev.currentTarget.style.color='#2563EB';}}>
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ),
+              },
+              { key: 'phone', label: 'Phone', render: (e) => <span className="font-mono text-xs" style={{ color:'#475569' }}>{e.phone||'—'}</span> },
+              { key: 'role', label: 'Role', render: (e) => <span className="text-xs capitalize" style={{ color:'#64748B' }}>{e.role||'Agent'}</span> },
+              {
+                key: 'todayCalls', label: 'Today Calls', align: 'right',
+                render: (e) => <span className="font-bold tabular-nums text-sm" style={{ color: e.todayCalls>0?'#2563EB':'#94A3B8' }}>{e.todayCalls}</span>,
+              },
+              {
+                key: 'status', label: 'Status', filterType: 'select',
+                filterOptions: [{ value:'active', label:'Active' }, { value:'inactive', label:'Inactive' }, { value:'on_leave', label:'On Leave' }],
+                filterValue: (e) => e.workingStatus||e.status||'active',
+                render: (e) => {
+                  const ws = e.workingStatus||e.status||'active';
+                  const ss = STATUS_STYLES[ws]||STATUS_STYLES.active;
+                  return (
+                    <span className="badge capitalize" style={{ background:ss.bg, color:ss.color, border:`1px solid ${ss.border}` }}>
+                      {ws.replace('_',' ')}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: 'actions', label: 'Actions', sortable: false, searchable: false,
+                render: (e) => (
+                  <Link href={`/employees/${e._id}`}
+                    className="text-[11px] font-semibold px-2.5 py-1 rounded-lg transition-all"
+                    style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}
+                    onMouseEnter={ev=>{ev.currentTarget.style.background='#2563EB';ev.currentTarget.style.color='#fff';}}
+                    onMouseLeave={ev=>{ev.currentTarget.style.background='#EFF6FF';ev.currentTarget.style.color='#2563EB';}}>
+                    View
+                  </Link>
+                ),
+              },
+            ]}
+          />
         </div>
       </div>
     </div>

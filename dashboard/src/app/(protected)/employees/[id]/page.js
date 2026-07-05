@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import api from '../../../../lib/api';
 import { fmtDate, fmtTime } from '../../../../lib/timezone';
-import Pagination from '../../../../components/Pagination';
+import { DataTable } from '../../../../components/report-shared';
 
 function formatDuration(sec) {
   if (!sec) return '—';
@@ -64,6 +64,38 @@ export default function EmployeeDetailPage() {
 
   const activeChip = { background:'#2563EB', color:'#fff', border:'1px solid #2563EB' };
   const idleChip   = { background:'#F1F5F9', color:'#64748B', border:'1px solid #E2E8F0' };
+
+  const columns = [
+    {
+      key: 'contactName',
+      label: 'Contact',
+      render: (log) => (
+        <div>
+          <p className="text-sm font-medium" style={{ color:'#0F172A' }}>{log.contactName||'—'}</p>
+          <p className="text-xs" style={{ color:'#94A3B8' }}>{log.contactNumber}</p>
+        </div>
+      ),
+    },
+    { key: 'callType', label: 'Type', render: (log) => <CallBadge type={log.callType}/> },
+    { key: 'duration', label: 'Duration', render: (log) => <span className="font-medium text-sm" style={{ color:'#475569' }}>{formatDuration(log.duration)}</span> },
+    {
+      key: 'timestamp',
+      label: 'Date & Time',
+      render: (log) => (
+        <div>
+          <p className="text-xs" style={{ color:'#475569' }}>{fmtDate(log.timestamp)}</p>
+          <p className="text-xs" style={{ color:'#94A3B8' }}>{fmtTime(log.timestamp)}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'leadStatus',
+      label: 'Status',
+      render: (log) => log.leadStatus
+        ? <span className="badge text-[11px]" style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}>{log.leadStatus}</span>
+        : <span className="text-xs" style={{ color:'#94A3B8' }}>—</span>,
+    },
+  ];
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -143,38 +175,19 @@ export default function EmployeeDetailPage() {
       </div>
 
       {/* Call logs table */}
-      <div className="page-card overflow-hidden">
-        <table className="data-table" style={{ minWidth:600 }}>
-          <thead><tr>
-            <th>Contact</th><th>Type</th><th>Duration</th><th>Date &amp; Time</th><th>Status</th>
-          </tr></thead>
-          <tbody>
-            {(data?.calls||[]).map(log=>(
-              <tr key={log._id}>
-                <td>
-                  <p className="text-sm font-medium" style={{ color:'#0F172A' }}>{log.contactName||'—'}</p>
-                  <p className="text-xs" style={{ color:'#94A3B8' }}>{log.contactNumber}</p>
-                </td>
-                <td><CallBadge type={log.callType}/></td>
-                <td className="font-medium text-sm" style={{ color:'#475569' }}>{formatDuration(log.duration)}</td>
-                <td>
-                  <p className="text-xs" style={{ color:'#475569' }}>{fmtDate(log.timestamp)}</p>
-                  <p className="text-xs" style={{ color:'#94A3B8' }}>{fmtTime(log.timestamp)}</p>
-                </td>
-                <td>
-                  {log.leadStatus
-                    ? <span className="badge text-[11px]" style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}>{log.leadStatus}</span>
-                    : <span className="text-xs" style={{ color:'#94A3B8' }}>—</span>}
-                </td>
-              </tr>
-            ))}
-            {(data?.calls||[]).length===0&&(
-              <tr><td colSpan={5} className="py-12 text-center text-sm" style={{ color:'#94A3B8' }}>No call logs found</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="page-card overflow-hidden p-4">
+        <DataTable
+          serverMode
+          columns={columns}
+          rows={data?.calls||[]}
+          loading={!data}
+          page={page}
+          totalPages={data?.pages||1}
+          totalCount={data?.total}
+          onPageChange={setPage}
+          emptyTitle="No call logs found"
+        />
       </div>
-      <Pagination page={page} pages={data?.pages||1} onPage={setPage}/>
     </div>
   );
 }

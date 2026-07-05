@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { DataTable } from '../../../../components/report-shared';
 
 const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
 
@@ -68,6 +69,14 @@ export default function DailyTargetsPage() {
   const totTargets = employees.reduce((a,e)=>a+getTarget(e),0);
   const overallPct = totTargets ? Math.min(100, Math.round((totCalls/totTargets)*100)) : 0;
   const achieved   = employees.filter(e=>(callCounts[e._id]||0)>=getTarget(e)).length;
+
+  const summaryRows = employees.map(emp => {
+    const calls  = callCounts[emp._id]||0;
+    const target = getTarget(emp);
+    const gap    = Math.max(0,target-calls);
+    const done   = calls >= target;
+    return { ...emp, calls, target, gap, done };
+  });
 
   if (loading) {
     return (
@@ -176,42 +185,32 @@ export default function DailyTargetsPage() {
         <div className="px-5 py-3.5" style={{ borderBottom:'1px solid #E2E8F0' }}>
           <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>Summary</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="data-table">
-            <thead><tr>
-              <th>Agent</th>
-              <th style={{ textAlign:'right' }}>Calls</th>
-              <th style={{ textAlign:'right' }}>Target</th>
-              <th style={{ textAlign:'right' }}>Gap</th>
-              <th style={{ textAlign:'right' }}>Status</th>
-            </tr></thead>
-            <tbody>
-              {employees.map(emp=>{
-                const calls  = callCounts[emp._id]||0;
-                const target = getTarget(emp);
-                const gap    = Math.max(0,target-calls);
-                const done   = calls >= target;
-                return (
-                  <tr key={emp._id}>
-                    <td className="font-medium" style={{ color:'#0F172A' }}>{emp.name}</td>
-                    <td style={{ textAlign:'right', fontWeight:700, color:'#2563EB' }}>{calls}</td>
-                    <td style={{ textAlign:'right', color:'#374151' }}>{target}</td>
-                    <td style={{ textAlign:'right', fontWeight:600, color:gap>0?'#EF4444':'#16A34A' }}>
-                      {gap>0?`-${gap}`:'✓'}
-                    </td>
-                    <td style={{ textAlign:'right' }}>
-                      <span className="badge text-[11px]"
-                        style={done
-                          ? { background:'rgba(22,163,74,0.08)', color:'#16A34A', border:'1px solid rgba(22,163,74,0.22)' }
-                          : { background:'rgba(217,119,6,0.08)', color:'#D97706', border:'1px solid rgba(217,119,6,0.22)' }}>
-                        {done?'Done':'In Progress'}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="px-5 py-4">
+          <DataTable
+            rows={summaryRows}
+            getRowId={(emp) => emp._id}
+            emptyTitle="No employees found"
+            columns={[
+              { key: 'name', label: 'Agent', render: (emp) => <span className="font-medium" style={{ color:'#0F172A' }}>{emp.name}</span> },
+              { key: 'calls', label: 'Calls', align: 'right', render: (emp) => <span style={{ fontWeight:700, color:'#2563EB' }}>{emp.calls}</span> },
+              { key: 'target', label: 'Target', align: 'right', render: (emp) => <span style={{ color:'#374151' }}>{emp.target}</span> },
+              {
+                key: 'gap', label: 'Gap', align: 'right',
+                render: (emp) => <span style={{ fontWeight:600, color:emp.gap>0?'#EF4444':'#16A34A' }}>{emp.gap>0?`-${emp.gap}`:'✓'}</span>,
+              },
+              {
+                key: 'done', label: 'Status', align: 'right', searchable: false,
+                render: (emp) => (
+                  <span className="badge text-[11px]"
+                    style={emp.done
+                      ? { background:'rgba(22,163,74,0.08)', color:'#16A34A', border:'1px solid rgba(22,163,74,0.22)' }
+                      : { background:'rgba(217,119,6,0.08)', color:'#D97706', border:'1px solid rgba(217,119,6,0.22)' }}>
+                    {emp.done?'Done':'In Progress'}
+                  </span>
+                ),
+              },
+            ]}
+          />
         </div>
       </div>
     </div>

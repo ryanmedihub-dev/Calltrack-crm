@@ -5,6 +5,7 @@ import api from '../../../../lib/api';
 import { triggerLocalExport } from '../../../../lib/downloads';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
+import { DataTable } from '../../../../components/report-shared';
 
 function Ico({ size = 16, children, className = '' }) {
   return (
@@ -57,11 +58,6 @@ const LeadPlusIco = ({ s = 13 }) => (
     <line x1="22" y1="11" x2="16" y2="11" />
   </Ico>
 );
-const CheckIco = () => (
-  <Ico>
-    <polyline points="20 6 9 17 4 12" />
-  </Ico>
-);
 const UsersIco = () => (
   <Ico>
     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -86,17 +82,6 @@ const CloseIco = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </Ico>
 );
-const ArrowLeftIco = () => (
-  <Ico size={14}>
-    <polyline points="15 18 9 12 15 6" />
-  </Ico>
-);
-const ArrowRightIco = () => (
-  <Ico size={14}>
-    <polyline points="9 6 15 12 9 18" />
-  </Ico>
-);
-
 const CALL_TYPE_STYLES = {
   incoming: { bg: 'rgba(34,197,94,0.10)', color: '#16A34A', border: '#BBF7D0', label: 'Incoming', icon: '📥' },
   outgoing: { bg: 'rgba(245,158,11,0.10)', color: '#D97706', border: '#FDE68A', label: 'Outgoing', icon: '📤' },
@@ -261,6 +246,79 @@ export default function UnsyncedCallsPage() {
 
   const totalPages = Math.ceil(total / PER_PAGE);
 
+  const unsyncedColumns = [
+    {
+      key: 'employeeName',
+      label: 'Employee',
+      render: (c) => (
+        <div className="flex items-center gap-3">
+          <div
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
+            style={{ background: '#2563EB' }}
+          >
+            {(c.employeeName || '?')[0].toUpperCase()}
+          </div>
+          <span className="text-sm font-medium text-gray-900 truncate max-w-[120px]">
+            {c.employeeName || '—'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'contactNumber',
+      label: 'Contact',
+      render: (c) => (
+        <div>
+          <span className="font-mono text-sm font-semibold text-gray-900">
+            {c.contactNumber || '—'}
+          </span>
+          {c.contactName && c.contactName !== 'Unknown' && (
+            <p className="text-xs text-gray-500 mt-0.5">{c.contactName}</p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'callType',
+      label: 'Type',
+      render: (c) => <TypeBadge type={c.callType} />,
+    },
+    {
+      key: 'duration',
+      label: 'Duration',
+      align: 'left',
+      render: (c) => <span className="text-sm text-gray-700 tabular-nums">{dur(c.duration)}</span>,
+    },
+    {
+      key: 'timestamp',
+      label: 'Date & Time',
+      render: (c) => <span className="text-sm text-gray-600 whitespace-nowrap">{fmt(c.timestamp)}</span>,
+    },
+    {
+      key: 'action',
+      label: 'Action',
+      sortable: false,
+      searchable: false,
+      render: (c) => (
+        <button
+          onClick={() => {
+            setCreating(c);
+            setForm({
+              name: c.contactName !== 'Unknown' ? c.contactName || '' : '',
+              email: '',
+              assignedTo: '',
+            });
+            setFormErr('');
+          }}
+          className="group flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600"
+        >
+          <LeadPlusIco s={12} />
+          Create Lead
+        </button>
+      ),
+    },
+  ];
+
   // Calculate stats
   const typeCounts = calls.reduce((acc, call) => {
     const type = call.callType?.toLowerCase() || 'unknown';
@@ -424,170 +482,20 @@ export default function UnsyncedCallsPage() {
               </span>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Employee
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Contact
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                    Type
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                    Duration
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Date & Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => (
-                    <tr key={i}>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="skeleton w-8 h-8 rounded-xl" />
-                          <div className="skeleton h-4 w-20 rounded" />
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="skeleton h-4 w-32 rounded" />
-                      </td>
-                      <td className="px-6 py-4 hidden md:table-cell">
-                        <div className="skeleton h-6 w-20 rounded-full" />
-                      </td>
-                      <td className="px-6 py-4 hidden lg:table-cell">
-                        <div className="skeleton h-4 w-16 rounded" />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="skeleton h-4 w-24 rounded" />
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="skeleton h-8 w-24 rounded-lg" />
-                      </td>
-                    </tr>
-                  ))
-                ) : calls.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>
-                      <div className="flex flex-col items-center py-16 gap-4">
-                        <div className="w-20 h-20 rounded-2xl bg-green-50 text-green-600 flex items-center justify-center">
-                          <CheckIco />
-                        </div>
-                        <p className="font-bold text-lg text-gray-900">All calls are synced! 🎉</p>
-                        <p className="text-sm text-gray-500 max-w-sm text-center">
-                          No unsynced calls found. All call records have matching leads in the database.
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  <AnimatePresence>
-                    {calls.map((c, i) => (
-                      <motion.tr
-                        key={c._id || i}
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.02 }}
-                        className="hover:bg-gray-50/50 transition-colors duration-150"
-                      >
-                        <td className="px-6 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
-                              style={{ background: '#2563EB' }}
-                            >
-                              {(c.employeeName || '?')[0].toUpperCase()}
-                            </div>
-                            <span className="text-sm font-medium text-gray-900 truncate max-w-[120px]">
-                              {c.employeeName || '—'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-3">
-                          <div>
-                            <span className="font-mono text-sm font-semibold text-gray-900">
-                              {c.contactNumber || '—'}
-                            </span>
-                            {c.contactName && c.contactName !== 'Unknown' && (
-                              <p className="text-xs text-gray-500 mt-0.5">{c.contactName}</p>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-3 hidden md:table-cell">
-                          <TypeBadge type={c.callType} />
-                        </td>
-                        <td className="px-6 py-3 hidden lg:table-cell">
-                          <span className="text-sm text-gray-700 tabular-nums">
-                            {dur(c.duration)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3">
-                          <span className="text-sm text-gray-600 whitespace-nowrap">
-                            {fmt(c.timestamp)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-3">
-                          <button
-                            onClick={() => {
-                              setCreating(c);
-                              setForm({
-                                name: c.contactName !== 'Unknown' ? c.contactName || '' : '',
-                                email: '',
-                                assignedTo: '',
-                              });
-                              setFormErr('');
-                            }}
-                            className="group flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600"
-                          >
-                            <LeadPlusIco s={12} />
-                            Create Lead
-                          </button>
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </AnimatePresence>
-                )}
-              </tbody>
-            </table>
+          <div className="p-4">
+            <DataTable
+              serverMode
+              columns={unsyncedColumns}
+              rows={calls}
+              loading={loading}
+              page={page}
+              totalPages={totalPages}
+              totalCount={total}
+              onPageChange={setPage}
+              emptyTitle="All calls are synced!"
+              emptyHint="No unsynced calls found. All call records have matching leads in the database."
+            />
           </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="px-6 py-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <span className="text-sm text-gray-500">
-                Showing {((page - 1) * PER_PAGE) + 1} to {Math.min(page * PER_PAGE, total)} of {total} records
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 text-gray-700 hover:bg-gray-200"
-                >
-                  <ArrowLeftIco />
-                  Previous
-                </button>
-                <span className="text-sm font-medium text-gray-700 px-3 py-1.5">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  disabled={page === totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed bg-gray-100 text-gray-700 hover:bg-gray-200"
-                >
-                  Next
-                  <ArrowRightIco />
-                </button>
-              </div>
-            </div>
-          )}
         </motion.div>
 
         {/* Quick Actions */}

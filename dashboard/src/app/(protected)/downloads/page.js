@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import { fmtDateTime } from '../../../lib/timezone';
+import { DataTable } from '../../../components/report-shared';
 
 function Ico({ size = 16, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
@@ -10,7 +11,6 @@ function Ico({ size = 16, children }) {
 const DownloadIco = ({ s = 13 }) => <Ico size={s}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Ico>;
 const TrashIco    = ({ s = 13 }) => <Ico size={s}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></Ico>;
 const RefreshIco  = ({ s = 13, spinning = false }) => <Ico size={s}><g className={spinning ? 'animate-spin' : ''} style={{ transformOrigin: 'center' }}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></g></Ico>;
-const InboxIco    = ({ s = 32 }) => <Ico size={s}><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></Ico>;
 
 function formatBytes(n) {
   if (!n) return '0 B';
@@ -100,66 +100,52 @@ export default function DownloadsPage() {
         <div className="px-5 py-3.5" style={{ borderBottom: '1px solid #E2E8F0' }}>
           <h3 className="font-bold text-sm" style={{ color: '#0F172A' }}>{jobs.length} file{jobs.length === 1 ? '' : 's'}</h3>
         </div>
-        <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth: 640 }}>
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Type</th>
-                <th>Size</th>
-                <th>Created</th>
-                <th>Expires In</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 6 }).map((_, j) => <td key={j}><div className="skeleton h-4 rounded" /></td>)}</tr>
-                ))
-              ) : jobs.length === 0 ? (
-                <tr><td colSpan={6}>
-                  <div className="flex flex-col items-center py-14 gap-3">
-                    <InboxIco />
-                    <p className="text-sm font-medium" style={{ color: '#64748B' }}>No downloads yet</p>
-                    <p className="text-xs" style={{ color: '#94A3B8' }}>Export a report or call/lead list from anywhere in the app and it'll show up here</p>
-                  </div>
-                </td></tr>
-              ) : jobs.map((job) => (
-                <tr key={job._id}>
-                  <td>
+        <div className="px-5 py-4">
+          <DataTable
+            loading={loading}
+            rows={jobs}
+            emptyTitle="No downloads yet"
+            emptyHint="Export a report or call/lead list from anywhere in the app and it'll show up here"
+            columns={[
+              {
+                key: 'filename', label: 'File',
+                render: (job) => (
+                  <>
                     <p className="font-mono text-xs font-medium" style={{ color: '#0F172A' }}>{job.filename}</p>
                     {job.status === 'failed' && <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626' }}>Failed</span>}
-                  </td>
-                  <td className="text-xs" style={{ color: '#475569' }}>{job.label}</td>
-                  <td className="text-xs tabular-nums" style={{ color: '#475569' }}>{formatBytes(job.sizeBytes)}</td>
-                  <td className="text-xs" style={{ color: '#94A3B8' }}>{fmtDateTime(job.createdAt)}</td>
-                  <td className="text-xs font-medium" style={{ color: '#D97706' }}>{formatExpiresIn(job.expiresAt)}</td>
-                  <td>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        onClick={() => handleDownload(job)}
-                        disabled={busyId === job._id}
-                        className="btn-secondary text-[11px] py-1 px-2.5"
-                        title="Download"
-                      >
-                        <DownloadIco />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(job)}
-                        disabled={busyId === job._id}
-                        className="btn-secondary text-[11px] py-1 px-2.5"
-                        style={{ color: '#DC2626' }}
-                        title="Delete"
-                      >
-                        <TrashIco />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </>
+                ),
+              },
+              { key: 'label', label: 'Type', render: (job) => <span className="text-xs" style={{ color: '#475569' }}>{job.label}</span> },
+              { key: 'sizeBytes', label: 'Size', searchable: false, render: (job) => <span className="text-xs tabular-nums" style={{ color: '#475569' }}>{formatBytes(job.sizeBytes)}</span> },
+              { key: 'createdAt', label: 'Created', searchable: false, render: (job) => <span className="text-xs" style={{ color: '#94A3B8' }}>{fmtDateTime(job.createdAt)}</span> },
+              { key: 'expiresAt', label: 'Expires In', searchable: false, render: (job) => <span className="text-xs font-medium" style={{ color: '#D97706' }}>{formatExpiresIn(job.expiresAt)}</span> },
+              {
+                key: 'actions', label: 'Actions', align: 'right', sortable: false, searchable: false,
+                render: (job) => (
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button
+                      onClick={() => handleDownload(job)}
+                      disabled={busyId === job._id}
+                      className="btn-secondary text-[11px] py-1 px-2.5"
+                      title="Download"
+                    >
+                      <DownloadIco />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(job)}
+                      disabled={busyId === job._id}
+                      className="btn-secondary text-[11px] py-1 px-2.5"
+                      style={{ color: '#DC2626' }}
+                      title="Delete"
+                    >
+                      <TrashIco />
+                    </button>
+                  </div>
+                ),
+              },
+            ]}
+          />
         </div>
       </div>
     </div>

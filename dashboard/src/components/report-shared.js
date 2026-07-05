@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useMemo } from 'react';
+import { Fragment, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 /* ────────────────────────────────────────────────────────────
@@ -71,6 +71,17 @@ export function CallBadge({ type }) {
       style={{ color: m.color, background: m.bg }}>
       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: m.color }} />
       {m.label}
+    </span>
+  );
+}
+
+/* Lead status pill — statusStyle/statusLabel come from lib/leadStatus.js,
+   the single source of truth for the 9-value lead status taxonomy. */
+export function LeadStatusBadge({ status, style, label }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap ${style.bg} ${style.text} ${style.border}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+      {label}
     </span>
   );
 }
@@ -204,6 +215,20 @@ export function ActiveFilterChips({ filters, labels = {}, onClear, onClearAll })
   );
 }
 
+/* Column-level filter match. `col.filterValue(row)` lets a column filter on its
+   underlying raw value even when its `render()` shows a badge/pin/etc instead. */
+function matchesColumnFilter(row, col, val) {
+  const raw = col?.filterValue ? col.filterValue(row) : row[col?.key];
+  if (col?.filterType === 'select') return String(raw ?? '') === val;
+  if (col?.filterType === 'date') {
+    if (!raw) return false;
+    const d = new Date(raw), sel = new Date(val);
+    if (isNaN(d.getTime()) || isNaN(sel.getTime())) return false;
+    return d.getFullYear() === sel.getFullYear() && d.getMonth() === sel.getMonth() && d.getDate() === sel.getDate();
+  }
+  return String(raw ?? '').toLowerCase().includes(String(val).toLowerCase());
+}
+
 /* ────────────────────────────────────────────────────────────
    DATA TABLE — client-side search, sort, pagination
    Used for bounded datasets (summary, daywise, hourly, etc.)
@@ -219,18 +244,45 @@ export function DataTable({
   compact = false,
   footer,
   capNotice,
+  // Server-driven pagination: pass `rows` as already the current page's data.
+  // When set, DataTable stops slicing/sorting/filtering client-side and defers
+  // page/limit changes to the caller via the on* callbacks below.
+  serverMode = false,
+  page: serverPage = 1,
+  totalPages: serverTotalPages = 1,
+  totalCount,
+  onPageChange,
+  onPageSizeChange,
+  // Row selection (checkboxes) — caller owns the selected-id set.
+  selectable = false,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  getRowId = (row) => row._id ?? row.id,
+  // Expandable rows — renderExpanded(row) is shown in a full-width row
+  // directly beneath the row whose id matches `expandedId`.
+  renderExpanded,
+  expandedId,
+  onToggleExpand,
+  // Extras adopted from the report-page-local DataTable clones — a leading
+  // "Sr. No." column, a scrolling body with sticky header, and per-column
+  // select/date filters (in addition to the default text filter).
+  showRowNumber = false,
+  maxBodyHeight,
 }) {
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
   const [colSearch, setColSearch] = useState({});
-  const [page, setPage] = useState(1);
+  const [localPage, setLocalPage] = useState(1);
   const [rpp, setRpp] = useState(pageSize);
 
   const filtered = useMemo(() => {
+    if (serverMode) return rows;
     let r = rows;
     Object.entries(colSearch).forEach(([key, val]) => {
       if (!val) return;
-      r = r.filter((row) => String(row[key] ?? '').toLowerCase().includes(val.toLowerCase()));
+      const col = columns.find((c) => c.key === key);
+      r = r.filter((row) => matchesColumnFilter(row, col, val));
     });
     if (sortKey) {
       r = [...r].sort((a, b) => {
@@ -242,19 +294,45 @@ export function DataTable({
       });
     }
     return r;
-  }, [rows, colSearch, sortKey, sortDir]);
+  }, [rows, colSearch, sortKey, sortDir, serverMode]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / rpp));
-  const pageRows = filtered.slice((page - 1) * rpp, page * rpp);
+  const page = serverMode ? serverPage : localPage;
+  const totalPages = serverMode ? Math.max(1, serverTotalPages) : Math.max(1, Math.ceil(filtered.length / rpp));
+  const pageRows = serverMode ? rows : filtered.slice((page - 1) * rpp, page * rpp);
+  const rangeTotal = serverMode ? (totalCount ?? rows.length) : filtered.length;
 
-  useEffect(() => setPage(1), [colSearch, rpp, rows]);
+  useEffect(() => { if (!serverMode) setLocalPage(1); }, [colSearch, rpp, rows, serverMode]);
+
+  const goToPage = (p) => (serverMode ? onPageChange?.(p) : setLocalPage(p));
+  const changeRpp = (n) => (serverMode ? onPageSizeChange?.(n) : (setRpp(n)));
 
   const toggleSort = (key) => {
+    if (serverMode) return;
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
   };
 
   const cell = compact ? 'px-3 py-2' : 'px-4 py-3';
+
+  const allOnPageSelected = selectable && pageRows.length > 0 && pageRows.every((r) => selectedIds?.has(getRowId(r)));
+  let effectiveColumns = showRowNumber
+    ? [{ key: '__srNo', label: 'Sr. No.', width: 72, sortable: false, searchable: false, render: (_row, i) => (page - 1) * rpp + i + 1 }, ...columns]
+    : columns;
+  if (selectable) {
+    effectiveColumns = [{
+      key: '__select', sortable: false, searchable: false, align: 'left',
+      label: (
+        <input type="checkbox" checked={allOnPageSelected} onChange={() => onToggleSelectAll?.(pageRows.map(getRowId))}
+          className="w-3.5 h-3.5 rounded border-gray-300 cursor-pointer" />
+      ),
+      render: (row) => (
+        <input type="checkbox" checked={!!selectedIds?.has(getRowId(row))} onChange={() => onToggleSelect?.(getRowId(row))}
+          onClick={(e) => e.stopPropagation()}
+          className="w-3.5 h-3.5 rounded border-gray-300 cursor-pointer" />
+      ),
+    }, ...effectiveColumns];
+  }
+  const hasWidths = effectiveColumns.some((c) => c.width);
 
   return (
     <div>
@@ -266,39 +344,68 @@ export function DataTable({
       )}
       <div className="flex items-center justify-between px-1 pb-3">
         <span className="text-xs text-gray-400">
-          {filtered.length === 0 ? '0'
-            : `${(page - 1) * rpp + 1}–${Math.min(page * rpp, filtered.length)}`} of {filtered.length.toLocaleString()}
+          {rangeTotal === 0 ? '0'
+            : serverMode
+              ? `Page ${page}`
+              : `${(page - 1) * rpp + 1}–${Math.min(page * rpp, rangeTotal)}`} of {rangeTotal.toLocaleString()}
         </span>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          Show
-          <select value={rpp} onChange={(e) => setRpp(Number(e.target.value))}
-            className="border border-gray-200 rounded-md px-2 py-1 text-xs outline-none focus:border-blue-400 bg-white">
-            {[10, 25, 50, 100].map((n) => <option key={n}>{n}</option>)}
-          </select>
-        </div>
+        {(!serverMode || onPageSizeChange) && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            Show
+            <select value={rpp} onChange={(e) => { const n = Number(e.target.value); setRpp(n); changeRpp(n); }}
+              className="border border-gray-200 rounded-md px-2 py-1 text-xs outline-none focus:border-blue-400 bg-white">
+              {[10, 25, 50, 100].map((n) => <option key={n}>{n}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-100 shadow-sm">
-        <table className="w-full text-sm min-w-[600px]">
+        <div className="overflow-auto" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
+        <table className="w-full text-sm min-w-[600px]" style={hasWidths ? { tableLayout: 'fixed' } : undefined}>
+          {hasWidths && (
+            <colgroup>
+              {effectiveColumns.map((c) => <col key={c.key} style={{ width: c.width ? c.width : `${100 / effectiveColumns.length}%` }} />)}
+            </colgroup>
+          )}
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
-              {columns.map((c) => (
+              {effectiveColumns.map((c) => (
                 <th key={c.key}
                   className={`${cell} text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
                   <button
                     onClick={() => c.sortable !== false && toggleSort(c.key)}
-                    className={`inline-flex items-center gap-1 ${c.sortable !== false ? 'hover:text-gray-800 cursor-pointer' : 'cursor-default'}`}>
+                    className={`inline-flex items-center gap-1 ${!serverMode && c.sortable !== false ? 'hover:text-gray-800 cursor-pointer' : 'cursor-default'}`}>
                     {c.label}
-                    {sortKey === c.key && (sortDir === 'asc' ? <ArrowUpIco /> : <ArrowDownIco />)}
+                    {!serverMode && sortKey === c.key && (sortDir === 'asc' ? <ArrowUpIco /> : <ArrowDownIco />)}
                   </button>
                 </th>
               ))}
             </tr>
-            {searchable && (
+            {searchable && !serverMode && (
               <tr className="bg-white border-b border-gray-100">
-                {columns.map((c) => (
+                {effectiveColumns.map((c) => (
                   <td key={c.key} className={`${cell} pt-2 pb-2`}>
-                    {c.searchable !== false ? (
+                    {c.searchable === false ? null : c.filterType === 'select' ? (
+                      <select
+                        value={colSearch[c.key] || ''}
+                        onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-gray-50">
+                        <option value="">{c.filterPlaceholder || 'All'}</option>
+                        {(c.filterOptions || []).map((opt) => {
+                          const value = typeof opt === 'string' ? opt : opt.value;
+                          const label = typeof opt === 'string' ? opt : opt.label;
+                          return <option key={value} value={value}>{label}</option>;
+                        })}
+                      </select>
+                    ) : c.filterType === 'date' ? (
+                      <input
+                        type="date"
+                        value={colSearch[c.key] || ''}
+                        onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-gray-50"
+                      />
+                    ) : (
                       <div className="relative">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300"><SearchIco /></span>
                         <input
@@ -308,7 +415,7 @@ export function DataTable({
                           onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
                         />
                       </div>
-                    ) : null}
+                    )}
                   </td>
                 ))}
               </tr>
@@ -318,34 +425,47 @@ export function DataTable({
             {loading ? (
               Array.from({ length: Math.min(rpp, 8) }).map((_, i) => (
                 <tr key={i} className="animate-pulse">
-                  {columns.map((c, j) => (
+                  {effectiveColumns.map((c, j) => (
                     <td key={j} className={cell}><div className="h-4 bg-gray-100 rounded w-3/4" /></td>
                   ))}
                 </tr>
               ))
             ) : pageRows.length === 0 ? (
-              <tr><td colSpan={columns.length}><EmptyState title={emptyTitle} hint={emptyHint} /></td></tr>
+              <tr><td colSpan={effectiveColumns.length}><EmptyState title={emptyTitle} hint={emptyHint} /></td></tr>
             ) : (
-              pageRows.map((row, i) => (
-                <motion.tr
-                  key={row._id ?? row.id ?? i}
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                  transition={{ delay: Math.min(i * 0.015, 0.15) }}
-                  className={`transition-colors hover:bg-blue-50/40 ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}>
-                  {columns.map((c) => (
-                    <td key={c.key}
-                      className={`${cell} whitespace-nowrap text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
-                      {c.render ? c.render(row) : (row[c.key] ?? '—')}
-                    </td>
-                  ))}
-                </motion.tr>
-              ))
+              pageRows.map((row, i) => {
+                const rowId = getRowId(row) ?? i;
+                const isExpanded = renderExpanded && expandedId === rowId;
+                return (
+                  <Fragment key={rowId}>
+                    <motion.tr
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      transition={{ delay: Math.min(i * 0.015, 0.15) }}
+                      onClick={renderExpanded ? () => onToggleExpand?.(rowId) : undefined}
+                      className={`transition-colors hover:bg-blue-50/40 ${renderExpanded ? 'cursor-pointer' : ''} ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}>
+                      {effectiveColumns.map((c) => (
+                        <td key={c.key}
+                          className={`${cell} whitespace-nowrap text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
+                          {c.render ? c.render(row, i) : (row[c.key] ?? '—')}
+                        </td>
+                      ))}
+                    </motion.tr>
+                    {isExpanded && (
+                      <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-50/60">
+                        <td colSpan={effectiveColumns.length} className="px-4 py-3">
+                          {renderExpanded(row)}
+                        </td>
+                      </motion.tr>
+                    )}
+                  </Fragment>
+                );
+              })
             )}
           </tbody>
           {footer && !loading && pageRows.length > 0 && (
             <tfoot>
               <tr className="border-t-2 border-gray-100 bg-gray-50/60 font-semibold text-gray-900">
-                {columns.map((c) => (
+                {effectiveColumns.map((c) => (
                   <td key={c.key} className={`${cell} whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}>
                     {footer[c.key] !== undefined ? footer[c.key] : ''}
                   </td>
@@ -354,25 +474,26 @@ export function DataTable({
             </tfoot>
           )}
         </table>
+        </div>
       </div>
 
-      {!loading && filtered.length > 0 && (
+      {!loading && rangeTotal > 0 && (
         <div className="flex items-center justify-between mt-3 px-1">
           <span className="text-xs text-gray-400">Page {page} of {totalPages}</span>
           <div className="flex gap-1">
-            <button disabled={page === 1} onClick={() => setPage(1)}
+            <button disabled={page === 1} onClick={() => goToPage(1)}
               className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
               «
             </button>
-            <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}
+            <button disabled={page === 1} onClick={() => goToPage(page - 1)}
               className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
               Prev
             </button>
-            <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}
+            <button disabled={page === totalPages} onClick={() => goToPage(page + 1)}
               className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
               Next
             </button>
-            <button disabled={page === totalPages} onClick={() => setPage(totalPages)}
+            <button disabled={page === totalPages} onClick={() => goToPage(totalPages)}
               className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
               »
             </button>

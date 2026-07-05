@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Lead = require('../models/Lead');
 const { protect, isManager } = require('../middleware/auth');
 
 // GET /api/employees
@@ -83,11 +84,33 @@ router.put('/:id', protect, isManager, async (req, res) => {
   }
 });
 
-// DELETE /api/employees/:id
+// DELETE /api/employees/:id — if the employee has leads assigned, the caller
+// must say what to do with them: reassignTo another employee, or deleteLeads
+// to remove them too. Without either, the request is rejected (409) so the
+// frontend can prompt the manager instead of silently orphaning leads.
 router.delete('/:id', protect, isManager, async (req, res) => {
   try {
-    const employee = await User.findOneAndDelete({ _id: req.params.id, role: 'employee' });
+    const { reassignTo, deleteLeads } = req.body || {};
+    const employee = await User.findOne({ _id: req.params.id, role: 'employee' });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+
+    const leadCount = await Lead.countDocuments({ assignedTo: employee._id });
+    if (leadCount > 0) {
+      if (reassignTo) {
+        if (reassignTo === employee._id.toString()) {
+          return res.status(400).json({ success: false, error: 'Cannot reassign leads to the same employee being removed' });
+        }
+        const target = await User.findOne({ _id: reassignTo, role: 'employee' });
+        if (!target) return res.status(400).json({ success: false, error: 'Target employee not found' });
+        await Lead.updateMany({ assignedTo: employee._id }, { $set: { assignedTo: reassignTo } });
+      } else if (deleteLeads) {
+        await Lead.deleteMany({ assignedTo: employee._id });
+      } else {
+        return res.status(409).json({ success: false, error: 'Employee has assigned leads', leadCount });
+      }
+    }
+
+    await User.deleteOne({ _id: employee._id });
     return res.json({ success: true, message: 'Employee deleted' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
