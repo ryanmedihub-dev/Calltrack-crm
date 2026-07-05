@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { triggerLocalExport } from '../../../../lib/downloads';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -173,6 +175,7 @@ export default function UnsyncedCallsPage() {
   const [form, setForm] = useState({ name: '', email: '', assignedTo: '' });
   const [formErr, setFormErr] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [bulkCreating, setBulkCreating] = useState(false);
 
   const PER_PAGE = 25;
 
@@ -222,6 +225,38 @@ export default function UnsyncedCallsPage() {
     } catch (e) {
       setFormErr(e.response?.data?.error || 'Failed to create lead');
     }
+  };
+
+  const createAllLeads = async () => {
+    if (bulkCreating || calls.length === 0) return;
+    setBulkCreating(true);
+    let created = 0, failed = 0;
+    for (const call of calls) {
+      if (!call.contactNumber) { failed++; continue; }
+      try {
+        await api.post('/api/leads/from-call', {
+          callId: call._id,
+          phone: call.contactNumber,
+          name: call.contactName && call.contactName !== 'Unknown' ? call.contactName : undefined,
+          source: 'Call',
+        });
+        created++;
+      } catch {
+        failed++;
+      }
+    }
+    setBulkCreating(false);
+    toast.success(`${created} lead${created === 1 ? '' : 's'} created${failed ? `, ${failed} failed` : ''}`);
+    load();
+  };
+
+  const exportList = () => {
+    const rows = [
+      ['Employee', 'Contact', 'Type', 'Duration', 'Date'],
+      ...calls.map((c) => [c.employeeName || '', c.contactNumber || '', c.callType || '', dur(c.duration), fmtDateTime(c.timestamp)]),
+    ];
+    const csv = rows.map((r) => r.join(',')).join('\n');
+    triggerLocalExport({ label: 'Unsynced Calls', filename: 'unsynced-calls.csv', csv });
   };
 
   const totalPages = Math.ceil(total / PER_PAGE);
@@ -566,18 +601,15 @@ export default function UnsyncedCallsPage() {
             <h4 className="text-sm font-bold text-gray-900 mb-3">Quick Actions</h4>
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => {
-                  // Bulk create logic could be added here
-                }}
-                className="px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 text-sm font-medium flex items-center gap-2"
+                onClick={createAllLeads}
+                disabled={bulkCreating}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 text-sm font-medium flex items-center gap-2 disabled:opacity-60"
               >
                 <LeadPlusIco s={14} />
-                Create All Leads
+                {bulkCreating ? 'Creating…' : 'Create All Leads'}
               </button>
               <button
-                onClick={() => {
-                  // Export logic could be added here
-                }}
+                onClick={exportList}
                 className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors duration-200 text-sm font-medium"
               >
                 📥 Export List

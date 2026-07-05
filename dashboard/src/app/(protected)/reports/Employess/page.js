@@ -1,178 +1,484 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useEffect, useState, useCallback } from 'react';
+import toast from 'react-hot-toast';
+import {
+  BarChart, Bar, ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell,
+} from 'recharts';
 import api from '../../../../lib/api';
+import { triggerLocalExport } from '../../../../lib/downloads';
+import {
+  DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton,
+  PhoneIco, UsersIco, CheckIco, GaugeIco, TrophyIco, ClockIco, DownloadIco,
+  GridIco, BarChartTabIco, CalendarTabIco, ClockTabIco, NoEntryIco, ClipboardIco,
+} from '../../../../components/report-shared';
 
-function Ico({ size=16, children }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
+const TABS = [
+  { key: 'summary',  label: 'Summary',           icon: <GridIco /> },
+  { key: 'analysis', label: 'Analysis',          icon: <BarChartTabIco /> },
+  { key: 'dayWise',  label: 'Day-wise Analysis', icon: <CalendarTabIco /> },
+  { key: 'hourly',   label: 'Hourly Analysis',   icon: <ClockTabIco /> },
+  { key: 'target',   label: 'Target Achievement',icon: <GaugeIco /> },
+  { key: 'attention',label: 'Needs Attention',   icon: <NoEntryIco /> },
+  { key: 'directory',label: 'Directory',         icon: <ClipboardIco /> },
+];
+
+function AchievementBar({ pct }) {
+  if (pct == null) return <span className="text-xs text-gray-400">No target set</span>;
+  const color = pct >= 100 ? '#16A34A' : pct >= 50 ? '#D97706' : '#DC2626';
+  return (
+    <div className="flex items-center gap-2 justify-end">
+      <div className="w-20 h-1.5 rounded-full overflow-hidden bg-gray-200">
+        <div className="h-full rounded-full" style={{ width: `${Math.min(pct, 100)}%`, background: color }} />
+      </div>
+      <span className="text-xs font-semibold tabular-nums w-10 text-right" style={{ color }}>{pct}%</span>
+    </div>
+  );
 }
-const DownloadIco = ({s=13}) => <Ico size={s}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></Ico>;
-const UsersIco    = ({s=20}) => <Ico size={s}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></Ico>;
 
-const PERIODS = [{ k:'today',l:'Today' },{ k:'week',l:'This Week' },{ k:'month',l:'This Month' }];
+function StatusPill({ active }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${active ? 'text-emerald-700 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${active ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      {active ? 'Active' : 'Inactive'}
+    </span>
+  );
+}
 
-const ChartTip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return <div className="rounded-lg px-3 py-2 text-xs" style={{ background:'#0F172A', color:'#fff' }}>
-    <p style={{ color:'#94A3B8' }}>{label}</p>
-    {payload.map((p,i) => <p key={i} className="font-bold">{p.name}: {p.value}</p>)}
-  </div>;
-};
+/* Inline-editable Daily Target cell, backed by the real PATCH /api/employees/:id/target endpoint */
+function TargetCell({ employeeId, initial, onSaved }) {
+  const [value, setValue] = useState(initial ?? 0);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-const MEDALS = ['🥇','🥈','🥉'];
+  const commit = async () => {
+    setEditing(false);
+    const num = Number(value);
+    if (Number.isNaN(num) || num < 0 || num === initial) { setValue(initial ?? 0); return; }
+    setSaving(true);
+    try {
+      await api.patch(`/api/employees/${employeeId}/target`, { dailyTarget: num });
+      toast.success('Target updated');
+      onSaved?.(num);
+    } catch {
+      toast.error('Failed to update target');
+      setValue(initial ?? 0);
+    } finally {
+      setSaving(false);
+    }
+  };
 
-export default function EmployeesReportPage() {
-  const [period,    setPeriod]    = useState('week');
+  if (editing) {
+    return (
+      <input
+        autoFocus type="number" min={0} value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        className="w-20 text-xs border border-blue-300 rounded-md px-2 py-1 outline-none text-right"
+      />
+    );
+  }
+  return (
+    <button onClick={() => setEditing(true)} disabled={saving}
+      className="text-xs font-semibold text-gray-700 hover:text-blue-600 hover:underline disabled:opacity-50">
+      {saving ? '…' : value || 0}
+    </button>
+  );
+}
+
+/* Active/Inactive toggle, backed by PATCH /api/employees/:id/status */
+function StatusToggle({ employeeId, active, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await api.patch(`/api/employees/${employeeId}/status`, { isActive: !active });
+      toast.success(!active ? 'Marked active' : 'Marked inactive');
+      onSaved?.(!active);
+    } catch {
+      toast.error('Failed to update status');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button onClick={toggle} disabled={busy} className="disabled:opacity-50">
+      <StatusPill active={active} />
+    </button>
+  );
+}
+
+export default function EmployeeReportsPage() {
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('summary');
+  const [chartMode, setChartMode] = useState('composed');
   const [employees, setEmployees] = useState([]);
-  const [dialers,   setDialers]   = useState([]);
-  const [loading,   setLoading]   = useState(true);
+  const [report, setReport] = useState(null);
+  const [rowOverrides, setRowOverrides] = useState({}); // optimistic edits for directory tab
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const [empRes, statsRes] = await Promise.allSettled([
-          api.get('/api/employees'),
-          api.get('/api/calls/stats'),
-        ]);
-        const emps   = empRes.status==='fulfilled'  ? empRes.value.data?.data||[]  : [];
-        const stats  = statsRes.status==='fulfilled' ? statsRes.value.data?.data    : null;
-        setEmployees(emps);
-        const key = period==='today'?'today':period==='week'?'thisWeek':'thisMonth';
-        setDialers(stats?.[key]?.topDialers||stats?.today?.topDialers||[]);
-      } catch {}
-      setLoading(false);
-    })();
-  }, [period]);
+  const [filters, setFilters] = useState({ fromDate: '', toDate: '', employee: '', status: '' });
 
-  const total     = dialers.reduce((s,d)=>s+d.count,0)||1;
-  const maxCalls  = dialers[0]?.count||1;
-  const barData   = dialers.slice(0,12).map(d=>({ name:(d.name||'').split(' ')[0], calls:d.count }));
+  const buildParams = useCallback(() => ({
+    ...(filters.fromDate && { startDate: filters.fromDate }),
+    ...(filters.toDate && { endDate: filters.toDate }),
+    ...(filters.employee && { employeeId: filters.employee }),
+    ...(filters.status && { status: filters.status }),
+  }), [filters]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/api/reports/employees-periodic', { params: { ...buildParams(), tab: activeTab, limit: 500 } });
+      setReport(res.data?.data || null);
+      setRowOverrides({});
+    } catch {
+      setReport(null);
+      toast.error('Failed to load report');
+    }
+    setLoading(false);
+  }, [buildParams, activeTab]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get('/api/employees').then((r) => setEmployees(r.data.data || [])).catch(() => {}); }, []);
 
   const exportCSV = () => {
-    const rows = [['Rank','Name','Calls','Share %'],...dialers.map((d,i)=>[i+1,d.name,d.count,Math.round((d.count/total)*100)])];
-    const csv  = rows.map(r=>r.join(',')).join('\n');
-    const blob = new Blob([csv],{type:'text/csv'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a'); a.href=url; a.download='employees-report.csv'; a.click();
+    const rows = report?.employeePerformance || [];
+    const csvRows = [
+      ['Employee', 'Status', 'Total Calls', 'Connected', 'Leads Assigned', 'Converted', 'Conv. Rate %', 'Target Achievement %'],
+      ...rows.map((r) => [r.employeeName, r.isActive ? 'Active' : 'Inactive', r.totalCalls, r.connectedCalls, r.leadsAssigned, r.leadsConverted, r.conversionRate, r.targetAchievement ?? ''])
+    ];
+    triggerLocalExport({ label: 'Employee Report', filename: 'employee-report.csv', csv: csvRows.map((r) => r.join(',')).join('\n') });
   };
+
+  const applyOverride = (id, patch) => setRowOverrides((o) => ({ ...o, [id]: { ...o[id], ...patch } }));
+
+  const performanceRows = (report?.employeePerformance || []).map((r) => ({ ...r, ...rowOverrides[r.employeeId] }));
+  const directoryRows = (report?.employees || []).map((r) => ({ ...r, ...rowOverrides[r.employeeId] }));
+  const targetRows = (report?.records || []);
+  const attentionRows = (report?.records || []);
+  const hourlyRows = (report?.hourly || []).map((h) => ({ ...h, id: h.hour }));
+  const dayWiseRows = (report?.daywise || []).map((d) => ({ ...d, id: d.date }));
+  const hourlyChartData = (report?.hourly || []).map((h) => ({ hour: h.label, calls: h.calls, leads: h.leads }));
+
+  const employeeName = employees.find((e) => e._id === filters.employee)?.name;
 
   return (
     <div className="space-y-5 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>Employees Report</h2>
-          <p className="text-sm mt-0.5" style={{ color:'#94A3B8' }}>Employee call activity, rankings, and performance metrics</p>
+          <p className="text-xs text-gray-400 flex items-center gap-1.5">
+            Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Employee Reports</span>
+          </p>
+          <h1 className="text-xl font-bold text-gray-900 mt-0.5">{report?.dateLabel || 'Employee Reports'}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-0.5 p-1 rounded-xl" style={{ background:'#fff', border:'1px solid #E2E8F0' }}>
-            {PERIODS.map(p=>(
-              <button key={p.k} onClick={()=>setPeriod(p.k)}
-                className="px-3 h-7 flex items-center rounded-lg text-xs font-semibold transition-all"
-                style={period===p.k?{background:'#2563EB',color:'#fff',boxShadow:'0 2px 6px rgba(37,99,235,0.25)'}:{color:'#94A3B8'}}>
-                {p.l}
-              </button>
-            ))}
-          </div>
-          <button onClick={exportCSV} className="btn-secondary text-xs py-1.5 px-3"><DownloadIco/> Export</button>
-        </div>
+        <button onClick={exportCSV} disabled={!performanceRows.length}
+          className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm disabled:opacity-40">
+          <DownloadIco /> Export
+        </button>
       </div>
 
-      {/* Summary KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 stagger">
-        {[
-          { label:'Total Employees', val:employees.length,                             color:'#2563EB', bg:'#EFF6FF' },
-          { label:'Active Callers',  val:dialers.filter(d=>d.count>0).length,          color:'#16A34A', bg:'#F0FDF4' },
-          { label:'Total Calls',     val:dialers.reduce((s,d)=>s+d.count,0),           color:'#D97706', bg:'#FFFBEB' },
-          { label:'Avg per Caller',  val:dialers.length?Math.round(dialers.reduce((s,d)=>s+d.count,0)/dialers.length):0, color:'#7C3AED', bg:'#F5F3FF' },
-        ].map((k,i)=>(
-          <div key={k.label} className="page-card p-4 animate-fade-in-up" style={{ animationDelay:`${i*0.05}s` }}>
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center mb-2" style={{ background:k.bg, color:k.color }}>
-              <UsersIco s={14}/>
-            </div>
-            <p className="stat-number text-2xl">
-              {loading?<span className="skeleton inline-block w-10 h-6 rounded"/>:k.val}
-            </p>
-            <p className="stat-label text-[10px] uppercase tracking-wider">{k.label}</p>
-          </div>
+      {/* Filters */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+          <Field label="From Date">
+            <input type="date" className="form-input" value={filters.fromDate} onChange={(e) => setFilters({ ...filters, fromDate: e.target.value })} />
+          </Field>
+          <Field label="To Date">
+            <input type="date" className="form-input" value={filters.toDate} onChange={(e) => setFilters({ ...filters, toDate: e.target.value })} />
+          </Field>
+          <Field label="Employee">
+            <select className="form-input" value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })}>
+              <option value="">All employees</option>
+              {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Status">
+            <select className="form-input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+              <option value="">All</option>
+              <option value="active">Active only</option>
+              <option value="inactive">Inactive only</option>
+            </select>
+          </Field>
+          <button onClick={load} className="btn-primary justify-center h-[38px]">Apply</button>
+        </div>
+        {(filters.employee || filters.status) && (
+          <p className="text-xs text-gray-400 mt-3">
+            Filtering by {filters.employee ? employeeName : 'all employees'}{filters.status ? `, ${filters.status}` : ''}
+          </p>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="tab-nav">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)} className={`tab-item${activeTab === t.key ? ' active' : ''}`}>
+            {t.icon} {t.label}
+          </button>
         ))}
       </div>
 
-      {/* Chart */}
-      {!loading && barData.length > 0 && (
-        <div className="page-card p-5">
-          <h3 className="font-bold text-sm mb-4" style={{ color:'#0F172A' }}>Top Employees by Calls</h3>
-          <ResponsiveContainer width="100%" height={Math.max(200, barData.length*30)}>
-            <BarChart data={barData} barSize={22} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" horizontal={false}/>
-              <XAxis type="number" tick={{ fontSize:10, fill:'#94A3B8' }} tickLine={false} axisLine={false} allowDecimals={false}/>
-              <YAxis type="category" dataKey="name" tick={{ fontSize:11, fill:'#475569', fontWeight:600 }} tickLine={false} axisLine={false} width={72}/>
-              <Tooltip content={<ChartTip/>}/>
-              <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[0,5,5,0]}/>
-            </BarChart>
-          </ResponsiveContainer>
+      {/* ── Summary ── */}
+      {activeTab === 'summary' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard loading={loading} label="Total Employees" value={(report?.kpis?.totalEmployees ?? 0).toLocaleString()} color="#2563EB" icon={<UsersIco />} />
+            <StatCard loading={loading} label="Active Employees" value={(report?.kpis?.activeEmployees ?? 0).toLocaleString()} color="#16A34A" icon={<CheckIco />} />
+            <StatCard loading={loading} label="Total Calls" value={(report?.kpis?.totalCalls ?? 0).toLocaleString()} color="#D97706" icon={<PhoneIco />} />
+            <StatCard loading={loading} label="Leads Assigned" value={(report?.kpis?.totalLeadsAssigned ?? 0).toLocaleString()} color="#7C3AED" icon={<UsersIco />} />
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div className="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Workforce Status</h3>
+              <p className="text-xs text-gray-400 mb-3">Active vs inactive</p>
+              {loading ? <Skeleton className="h-44 w-full" /> : !report?.statusPie?.length ? <EmptyState title="No employees" hint="" /> : (
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie data={report.statusPie} cx="50%" cy="50%" innerRadius={44} outerRadius={68} paddingAngle={3} dataKey="value">
+                      {report.statusPie.map((d, i) => <Cell key={i} fill={d.color} stroke="#fff" strokeWidth={2} />)}
+                    </Pie>
+                    <Tooltip content={<ChartTip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+              <div className="flex justify-center gap-4 mt-2 flex-wrap">
+                {(report?.statusPie || []).map((d, i) => (
+                  <span key={i} className="flex items-center gap-1.5 text-xs text-gray-500">
+                    <span className="w-2 h-2 rounded-full" style={{ background: d.color }} /> {d.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Performance</h3>
+              <p className="text-xs text-gray-400 mb-3">Calls, leads and target achievement for the selected period</p>
+              <DataTable
+                loading={loading}
+                pageSize={10}
+                emptyTitle="No employees found"
+                columns={[
+                  {
+                    key: 'employeeName', label: 'Employee',
+                    render: (r) => (
+                      <div>
+                        <p className="font-semibold text-sm text-gray-900">{r.employeeName}</p>
+                        <StatusPill active={r.isActive} />
+                      </div>
+                    ),
+                  },
+                  { key: 'totalCalls', label: 'Calls', align: 'right', searchable: false },
+                  { key: 'connectedCalls', label: 'Connected', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600 font-semibold">{r.connectedCalls}</span> },
+                  { key: 'leadsAssigned', label: 'Leads', align: 'right', searchable: false },
+                  { key: 'leadsConverted', label: 'Converted', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600 font-semibold">{r.leadsConverted}</span> },
+                  { key: 'conversionRate', label: 'Conv. Rate', align: 'right', searchable: false, render: (r) => `${r.conversionRate}%` },
+                  { key: 'targetAchievement', label: 'Target', align: 'right', sortable: false, searchable: false, render: (r) => <AchievementBar pct={r.targetAchievement} /> },
+                ]}
+                rows={performanceRows}
+              />
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Full table */}
-      <div className="page-card overflow-hidden">
-        <div className="px-5 py-3.5" style={{ borderBottom:'1px solid #E2E8F0' }}>
-          <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>Full Employee Rankings</h3>
+      {/* ── Analysis ── */}
+      {activeTab === 'analysis' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Calls vs. Leads — Hourly</h3>
+                <p className="text-xs text-gray-400">Org-wide activity across all employees</p>
+              </div>
+              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+                {['composed', 'bar'].map((m) => (
+                  <button key={m} onClick={() => setChartMode(m)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-colors ${chartMode === m ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {loading ? <Skeleton className="h-72 w-full" /> : (
+              <ResponsiveContainer width="100%" height={280}>
+                <ComposedChart data={hourlyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="hour" tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} interval={1} />
+                  <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} width={30} allowDecimals={false} />
+                  <Tooltip content={<ChartTip />} />
+                  <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[4, 4, 0, 0]} barSize={18} />
+                  {chartMode === 'composed' && <Line type="monotone" dataKey="leads" name="Leads Created" stroke="#7C3AED" strokeWidth={2} dot={{ r: 3, fill: '#7C3AED' }} />}
+                  {chartMode === 'bar' && <Bar dataKey="leads" name="Leads Created" fill="#7C3AED" radius={[4, 4, 0, 0]} barSize={18} />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <InsightCard icon={<TrophyIco />} title="Top Performers" rows={[
+              { label: 'Top Dialer', value: report?.topDialer?.employeeName || '—', sub: report?.topDialer ? `${report.topDialer.count} calls` : '' },
+              { label: 'Top Converter', value: report?.topConverter?.employeeName || '—', sub: report?.topConverter ? `${report.topConverter.count} leads converted` : '' },
+            ]} />
+            <InsightCard icon={<GaugeIco />} title="Target Achievement" rows={[
+              { label: 'Best Achiever', value: report?.bestTarget?.employeeName || '—', sub: report?.bestTarget ? `${report.bestTarget.pct}% of target` : 'No targets set' },
+              { label: 'Needs Coaching', value: report?.needsAttention?.employeeName || '—', sub: report?.needsAttention ? `${report.needsAttention.pct}% of target` : '' },
+            ]} />
+            <InsightCard icon={<ClockIco />} title="Averages" rows={[
+              { label: 'Avg Calls / Employee', value: report?.avgCallsPerEmployee ?? 0 },
+              { label: 'Avg Leads / Employee', value: report?.avgLeadsPerEmployee ?? 0 },
+              { label: 'Business Days', value: report?.dayCount ?? 0 },
+            ]} />
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="data-table" style={{ minWidth:560 }}>
-            <thead><tr><th>Rank</th><th>Employee</th><th style={{ textAlign:'right' }}>Calls</th><th>Share</th><th>Status</th></tr></thead>
-            <tbody>
-              {loading ? (
-                Array.from({length:8}).map((_,i)=>(
-                  <tr key={i}>{Array.from({length:5}).map((_,j)=><td key={j}><div className="skeleton h-4 rounded"/></td>)}</tr>
-                ))
-              ) : dialers.length===0 ? (
-                <tr><td colSpan={5}>
-                  <div className="flex flex-col items-center py-14 gap-2">
-                    <UsersIco s={28}/>
-                    <p className="text-sm" style={{ color:'#94A3B8' }}>No data for this period</p>
+      )}
+
+      {/* ── Day-wise ── */}
+      {activeTab === 'dayWise' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Daily Activity</h3>
+          <p className="text-xs text-gray-400 mb-4">Calls and leads created per day, across all employees</p>
+          <DataTable
+            loading={loading}
+            searchable={false}
+            pageSize={15}
+            columns={[
+              { key: 'label', label: 'Day' },
+              { key: 'calls', label: 'Calls', align: 'right' },
+              { key: 'leadsCreated', label: 'Leads Created', align: 'right' },
+              { key: 'leadsConverted', label: 'Converted', align: 'right', render: (r) => <span className="text-emerald-600 font-semibold">{r.leadsConverted}</span> },
+            ]}
+            rows={dayWiseRows}
+          />
+          {!loading && dayWiseRows.length > 0 && (
+            <div className="mt-6">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={[...dayWiseRows].reverse().map((r) => ({ day: r.label.split(',')[0], calls: r.calls, leads: r.leadsCreated }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: '#94A3B8', fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} width={30} />
+                  <Tooltip content={<ChartTip />} />
+                  <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="leads" name="Leads Created" fill="#7C3AED" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Hourly ── */}
+      {activeTab === 'hourly' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Hourly Time Slots</h3>
+          <p className="text-xs text-gray-400 mb-4">Share of combined activity (calls + leads) by hour, IST</p>
+          <DataTable
+            loading={loading}
+            searchable={false}
+            pageSize={24}
+            columns={[
+              { key: 'label', label: 'Time Slot' },
+              { key: 'calls', label: 'Calls', align: 'right' },
+              { key: 'leads', label: 'Leads', align: 'right' },
+              {
+                key: 'pct', label: '% of Total', align: 'right', sortable: false,
+                render: (r) => (
+                  <div className="flex items-center gap-2 justify-end">
+                    <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(r.pct, 100)}%` }} />
+                    </div>
+                    <span className="text-xs text-gray-500 w-10 text-right">{r.pct}%</span>
                   </div>
-                </td></tr>
-              ) : dialers.map((d,i)=>{
-                const share = Math.round((d.count/total)*100);
-                const emp   = employees.find(e=>e._id===d.employeeId);
-                return (
-                  <tr key={d.employeeId||i}>
-                    <td className="w-12">
-                      {i<3?<span className="text-lg">{MEDALS[i]}</span>:<span className="font-bold text-xs" style={{ color:'#94A3B8' }}>#{i+1}</span>}
-                    </td>
-                    <td>
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                          style={{ background:'linear-gradient(135deg,#2563EB,#60A5FA)' }}>
-                          {(d.name||'?').slice(0,2).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-xs" style={{ color:'#0F172A' }}>{d.name||'Unknown'}</p>
-                          <p className="text-[10px] capitalize" style={{ color:'#94A3B8' }}>{emp?.role||'Agent'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{ textAlign:'right', fontWeight:700, color:'#2563EB' }}>{d.count}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background:'#E2E8F0' }}>
-                          <div className="h-full rounded-full" style={{ width:`${(d.count/maxCalls)*100}%`, background:'#2563EB' }}/>
-                        </div>
-                        <span className="text-[10px] tabular-nums" style={{ color:'#94A3B8' }}>{share}%</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="badge" style={{ background:'#F0FDF4', color:'#16A34A', border:'1px solid #BBF7D0' }}>Active</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ),
+              },
+            ]}
+            rows={hourlyRows}
+          />
         </div>
-      </div>
+      )}
+
+      {/* ── Target Achievement ── */}
+      {activeTab === 'target' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Target Achievement</h3>
+          <p className="text-xs text-gray-400 mb-4">Employees with a daily call target set, weakest first</p>
+          <DataTable
+            loading={loading}
+            emptyTitle="No targets configured"
+            emptyHint="Set a daily target for an employee from the Directory tab."
+            columns={[
+              { key: 'employeeName', label: 'Employee' },
+              { key: 'dailyTarget', label: 'Daily Target', align: 'right', searchable: false },
+              { key: 'totalCalls', label: 'Calls Made', align: 'right', searchable: false },
+              { key: 'targetTotal', label: 'Period Target', align: 'right', searchable: false },
+              { key: 'targetAchievement', label: 'Achievement', align: 'right', sortable: false, searchable: false, render: (r) => <AchievementBar pct={r.targetAchievement} /> },
+            ]}
+            rows={targetRows}
+          />
+        </div>
+      )}
+
+      {/* ── Needs Attention ── */}
+      {activeTab === 'attention' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Needs Attention</h3>
+          <p className="text-xs text-gray-400 mb-4">Inactive accounts, employees below 50% of target, or no activity this period</p>
+          <DataTable
+            loading={loading}
+            emptyTitle="Nobody needs attention 🎉"
+            columns={[
+              { key: 'employeeName', label: 'Employee' },
+              {
+                key: 'reason', label: 'Reason', sortable: false,
+                render: (r) => (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium text-red-600 bg-red-50">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {r.reason}
+                  </span>
+                ),
+              },
+              { key: 'totalCalls', label: 'Calls', align: 'right', searchable: false },
+              { key: 'targetAchievement', label: 'Target', align: 'right', sortable: false, searchable: false, render: (r) => <AchievementBar pct={r.targetAchievement} /> },
+            ]}
+            rows={attentionRows}
+          />
+        </div>
+      )}
+
+      {/* ── Directory ── */}
+      {activeTab === 'directory' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Directory</h3>
+          <p className="text-xs text-gray-400 mb-4">Full roster — click a status pill or target value to edit it directly</p>
+          <DataTable
+            loading={loading}
+            pageSize={25}
+            columns={[
+              {
+                key: 'employeeName', label: 'Employee',
+                render: (r) => (
+                  <div>
+                    <p className="font-semibold text-sm text-gray-900">{r.employeeName}</p>
+                    <p className="text-xs text-gray-400">{r.email}</p>
+                  </div>
+                ),
+              },
+              { key: 'phone', label: 'Phone', searchable: false },
+              {
+                key: 'isActive', label: 'Status', sortable: false, searchable: false,
+                render: (r) => <StatusToggle employeeId={r.employeeId} active={r.isActive} onSaved={(v) => applyOverride(r.employeeId, { isActive: v })} />,
+              },
+              {
+                key: 'dailyTarget', label: 'Daily Target', align: 'right', sortable: false, searchable: false,
+                render: (r) => <TargetCell employeeId={r.employeeId} initial={r.dailyTarget} onSaved={(v) => applyOverride(r.employeeId, { dailyTarget: v })} />,
+              },
+              { key: 'totalCalls', label: 'Calls (period)', align: 'right', searchable: false },
+              { key: 'leadsAssigned', label: 'Leads (period)', align: 'right', searchable: false },
+            ]}
+            rows={directoryRows}
+          />
+        </div>
+      )}
     </div>
   );
 }

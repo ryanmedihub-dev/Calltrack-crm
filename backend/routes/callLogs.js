@@ -5,6 +5,7 @@ const Lead = require('../models/Lead');
 const { protect, isManager } = require('../middleware/auth');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
+const { createDownloadJob } = require('../lib/downloadJobs');
 
 function fmtDuration(seconds) {
   if (!seconds || seconds <= 0) return '0s';
@@ -306,10 +307,13 @@ router.post('/sync', protect, async (req, res) => {
 // GET /api/calls — all call logs with filters (manager)
 router.get('/', protect, isManager, async (req, res) => {
   try {
-    const { employeeId, callType, startDate, endDate, search, page = 1, limit = 20 } = req.query;
+    const { employeeId, callType, startDate, endDate, search, unsynced, page = 1, limit = 20 } = req.query;
     const filter = {};
     if (employeeId) filter.employeeId = employeeId;
     if (callType) filter.callType = callType;
+    // "Unsynced" here means "no matching lead was auto-linked" (leadId is null),
+    // not the CallLog.synced device-sync flag — matches the page's own copy.
+    if (unsynced === 'true') filter.leadId = null;
     if (startDate || endDate) {
       filter.timestamp = {};
       if (startDate) filter.timestamp.$gte = new Date(startDate);
@@ -456,7 +460,7 @@ router.get('/my-stats', protect, async (req, res) => {
   }
 });
 
-// GET /api/calls/export — streaming CSV export (manager)
+// GET /api/calls/export — CSV export (manager); also registered in the Downloads Center
 router.get('/export', protect, isManager, async (req, res) => {
   try {
     const { employeeId, callType, startDate, endDate } = req.query;
@@ -472,15 +476,12 @@ router.get('/export', protect, isManager, async (req, res) => {
       }
     }
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="calls.csv"');
-    res.write('Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n');
-
+    const rows = ['Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n'];
     const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1 }).lean().cursor();
     for await (const doc of cursor) {
       const d   = new Date(doc.timestamp);
       const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
-      res.write([
+      rows.push([
         d.toLocaleDateString('en-IN'),
         d.toLocaleTimeString('en-IN'),
         esc(doc.employeeId?.name),
@@ -491,8 +492,21 @@ router.get('/export', protect, isManager, async (req, res) => {
         esc(doc.notes)
       ].join(',') + '\n');
     }
+    const csv = rows.join('');
+    const filename = `calls_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    res.end();
+    let job = null;
+    try {
+      job = await createDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename, content: csv });
+    } catch {}
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (job) {
+      res.setHeader('X-Download-Job-Id', job._id.toString());
+      res.setHeader('X-Download-Expires-At', job.expiresAt.toISOString());
+    }
+    return res.status(200).send(csv);
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }

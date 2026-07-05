@@ -1,7 +1,8 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
+import { triggerServerExport } from '../../../lib/downloads';
 import CallTypeBadge from '../../../components/CallTypeBadge';
 import Pagination from '../../../components/Pagination';
 import { parseUTC } from '../../../lib/timezone';
@@ -263,17 +264,11 @@ export default function CallLogsPage() {
     fetchCalls(1, { startDate: today, endDate: today });
   };
 
-  const handleExport = async () => {
-    try {
-      const params = buildFilters();
-      const res = await api.get('/api/calls/export', { params, responseType:'blob' });
-      const url = URL.createObjectURL(new Blob([res.data],{type:'text/csv'}));
-      const a = document.createElement('a'); a.href = url;
-      a.download = `calls_${today}.csv`;
-      a.click(); URL.revokeObjectURL(url);
-      toast.success('Export downloaded');
-    } catch { toast.error('Export failed'); }
-  };
+  const handleExport = () => triggerServerExport({
+    endpoint: '/api/calls/export',
+    params: buildFilters(),
+    filename: `calls_${today}.csv`,
+  });
 
   const handleSaveNote = async () => {
     if (!noteText.trim()||!noteModal) return;
@@ -446,8 +441,8 @@ export default function CallLogsPage() {
             </thead>
             <tbody>
               {calls.map((log,idx)=>(
-                <>
-                  <tr key={log._id} className="cursor-pointer"
+                <Fragment key={log._id}>
+                  <tr className="cursor-pointer"
                     onClick={()=>setExpanded(expanded===log._id?null:log._id)}>
                     <td style={{ color:'#CBD5E1' }}>{(page-1)*20+idx+1}</td>
                     <td>
@@ -525,7 +520,7 @@ export default function CallLogsPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
               {calls.length === 0 && (
                 <tr>

@@ -5,6 +5,7 @@ const CallLog = require('../models/CallLog');
 const { protect, isManager } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
+const { createDownloadJob } = require('../lib/downloadJobs');
 
 // POST /api/leads — create lead (any authenticated user)
 router.post('/', protect, async (req, res) => {
@@ -235,7 +236,7 @@ router.post('/from-call', protect, async (req, res) => {
   }
 });
 
-// GET /api/leads/export — streaming CSV export (manager)
+// GET /api/leads/export — CSV export (manager); also registered in the Downloads Center
 router.get('/export', protect, isManager, async (req, res) => {
   try {
     const { status, assignedTo, startDate, endDate, search, tags } = req.query;
@@ -259,14 +260,11 @@ router.get('/export', protect, isManager, async (req, res) => {
       }
     }
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="leads.csv"');
-    res.write('Name,Phone,Email,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n');
-
+    const rows = ['Name,Phone,Email,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n'];
     const cursor = Lead.find(filter).populate('assignedTo', 'name').sort({ createdAt: -1 }).lean().cursor();
     const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
     for await (const doc of cursor) {
-      res.write([
+      rows.push([
         esc(doc.name),
         doc.phone || '',
         doc.email || '',
@@ -281,8 +279,21 @@ router.get('/export', protect, isManager, async (req, res) => {
         new Date(doc.createdAt).toLocaleDateString('en-IN')
       ].join(',') + '\n');
     }
+    const csv = rows.join('');
+    const filename = `leads_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    res.end();
+    let job = null;
+    try {
+      job = await createDownloadJob({ ownerId: req.user._id, label: 'Leads Export', filename, content: csv });
+    } catch {}
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    if (job) {
+      res.setHeader('X-Download-Job-Id', job._id.toString());
+      res.setHeader('X-Download-Expires-At', job.expiresAt.toISOString());
+    }
+    return res.status(200).send(csv);
   } catch (err) {
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }

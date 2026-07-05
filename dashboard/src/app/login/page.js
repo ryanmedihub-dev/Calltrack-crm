@@ -66,7 +66,10 @@ export default function LoginPage() {
       toast.success('Welcome back!');
       window.location.href = '/dashboard';
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Login failed');
+      const fallback = err.response?.status === 429
+        ? 'Too many login attempts. Please wait a few minutes and try again.'
+        : 'Login failed';
+      toast.error(err.response?.data?.error || fallback);
     } finally {
       setLoading(false);
     }

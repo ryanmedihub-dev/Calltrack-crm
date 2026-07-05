@@ -217,6 +217,8 @@ export function DataTable({
   emptyTitle,
   emptyHint,
   compact = false,
+  footer,
+  capNotice,
 }) {
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState('asc');
@@ -256,6 +258,12 @@ export function DataTable({
 
   return (
     <div>
+      {capNotice && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+          {capNotice}
+        </div>
+      )}
       <div className="flex items-center justify-between px-1 pb-3">
         <span className="text-xs text-gray-400">
           {filtered.length === 0 ? '0'
@@ -273,7 +281,7 @@ export function DataTable({
       <div className="overflow-x-auto rounded-xl border border-gray-100 shadow-sm">
         <table className="w-full text-sm min-w-[600px]">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
+            <tr className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
               {columns.map((c) => (
                 <th key={c.key}
                   className={`${cell} text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
@@ -323,10 +331,10 @@ export function DataTable({
                   key={row._id ?? row.id ?? i}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                   transition={{ delay: Math.min(i * 0.015, 0.15) }}
-                  className="hover:bg-blue-50/40 transition-colors">
+                  className={`transition-colors hover:bg-blue-50/40 ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}>
                   {columns.map((c) => (
                     <td key={c.key}
-                      className={`${cell} whitespace-nowrap text-gray-700 ${c.align === 'right' ? 'text-right' : 'text-left'} ${c.className || ''}`}>
+                      className={`${cell} whitespace-nowrap text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
                       {c.render ? c.render(row) : (row[c.key] ?? '—')}
                     </td>
                   ))}
@@ -334,22 +342,40 @@ export function DataTable({
               ))
             )}
           </tbody>
+          {footer && !loading && pageRows.length > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-100 bg-gray-50/60 font-semibold text-gray-900">
+                {columns.map((c) => (
+                  <td key={c.key} className={`${cell} whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}>
+                    {footer[c.key] !== undefined ? footer[c.key] : ''}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
-      {!loading && filtered.length > rpp && (
+      {!loading && filtered.length > 0 && (
         <div className="flex items-center justify-between mt-3 px-1">
           <span className="text-xs text-gray-400">Page {page} of {totalPages}</span>
           <div className="flex gap-1">
-            {[
-              { label: '← Prev', fn: () => setPage((p) => p - 1), dis: page === 1 },
-              { label: 'Next →', fn: () => setPage((p) => p + 1), dis: page === totalPages },
-            ].map(({ label, fn, dis }) => (
-              <button key={label} disabled={dis} onClick={fn}
-                className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
-                {label}
-              </button>
-            ))}
+            <button disabled={page === 1} onClick={() => setPage(1)}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+              «
+            </button>
+            <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+              Prev
+            </button>
+            <button disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+              Next
+            </button>
+            <button disabled={page === totalPages} onClick={() => setPage(totalPages)}
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+              »
+            </button>
           </div>
         </div>
       )}

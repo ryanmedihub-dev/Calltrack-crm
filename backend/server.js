@@ -11,6 +11,7 @@ const reportRoutes    = require('./routes/reports');
 const auditRoutes     = require('./routes/auditLog');
 const scriptRoutes    = require('./routes/scripts');
 const employeeRoutes  = require('./routes/employees');
+const downloadRoutes  = require('./routes/downloads');
 
 const app = express();
 
@@ -27,25 +28,35 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['X-Download-Job-Id', 'X-Download-Expires-At']
 };
 
 app.set('trust proxy', 1);
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+// Registering a client-built CSV JSON-escapes its content (inflating wire size up to ~2x),
+// so this route needs a bigger body limit than the global one below.
+app.use('/api/downloads/register', express.json({ limit: '12mb' }));
 app.use(express.json({ limit: '5mb' }));
 
 const limiter        = rateLimit({ windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false });
-const authLimiter    = rateLimit({ windowMs: 15 * 60 * 1000, max: 20,  standardHeaders: true, legacyHeaders: false });
+const authLimiter    = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  message: { success: false, error: 'Too many login attempts. Please wait a few minutes and try again.' },
+});
 // 5 registrations per hour — prevents bulk account creation via the protected route
 const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false });
 // Reports run heavy aggregations; cap at 30 per 5 minutes
 const reportsLimiter  = rateLimit({ windowMs:  5 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+// File generation/registration; cap at 60 per 5 minutes
+const downloadsLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
 
 app.use('/api/', limiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', registerLimiter);
 app.use('/api/reports', reportsLimiter);
+app.use('/api/downloads', downloadsLimiter);
 
 // Fail immediately if not connected — no silent 10s buffering
 mongoose.set('bufferCommands', false);
@@ -87,6 +98,7 @@ app.use('/api/reports',    reportRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/scripts',    scriptRoutes);
 app.use('/api/employees',  employeeRoutes);
+app.use('/api/downloads',  downloadRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ success: true, message: 'CallTrack API running' }));
 

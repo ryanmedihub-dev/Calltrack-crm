@@ -1,290 +1,294 @@
 'use client';
 import { useState } from 'react';
-import { PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer } from 'recharts';
+import toast from 'react-hot-toast';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../../lib/api';
 import Pagination from '../../../../components/Pagination';
 import { parseUTC } from '../../../../lib/timezone';
+import {
+  DataTable, EmptyState, Field, ChartTip, CallBadge,
+  PhoneIco, GridIco, ClipboardIco,
+} from '../../../../components/report-shared';
 
 const DURATION_OPTIONS = [
-  { value:'all',       label:'All Time' },
-  { value:'today',     label:'Today' },
-  { value:'yesterday', label:'Yesterday' },
-  { value:'week',      label:'Last 7 Days' },
-  { value:'month',     label:'Last 30 Days' },
+  { value: 'all', label: 'All Time' },
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'week', label: 'Last 7 Days' },
+  { value: 'month', label: 'Last 30 Days' },
 ];
 
-const TYPE_COLORS = {
-  incoming: '#22C55E', outgoing: '#F59E0B', missed: '#EF4444', rejected: '#7C3AED',
-};
-
-function CallBadge({ type }) {
-  const color = TYPE_COLORS[type] || '#64748B';
-  return (
-    <span className="badge text-[11px] capitalize"
-      style={{ background:`${color}14`, color, border:`1px solid ${color}38` }}>
-      {type||'—'}
-    </span>
-  );
-}
+const TABS = [
+  { key: 'summary', label: 'Summary', icon: <GridIco /> },
+  { key: 'history', label: 'Call History', icon: <ClipboardIco /> },
+];
 
 export default function ClientReportsPage() {
-  const [phone,       setPhone]       = useState('');
-  const [duration,    setDuration]    = useState('all');
-  const [data,        setData]        = useState(null);
-  const [loading,     setLoading]     = useState(false);
-  const [activeTab,   setActiveTab]   = useState('summary');
-  const [page,        setPage]        = useState(1);
+  const [phone, setPhone] = useState('');
+  const [duration, setDuration] = useState('all');
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
+  const [page, setPage] = useState(1);
   const [historyData, setHistoryData] = useState(null);
 
   const fetchReport = async () => {
     if (!phone.trim()) return;
     setLoading(true);
     try {
-      const res = await api.get('/api/reports/client', { params:{ phone:phone.trim(), duration, tab:'summary' } });
+      const res = await api.get('/api/reports/client', { params: { phone: phone.trim(), duration, tab: 'summary' } });
       setData(res.data.data);
       setActiveTab('summary'); setPage(1); setHistoryData(null);
-    } catch {}
+    } catch (err) {
+      setData(null);
+      toast.error(err.response?.data?.error || 'Failed to load client report');
+    }
     finally { setLoading(false); }
   };
 
-  const fetchHistory = async (p=1) => {
+  const fetchHistory = async (p = 1) => {
     try {
-      const res = await api.get('/api/reports/client', { params:{ phone:phone.trim(), duration, tab:'history', page:p, limit:50 } });
+      const res = await api.get('/api/reports/client', { params: { phone: phone.trim(), duration, tab: 'history', page: p, limit: 50 } });
       setHistoryData(res.data.data);
     } catch {}
   };
 
   const handleTabChange = (tab) => {
     setActiveTab(tab);
-    if (tab==='history') fetchHistory(1);
+    if (tab === 'history') fetchHistory(1);
   };
 
   return (
-    <div className="space-y-5 animate-fade-in">
-      <div>
-        <h2 className="text-lg font-bold" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>Client Reports</h2>
-        <p className="text-sm mt-0.5" style={{ color:'#94A3B8' }}>Search call history by client phone number</p>
-      </div>
+    <div className="min-h-screen">
+      <div className="space-y-5">
 
-      {/* Search bar */}
-      <div className="page-card p-4 flex flex-wrap gap-3 items-end">
+        {/* ── Header ── */}
         <div>
-          <label className="block text-xs font-medium mb-1" style={{ color:'#64748B' }}>Duration</label>
-          <select value={duration} onChange={e=>setDuration(e.target.value)} className="form-input min-w-36">
-            {DURATION_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <p className="text-xs text-gray-400 flex items-center gap-1.5">
+            Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Client Reports</span>
+          </p>
+          <h1 className="text-xl font-bold text-gray-900 mt-0.5">Client Reports</h1>
         </div>
-        <div className="flex-1 min-w-48">
-          <label className="block text-xs font-medium mb-1" style={{ color:'#64748B' }}>Phone Number</label>
-          <input value={phone} onChange={e=>setPhone(e.target.value)}
-            onKeyDown={e=>e.key==='Enter'&&fetchReport()}
-            placeholder="Enter phone number…"
-            className="form-input w-full"/>
+
+        {/* ── Search ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr_auto] gap-3 items-end">
+            <Field label="Duration">
+              <select className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
+                {DURATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Phone Number">
+              <div className="relative">
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchReport()}
+                  placeholder="Enter phone number…"
+                  className="input pl-9"
+                />
+              </div>
+            </Field>
+            <button
+              onClick={fetchReport}
+              disabled={loading || !phone.trim()}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed h-[38px]"
+            >
+              {loading ? 'Loading…' : 'Get Report'}
+            </button>
+          </div>
         </div>
-        <button onClick={fetchReport} disabled={loading||!phone.trim()} className="btn-primary" style={{ opacity:loading||!phone.trim()?0.6:1 }}>
-          {loading?'Loading…':'Get Report'}
-        </button>
+
+        {data && (
+          <>
+            {/* Active search tag */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs font-medium px-3 py-1.5 rounded-full border border-blue-100">
+                {DURATION_OPTIONS.find((o) => o.value === duration)?.label} · Client: {data.phone}
+              </span>
+            </div>
+
+            {/* Tabs */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+              <div className="flex gap-1 px-4 py-3 overflow-hidden">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => handleTabChange(tab.key)}
+                    className={`relative px-2 py-3.5 text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
+                      activeTab === tab.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <span className={`flex items-center justify-center transition-transform ${activeTab === tab.key ? 'scale-110' : ''}`}>
+                      {tab.icon}
+                    </span>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {activeTab === 'summary' && <ClientSummaryTab data={data} />}
+            {activeTab === 'history' && (
+              <ClientHistoryTab data={historyData} page={page} onPage={(p) => { setPage(p); fetchHistory(p); }} />
+            )}
+          </>
+        )}
+
+        {!data && !loading && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <EmptyState title="No client selected" hint="Enter a phone number above and click Get Report." />
+          </div>
+        )}
       </div>
 
-      {data && (
-        <>
-          {/* Active filter tag */}
-          <div className="flex items-center gap-2">
-            <span className="badge text-xs"
-              style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}>
-              {DURATION_OPTIONS.find(o=>o.value===duration)?.label} · Client: {data.phone}
-            </span>
-          </div>
-
-          {/* Tabs */}
-          <div className="tab-nav">
-            {[{ key:'summary',label:'Summary' },{ key:'history',label:'Call History' }].map(tab=>(
-              <button key={tab.key} onClick={()=>handleTabChange(tab.key)}
-                className={`tab-item${activeTab===tab.key?' active':''}`}>
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {activeTab==='summary' && <ClientSummaryTab data={data} CallBadge={CallBadge}/>}
-          {activeTab==='history' && (
-            <ClientHistoryTab data={historyData} page={page} onPage={p=>{ setPage(p); fetchHistory(p); }} CallBadge={CallBadge}/>
-          )}
-        </>
-      )}
-
-      {!data && !loading && (
-        <div className="page-card flex flex-col items-center justify-center h-64 gap-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:'#EFF6FF', color:'#2563EB' }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-            </svg>
-          </div>
-          <p className="text-sm" style={{ color:'#94A3B8' }}>Enter a phone number and click Get Report</p>
-        </div>
-      )}
+      <style jsx global>{`
+        .input {
+          width: 100%;
+          padding: 0.5rem 0.75rem;
+          border-radius: 0.5rem;
+          border: 1px solid #E5E7EB;
+          font-size: 0.8125rem;
+          outline: none;
+          background: white;
+          transition: border-color 0.15s;
+        }
+        .input:focus { border-color: #3B82F6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+      `}</style>
     </div>
   );
 }
 
-function ClientSummaryTab({ data, CallBadge }) {
+function ClientSummaryTab({ data }) {
   const { summary, sidebarStats, pieData, employeeSummary } = data;
   if (!summary) return null;
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        {/* Summary table */}
-        <div className="xl:col-span-2 page-card overflow-hidden">
-          <table className="data-table">
-            <thead><tr>
-              <th>Call Type</th>
-              <th style={{ textAlign:'right' }}>Calls</th>
-              <th style={{ textAlign:'right' }}>Duration</th>
-            </tr></thead>
-            <tbody>
-              {[
-                { label:'Incoming', key:'incoming', color:'#22C55E' },
-                { label:'Outgoing', key:'outgoing', color:'#F59E0B' },
-                { label:'Missed',   key:'missed',   color:'#EF4444' },
-                { label:'Rejected', key:'rejected', color:'#7C3AED' },
-              ].map(row=>(
-                <tr key={row.key}>
-                  <td className="font-semibold" style={{ color:row.color }}>{row.label}</td>
-                  <td style={{ textAlign:'right', fontWeight:700, color:'#0F172A' }}>{summary[row.key]?.calls||0}</td>
-                  <td style={{ textAlign:'right', color:'#475569' }}>{summary[row.key]?.duration||'—'}</td>
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-3">Call Type Breakdown</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-400 uppercase">
+                <th className="text-left pb-2">Call Type</th>
+                <th className="text-right pb-2">Calls</th>
+                <th className="text-right pb-2">Duration</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {['incoming', 'outgoing', 'missed', 'rejected'].map((k) => (
+                <tr key={k}>
+                  <td className="py-2.5"><CallBadge type={k} /></td>
+                  <td className="py-2.5 text-right font-semibold text-gray-900">{summary[k]?.calls || 0}</td>
+                  <td className="py-2.5 text-right text-gray-500">{summary[k]?.duration || '—'}</td>
                 </tr>
               ))}
-              <tr style={{ background:'#F8FAFC' }}>
-                <td className="font-bold" style={{ color:'#0F172A' }}>Total</td>
-                <td style={{ textAlign:'right', fontWeight:700, color:'#0F172A' }}>{summary.total?.calls||0}</td>
-                <td style={{ textAlign:'right', color:'#475569' }}>{summary.total?.duration||'—'}</td>
+              <tr className="border-t-2 border-gray-100">
+                <td className="py-2.5 font-bold text-gray-900">Total</td>
+                <td className="py-2.5 text-right font-bold text-gray-900">{summary.total?.calls || 0}</td>
+                <td className="py-2.5 text-right font-bold text-gray-900">{summary.total?.duration || '—'}</td>
               </tr>
             </tbody>
           </table>
-        </div>
 
-        {/* Sidebar stats + pie */}
-        <div className="space-y-4">
           {sidebarStats && (
-            <div className="page-card p-4 space-y-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100">
               {[
-                { label:'Never Attended',        val:sidebarStats.neverAttended },
-                { label:'Not Pickup by Client',  val:sidebarStats.notPickupByClient },
-                { label:'Connected Calls',       val:sidebarStats.connectedCalls },
-              ].map(({ label, val }) => (
-                <div key={label} className="flex justify-between items-center py-1.5" style={{ borderBottom:'1px solid #F1F5F9' }}>
-                  <span className="text-xs" style={{ color:'#94A3B8' }}>{label}</span>
-                  <span className="font-bold text-sm" style={{ color:'#0F172A' }}>{val??'—'}</span>
+                { label: 'Never Attended', value: sidebarStats.neverAttended, color: '#DC2626' },
+                { label: 'Not Pickup by Client', value: sidebarStats.notPickupByClient, color: '#EA580C' },
+                { label: 'Connected Calls', value: sidebarStats.connectedCalls, color: '#16A34A' },
+              ].map((s, i) => (
+                <div key={i} className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400">{s.label}</p>
+                  <p className="text-sm font-bold mt-0.5" style={{ color: s.color }}>{s.value ?? '—'}</p>
                 </div>
               ))}
             </div>
           )}
-          {pieData?.length > 0 && (
-            <div className="page-card p-4">
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
-                    {pieData.map((entry,i)=><Cell key={i} fill={entry.color}/>)}
-                  </Pie>
-                  <Tooltip contentStyle={{ background:'#fff', border:'1px solid #E2E8F0', borderRadius:10, fontSize:12 }}/>
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize:11 }}/>
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          )}
         </div>
+
+        {pieData?.length > 0 && (
+          <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
+            <h3 className="text-sm font-bold text-gray-900 mb-1">Distribution</h3>
+            <p className="text-xs text-gray-400 mb-3">Overall split by call type</p>
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
+                  {pieData.map((entry, i) => <Cell key={i} fill={entry.color} stroke="none" />)}
+                </Pie>
+                <Tooltip content={<ChartTip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="flex justify-center gap-4 mt-2 flex-wrap">
+              {pieData.map((d, i) => (
+                <span key={i} className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span className="w-2 h-2 rounded-full" style={{ background: d.color }} /> {d.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {employeeSummary?.length > 0 && (
-        <div>
-          <h3 className="font-semibold text-sm mb-3" style={{ color:'#0F172A' }}>Employee Summary</h3>
-          <div className="page-card overflow-x-auto">
-            <table className="data-table" style={{ minWidth:800 }}>
-              <thead><tr>
-                <th>Sr.</th><th>Employee</th>
-                <th style={{ textAlign:'right' }}>Total</th>
-                <th style={{ textAlign:'right' }}>Duration</th>
-                <th style={{ textAlign:'right' }}>Connected</th>
-                <th style={{ textAlign:'right', color:'#22C55E' }}>In</th>
-                <th style={{ textAlign:'right', color:'#22C55E' }}>In Conn.</th>
-                <th style={{ textAlign:'right', color:'#F59E0B' }}>Out</th>
-                <th style={{ textAlign:'right', color:'#F59E0B' }}>Out Conn.</th>
-                <th style={{ textAlign:'right', color:'#EF4444' }}>Missed</th>
-                <th style={{ textAlign:'right', color:'#7C3AED' }}>Rejected</th>
-                <th style={{ textAlign:'right' }}>Never Att.</th>
-                <th style={{ textAlign:'right' }}>Not Pickup</th>
-                <th>Last Sync</th>
-              </tr></thead>
-              <tbody>
-                {employeeSummary.map((e,i)=>(
-                  <tr key={e.employeeId}>
-                    <td className="text-xs" style={{ color:'#94A3B8' }}>{i+1}</td>
-                    <td>
-                      <p className="text-xs font-medium" style={{ color:'#0F172A' }}>{e.employeeName}</p>
-                      {e.employeePhone&&<p className="text-xs" style={{ color:'#94A3B8' }}>({e.employeePhone})</p>}
-                    </td>
-                    <td style={{ textAlign:'right', fontWeight:700, color:'#0F172A' }}>{e.totalCalls}</td>
-                    <td style={{ textAlign:'right', color:'#475569' }} className="text-xs">{e.totalDuration}</td>
-                    <td style={{ textAlign:'right', color:'#475569' }}>{e.connectedCalls||0}</td>
-                    <td style={{ textAlign:'right', color:'#22C55E' }}>{e.incomingTotal}</td>
-                    <td style={{ textAlign:'right', color:'#22C55E' }}>{e.incomingConnected}</td>
-                    <td style={{ textAlign:'right', color:'#F59E0B' }}>{e.outgoingTotal}</td>
-                    <td style={{ textAlign:'right', color:'#F59E0B' }}>{e.outgoingConnected}</td>
-                    <td style={{ textAlign:'right', color:'#EF4444' }}>{e.missed}</td>
-                    <td style={{ textAlign:'right', color:'#7C3AED' }}>{e.rejected}</td>
-                    <td style={{ textAlign:'right', color:'#94A3B8' }}>{e.neverAttended}</td>
-                    <td style={{ textAlign:'right', color:'#94A3B8' }}>{e.notPickupByClient}</td>
-                    <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                      {e.lastSyncTime?parseUTC(e.lastSyncTime).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'}):'—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Summary</h3>
+          <p className="text-xs text-gray-400 mb-3">Per-employee performance for this client</p>
+          <DataTable
+            rows={employeeSummary}
+            pageSize={employeeSummary.length || 10}
+            columns={[
+              {
+                key: 'employeeName', label: 'Employee', render: (r) => (
+                  <div>
+                    <p className="font-medium text-gray-900">{r.employeeName}</p>
+                    {r.employeePhone && <p className="text-xs text-gray-400">({r.employeePhone})</p>}
+                  </div>
+                ),
+              },
+              { key: 'totalCalls', label: 'Total', align: 'right', searchable: false },
+              { key: 'totalDuration', label: 'Duration', align: 'right', searchable: false },
+              { key: 'connectedCalls', label: 'Connected', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600 font-semibold">{r.connectedCalls || 0}</span> },
+              { key: 'incomingTotal', label: 'In', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600">{r.incomingTotal}</span> },
+              { key: 'incomingConnected', label: 'In Conn.', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600">{r.incomingConnected}</span> },
+              { key: 'outgoingTotal', label: 'Out', align: 'right', searchable: false, render: (r) => <span className="text-amber-600">{r.outgoingTotal}</span> },
+              { key: 'outgoingConnected', label: 'Out Conn.', align: 'right', searchable: false, render: (r) => <span className="text-amber-600">{r.outgoingConnected}</span> },
+              { key: 'missed', label: 'Missed', align: 'right', searchable: false, render: (r) => <span className="text-red-600">{r.missed}</span> },
+              { key: 'rejected', label: 'Rejected', align: 'right', searchable: false, render: (r) => <span className="text-violet-600">{r.rejected}</span> },
+              { key: 'neverAttended', label: 'Never Att.', align: 'right', searchable: false },
+              { key: 'notPickupByClient', label: 'Not Pickup', align: 'right', searchable: false },
+              { key: 'lastSyncTime', label: 'Last Sync', searchable: false, render: (r) => (r.lastSyncTime ? parseUTC(r.lastSyncTime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—') },
+            ]}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function ClientHistoryTab({ data, page, onPage, CallBadge }) {
-  const calls = data?.calls||[];
+function ClientHistoryTab({ data, page, onPage }) {
+  const calls = data?.calls || [];
   return (
-    <div className="page-card overflow-hidden">
-      <div className="px-5 py-3.5" style={{ borderBottom:'1px solid #E2E8F0' }}>
-        <span className="font-semibold text-sm" style={{ color:'#0F172A' }}>Call History ({data?.total||0})</span>
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-sm font-bold text-gray-900">Call History</h3>
+        <span className="text-xs text-gray-400">{data?.total || 0} total</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="data-table">
-          <thead><tr>
-            <th>Sr.</th><th>Employee</th><th>Date</th><th>Time</th><th>Duration</th><th>Call Type</th><th>Notes</th>
-          </tr></thead>
-          <tbody>
-            {calls.map((log,i)=>(
-              <tr key={log._id}>
-                <td className="text-xs" style={{ color:'#94A3B8' }}>{(page-1)*50+i+1}</td>
-                <td className="text-xs font-medium" style={{ color:'#475569' }}>{log.employeeName}</td>
-                <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                  {parseUTC(log.timestamp).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'Asia/Kolkata'})}
-                </td>
-                <td className="text-xs whitespace-nowrap" style={{ color:'#94A3B8' }}>
-                  {parseUTC(log.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}
-                </td>
-                <td className="text-xs font-medium" style={{ color:'#475569' }}>
-                  {log.duration?`${Math.floor(log.duration/60)}m ${log.duration%60}s`:'—'}
-                </td>
-                <td><CallBadge type={log.callType}/></td>
-                <td className="text-xs" style={{ color:'#94A3B8' }}>{log.notes||'—'}</td>
-              </tr>
-            ))}
-            {!calls.length&&<tr><td colSpan={7} className="py-10 text-center text-sm" style={{ color:'#94A3B8' }}>No records</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <div className="px-5 py-3">
-        <Pagination page={page} pages={data?.pages||1} onPage={onPage}/>
-      </div>
+      <p className="text-xs text-gray-400 mb-3">Every call to/from this client</p>
+      <DataTable
+        rows={calls}
+        pageSize={50}
+        emptyTitle="No records"
+        columns={[
+          { key: 'employeeName', label: 'Employee' },
+          { key: 'date', label: 'Date', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
+          { key: 'time', label: 'Time', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) },
+          { key: 'duration', label: 'Duration', align: 'right', searchable: false, render: (r) => (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—') },
+          { key: 'callType', label: 'Call Type', searchable: false, render: (r) => <CallBadge type={r.callType} /> },
+          { key: 'notes', label: 'Notes', searchable: false, render: (r) => r.notes || '—' },
+        ]}
+      />
+      <div className="mt-2"><Pagination page={page} pages={data?.pages || 1} onPage={onPage} /></div>
     </div>
   );
 }

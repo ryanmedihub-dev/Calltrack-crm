@@ -158,7 +158,7 @@ const PAGES = [
     icon: <ClockIco />,
   },
   {
-    href: '/calls/agent-reports',
+    href: '/calls/agent-report',
     label: 'Agent Reports',
     desc: 'Per-agent performance',
     color: '#D97706',
@@ -194,7 +194,6 @@ const PAGES = [
 export default function CallsOverviewPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     api
@@ -373,30 +372,6 @@ export default function CallsOverviewPage() {
             <p className="text-sm text-gray-500 mt-1">
               High-level summary across all call reports
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-              <button
-                onClick={() => setActiveTab('overview')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'overview'
-                    ? 'bg-white shadow-sm text-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Overview
-              </button>
-              <button
-                onClick={() => setActiveTab('detailed')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                  activeTab === 'detailed'
-                    ? 'bg-white shadow-sm text-gray-900'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Detailed
-              </button>
-            </div>
           </div>
         </motion.div>
 

@@ -27,11 +27,48 @@ function istDayStart(offsetDays = 0) {
 function empName(c)  { return c.employeeId?.name  || 'Unknown'; }
 function empPhone(c) { return c.employeeId?.phone || ''; }
 
+// IST-aware bucketing helpers (server runs in UTC on most hosts — never use
+// Date#getHours()/#toLocaleDateString() without timeZone, it silently
+// buckets calls into the wrong day/hour once deployed).
+function istHourOf(ts) {
+  return parseInt(
+    new Date(ts).toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', hourCycle: 'h23' }),
+    10
+  );
+}
+function istDayKey(ts) {
+  return new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+}
+function istDayLabel(ts) {
+  return new Date(ts).toLocaleDateString('en-GB', {
+    timeZone: 'Asia/Kolkata', weekday: 'long', day: '2-digit', month: 'short', year: 'numeric'
+  });
+}
+function hourSlotLabel(h) {
+  const ampm = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 || 12;
+  return `${String(h12).padStart(2, '0')}:00 – ${String(h12).padStart(2, '0')}:59 ${ampm}`;
+}
+// Mongo-level filters so callHistory's separate paginated query (which never
+// loads the full call list into memory) stays consistent with the other tabs.
+function applyDurationFilter(filter, duration) {
+  if (duration === '0-60') filter.duration = { $gte: 0, $lt: 60 };
+  else if (duration === '60-300') filter.duration = { $gte: 60, $lt: 300 };
+  else if (duration === '300+') filter.duration = { $gte: 300 };
+}
+function applyCallTimeFilter(filter, callTime) {
+  const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
+  const r = ranges[callTime];
+  if (!r) return;
+  const hourExpr = { $hour: { date: '$timestamp', timezone: 'Asia/Kolkata' } };
+  filter.$expr = { $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] };
+}
+
 // GET /api/reports/periodic — full periodic report
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
     const {
-      startDate, endDate, employeeId, callType,
+      startDate, endDate, employeeId, callType, duration, callTime,
       tab = 'summary', page = 1, limit = 100
     } = req.query;
 
@@ -45,6 +82,8 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     const filter = { timestamp: { $gte: start, $lte: end } };
     if (employeeId) filter.employeeId = employeeId;
     if (callType) filter.callType = callType;
+    applyDurationFilter(filter, duration);
+    applyCallTimeFilter(filter, callTime);
 
     const calls = await CallLog.find(filter)
       .populate('employeeId', 'name phone')
@@ -75,11 +114,12 @@ router.get('/periodic', protect, isManager, async (req, res) => {
         incoming: 0, incomingConnected: 0, incomingDuration: 0,
         outgoing: 0, outgoingConnected: 0, outgoingDuration: 0,
         missed: 0, rejected: 0, neverAttended: 0, notPickupByClient: 0,
-        connectedCalls: 0, lastSyncTime: c.timestamp
+        connectedCalls: 0, lastSyncTime: c.timestamp, uniqueContacts: new Set()
       };
       const e = empSummary[id];
       e.totalCalls++;
       e.totalDuration += c.duration || 0;
+      e.uniqueContacts.add(c.contactNumber);
       if ((c.duration || 0) > 0) e.connectedCalls++;
       if (c.callType === 'incoming') {
         e.incoming++;
@@ -120,12 +160,19 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       empSummary[id].neverAttended = na;
     }
 
-    const employeeSummaryList = Object.values(empSummary).map((e) => ({
-      ...e,
-      totalDuration:    fmtDuration(e.totalDuration),
-      incomingDuration: fmtDuration(e.incomingDuration),
-      outgoingDuration: fmtDuration(e.outgoingDuration)
-    }));
+    const employeeSummaryList = Object.values(empSummary)
+      .map((e) => {
+        const { uniqueContacts, ...rest } = e;
+        return {
+          ...rest,
+          uniqueClients:    uniqueContacts.size,
+          totalDurationSec: e.totalDuration,
+          totalDuration:    fmtDuration(e.totalDuration),
+          incomingDuration: fmtDuration(e.incomingDuration),
+          outgoingDuration: fmtDuration(e.outgoingDuration)
+        };
+      })
+      .sort((a, b) => b.totalCalls - a.totalCalls);
 
     if (tab === 'summary') {
       return res.json({
@@ -162,28 +209,91 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     if (tab === 'daywise') {
       const dayMap = {};
       calls.forEach((c) => {
-        const day = new Date(c.timestamp).toLocaleDateString('en-GB');
-        if (!dayMap[day]) dayMap[day] = { date: day, totalCalls: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0 };
-        dayMap[day].totalCalls++;
-        dayMap[day].duration += c.duration || 0;
-        if (byType[c.callType]) dayMap[day][c.callType]++;
+        const key = istDayKey(c.timestamp);
+        if (!dayMap[key]) dayMap[key] = {
+          date: key, label: istDayLabel(c.timestamp),
+          totalCalls: 0, connected: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0
+        };
+        dayMap[key].totalCalls++;
+        dayMap[key].duration += c.duration || 0;
+        if ((c.duration || 0) > 0) dayMap[key].connected++;
+        if (byType[c.callType]) dayMap[key][c.callType]++;
       });
-      const daywise = Object.values(dayMap).map(d => ({ ...d, duration: fmtDuration(d.duration) }));
+      const daywise = Object.values(dayMap)
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .map(d => ({ ...d, duration: fmtDuration(d.duration) }));
       return res.json({ success: true, data: { daywise } });
     }
 
     if (tab === 'hourly') {
       const hourly = Array.from({ length: 24 }, (_, h) => ({
-        hour: h, label: `${String(h).padStart(2,'0')}:00`,
-        totalCalls: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0
+        hour: h, label: hourSlotLabel(h),
+        totalCalls: 0, connected: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0
       }));
       calls.forEach((c) => {
-        const h = new Date(c.timestamp).getHours();
+        const h = istHourOf(c.timestamp);
         hourly[h].totalCalls++;
         hourly[h].duration += c.duration || 0;
+        if ((c.duration || 0) > 0) hourly[h].connected++;
         if (hourly[h][c.callType] !== undefined) hourly[h][c.callType]++;
       });
-      return res.json({ success: true, data: { hourly: hourly.map(h => ({ ...h, duration: fmtDuration(h.duration) })) } });
+      const totalAll = calls.length || 1;
+      return res.json({
+        success: true,
+        data: {
+          hourly: hourly.map(h => ({
+            ...h,
+            duration: fmtDuration(h.duration),
+            pct: Number(((h.totalCalls / totalAll) * 100).toFixed(2))
+          }))
+        }
+      });
+    }
+
+    if (tab === 'analysis') {
+      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), totalCalls: 0, connected: 0 }));
+      calls.forEach((c) => {
+        const h = istHourOf(c.timestamp);
+        hourly[h].totalCalls++;
+        if ((c.duration || 0) > 0) hourly[h].connected++;
+      });
+
+      let topDialer = null, topReceiver = null, topOverall = null, mostDuration = null;
+      Object.values(empSummary).forEach((e) => {
+        if (!topDialer || e.outgoing > topDialer.count) topDialer = { employeeName: e.employeeName, count: e.outgoing };
+        if (!topReceiver || e.incoming > topReceiver.count) topReceiver = { employeeName: e.employeeName, count: e.incoming };
+        if (!topOverall || e.totalCalls > topOverall.count) topOverall = { employeeName: e.employeeName, count: e.totalCalls };
+        if (!mostDuration || e.totalDuration > mostDuration.durationSec) mostDuration = { employeeName: e.employeeName, durationSec: e.totalDuration };
+      });
+      if (mostDuration) mostDuration = { employeeName: mostDuration.employeeName, duration: fmtDuration(mostDuration.durationSec) };
+
+      let longestCall = null;
+      calls.forEach((c) => {
+        if ((c.duration || 0) > (longestCall?.durationSec || 0)) {
+          longestCall = {
+            durationSec: c.duration || 0, duration: fmtDuration(c.duration || 0),
+            callType: c.callType, contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
+            employeeName: empName(c), timestamp: c.timestamp
+          };
+        }
+      });
+
+      const incomingDurTotal = byType.incoming.reduce((s, c) => s + (c.duration || 0), 0);
+      const incomingConnCount = byType.incoming.filter((c) => (c.duration || 0) > 0).length;
+      const outgoingDurTotal = byType.outgoing.reduce((s, c) => s + (c.duration || 0), 0);
+      const outgoingConnCount = byType.outgoing.filter((c) => (c.duration || 0) > 0).length;
+      const dayCount = new Set(calls.map((c) => istDayKey(c.timestamp))).size || 1;
+
+      return res.json({
+        success: true,
+        data: {
+          hourly, topDialer, topReceiver, topOverall, mostDuration, longestCall,
+          avgIncomingDuration: fmtDuration(incomingConnCount ? Math.round(incomingDurTotal / incomingConnCount) : 0),
+          avgOutgoingDuration: fmtDuration(outgoingConnCount ? Math.round(outgoingDurTotal / outgoingConnCount) : 0),
+          avgPerDay: fmtDuration(Math.round(totalDuration / dayCount)),
+          dayCount
+        }
+      });
     }
 
     if (tab === 'neverAttended') {
@@ -293,13 +403,427 @@ router.get('/periodic', protect, isManager, async (req, res) => {
   }
 });
 
+// Lead status keys/labels — mirrors dashboard/src/app/(protected)/reports/lead/page.js STATUS_META
+const LEAD_STATUS_LABELS = {
+  new:            'New',
+  contacted:      'Contacted',
+  not_connected:  'Not Connected',
+  interested:     'Interested',
+  not_interested: 'Not Interested',
+  follow_up:      'Follow-up',
+  booking_done:   'Booking Done',
+  converted:      'Converted',
+  lost:           'Lost'
+};
+const LEAD_STATUS_KEYS = Object.keys(LEAD_STATUS_LABELS);
+
+function applyLeadTimeFilter(filter, leadTime) {
+  const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
+  const r = ranges[leadTime];
+  if (!r) return;
+  const hourExpr = { $hour: { date: '$createdAt', timezone: 'Asia/Kolkata' } };
+  filter.$expr = { $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] };
+}
+function round1(n) { return Math.round(n * 10) / 10; }
+
+// GET /api/reports/leads-periodic — leads report (Lead Reports page)
+router.get('/leads-periodic', protect, isManager, async (req, res) => {
+  try {
+    const {
+      startDate, endDate, employeeId, status, source, leadTime,
+      tab = 'summary', page = 1, limit = 500
+    } = req.query;
+
+    const filter = {};
+    if (startDate) {
+      const d = new Date(startDate); d.setHours(0, 0, 0, 0);
+      filter.createdAt = { ...(filter.createdAt || {}), $gte: d };
+    }
+    if (endDate) {
+      const d = new Date(endDate); d.setHours(23, 59, 59, 999);
+      filter.createdAt = { ...(filter.createdAt || {}), $lte: d };
+    }
+    if (employeeId) filter.assignedTo = employeeId;
+    if (status) filter.status = status;
+    if (source) filter.source = { $regex: source, $options: 'i' };
+    applyLeadTimeFilter(filter, leadTime);
+
+    const leads = await Lead.find(filter)
+      .populate('assignedTo', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const dateLabel = startDate
+      ? new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+        (endDate && endDate !== startDate
+          ? ' to ' + new Date(endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : '')
+      : 'All Leads';
+
+    const empNameOf = (l) => l.assignedTo?.name || 'Unassigned';
+    const pageNum = parseInt(page), pageSize = parseInt(limit);
+
+    if (tab === 'summary') {
+      const byStatus = {};
+      LEAD_STATUS_KEYS.forEach((k) => { byStatus[k] = leads.filter((l) => l.status === k); });
+
+      const summary = {};
+      LEAD_STATUS_KEYS.forEach((k) => {
+        const arr = byStatus[k];
+        const attemptsSum = arr.reduce((s, l) => s + (l.attempts || 0), 0);
+        summary[k] = { leads: arr.length, avgAttempts: arr.length ? round1(attemptsSum / arr.length) : 0 };
+      });
+      const totalAttempts = leads.reduce((s, l) => s + (l.attempts || 0), 0);
+      summary.total = { leads: leads.length, avgAttempts: leads.length ? round1(totalAttempts / leads.length) : 0 };
+
+      const pieData = LEAD_STATUS_KEYS
+        .map((k) => ({ key: k, name: LEAD_STATUS_LABELS[k], value: byStatus[k].length }))
+        .filter((d) => d.value > 0);
+
+      const now = new Date();
+      const sidebarStats = {
+        uncontacted:    leads.filter((l) => !(l.attempts > 0)).length,
+        notConnected:   byStatus.not_connected.length,
+        contacted:      leads.filter((l) => l.attempts > 0).length,
+        converted:      byStatus.converted.length,
+        uniqueSources:  new Set(leads.map((l) => l.source).filter(Boolean)).size,
+        followUpsDue:   leads.filter((l) => l.status === 'follow_up' && l.followUpDate && new Date(l.followUpDate) <= now).length
+      };
+
+      const empMap = {};
+      leads.forEach((l) => {
+        const id = l.assignedTo?._id?.toString() || 'unassigned';
+        if (!empMap[id]) empMap[id] = {
+          employeeName: empNameOf(l), total: 0, new: 0, contacted: 0,
+          follow_up: 0, converted: 0, lost: 0, attemptsSum: 0
+        };
+        const e = empMap[id];
+        e.total++;
+        if (l.status === 'new') e.new++;
+        if (l.status === 'contacted') e.contacted++;
+        if (l.status === 'follow_up') e.follow_up++;
+        if (l.status === 'converted') e.converted++;
+        if (l.status === 'lost') e.lost++;
+        e.attemptsSum += l.attempts || 0;
+      });
+      const employeeSummary = Object.values(empMap)
+        .map((e) => ({
+          ...e,
+          conversionRate: e.total ? Math.round((e.converted / e.total) * 100) : 0,
+          avgAttempts: e.total ? round1(e.attemptsSum / e.total) : 0
+        }))
+        .sort((a, b) => b.total - a.total);
+      employeeSummary.forEach((e) => delete e.attemptsSum);
+
+      return res.json({ success: true, data: { dateLabel, summary, pieData, sidebarStats, employeeSummary } });
+    }
+
+    if (tab === 'analysis') {
+      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), total: 0, contacted: 0 }));
+      leads.forEach((l) => {
+        const h = istHourOf(l.createdAt);
+        hourly[h].total++;
+        if (l.attempts > 0) hourly[h].contacted++;
+      });
+
+      const empMap = {};
+      leads.forEach((l) => {
+        const id = l.assignedTo?._id?.toString() || 'unassigned';
+        if (!empMap[id]) empMap[id] = { employeeName: empNameOf(l), total: 0, converted: 0, attemptsSum: 0 };
+        empMap[id].total++;
+        if (l.status === 'converted') empMap[id].converted++;
+        empMap[id].attemptsSum += l.attempts || 0;
+      });
+      const empList = Object.values(empMap);
+
+      let topAssignee = null, topConverter = null, topOverall = null, mostAttempts = null;
+      empList.forEach((e) => {
+        if (!topAssignee || e.total > topAssignee.count) topAssignee = { employeeName: e.employeeName, count: e.total };
+        if (!topConverter || e.converted > topConverter.count) topConverter = { employeeName: e.employeeName, count: e.converted };
+        if (!topOverall || e.attemptsSum > topOverall.count) topOverall = { employeeName: e.employeeName, count: e.attemptsSum };
+        if (!mostAttempts || e.attemptsSum > mostAttempts.count) mostAttempts = { employeeName: e.employeeName, count: e.attemptsSum };
+      });
+
+      let mostAttemptedLead = null;
+      leads.forEach((l) => {
+        if (!mostAttemptedLead || (l.attempts || 0) > mostAttemptedLead.attempts) {
+          mostAttemptedLead = { name: l.name, phone: l.phone, attempts: l.attempts || 0, status: l.status };
+        }
+      });
+
+      const total = leads.length;
+      const convertedCount = leads.filter((l) => l.status === 'converted').length;
+      const attemptsSumAll = leads.reduce((s, l) => s + (l.attempts || 0), 0);
+      const convertedAttemptsSum = leads.filter((l) => l.status === 'converted').reduce((s, l) => s + (l.attempts || 0), 0);
+      const dayCount = new Set(leads.map((l) => istDayKey(l.createdAt))).size || 1;
+
+      return res.json({
+        success: true,
+        data: {
+          dateLabel, hourly, topAssignee, topConverter, topOverall, mostAttempts, mostAttemptedLead,
+          conversionRate: total ? Math.round((convertedCount / total) * 100) : 0,
+          avgAttemptsPerLead: total ? round1(attemptsSumAll / total) : 0,
+          avgAttemptsPerConverted: convertedCount ? round1(convertedAttemptsSum / convertedCount) : 0,
+          avgLeadsPerDay: round1(total / dayCount),
+          dayCount
+        }
+      });
+    }
+
+    if (tab === 'dayWise') {
+      const dayMap = {};
+      leads.forEach((l) => {
+        const key = istDayKey(l.createdAt);
+        if (!dayMap[key]) dayMap[key] = { date: key, label: istDayLabel(l.createdAt), total: 0, converted: 0 };
+        dayMap[key].total++;
+        if (l.status === 'converted') dayMap[key].converted++;
+      });
+      const daywise = Object.values(dayMap)
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .map((d) => ({ ...d, conversionRate: d.total ? Math.round((d.converted / d.total) * 100) : 0 }));
+      return res.json({ success: true, data: { dateLabel, daywise } });
+    }
+
+    if (tab === 'hourly') {
+      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), total: 0, contacted: 0, converted: 0 }));
+      leads.forEach((l) => {
+        const h = istHourOf(l.createdAt);
+        hourly[h].total++;
+        if (l.attempts > 0) hourly[h].contacted++;
+        if (l.status === 'converted') hourly[h].converted++;
+      });
+      const totalAll = leads.length || 1;
+      return res.json({
+        success: true,
+        data: { dateLabel, hourly: hourly.map((h) => ({ ...h, pct: Number(((h.total / totalAll) * 100).toFixed(2)) })) }
+      });
+    }
+
+    if (tab === 'uncontacted') {
+      const uncontacted = leads
+        .filter((l) => !(l.attempts > 0))
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      const records = uncontacted.slice(0, pageSize).map((l) => ({
+        _id: l._id, name: l.name, phone: l.phone, source: l.source || '—',
+        employeeName: empNameOf(l), createdAt: l.createdAt,
+        daysSince: Math.max(0, Math.floor((Date.now() - new Date(l.createdAt).getTime()) / 86400000))
+      }));
+      return res.json({ success: true, data: { dateLabel, total: uncontacted.length, records } });
+    }
+
+    if (tab === 'notConnected') {
+      const notConnected = leads.filter((l) => l.status === 'not_connected');
+      const records = notConnected.slice(0, pageSize).map((l) => ({
+        _id: l._id, employeeName: empNameOf(l), name: l.name, phone: l.phone,
+        status: l.status, attempts: l.attempts || 0, lastCallAt: l.lastCallAt || null
+      }));
+      return res.json({ success: true, data: { dateLabel, total: notConnected.length, records } });
+    }
+
+    if (tab === 'sources') {
+      const sourceMap = {};
+      leads.forEach((l) => {
+        const src = l.source || 'Unknown';
+        if (!sourceMap[src]) sourceMap[src] = { source: src, total: 0, converted: 0, lost: 0 };
+        sourceMap[src].total++;
+        if (l.status === 'converted') sourceMap[src].converted++;
+        if (l.status === 'lost') sourceMap[src].lost++;
+      });
+      const records = Object.values(sourceMap)
+        .map((s) => ({ ...s, conversionRate: s.total ? Math.round((s.converted / s.total) * 100) : 0 }))
+        .sort((a, b) => b.total - a.total);
+      return res.json({ success: true, data: { dateLabel, total: records.length, records } });
+    }
+
+    if (tab === 'leadList') {
+      const leadsList = leads.slice(0, pageSize).map((l) => ({
+        _id: l._id, employeeName: empNameOf(l), phone: l.phone, name: l.name,
+        status: l.status, source: l.source || '—', attempts: l.attempts || 0,
+        followUpDate: l.followUpDate || null, createdAt: l.createdAt, lastCallNote: l.lastCallNote || ''
+      }));
+      return res.json({ success: true, data: { dateLabel, total: leads.length, leads: leadsList } });
+    }
+
+    return res.json({ success: true, data: { dateLabel, total: leads.length } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/reports/employees-periodic — Employee Reports page
+router.get('/employees-periodic', protect, isManager, async (req, res) => {
+  try {
+    const { startDate, endDate, employeeId, status, tab = 'summary' } = req.query;
+
+    const start = startDate
+      ? (() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; })()
+      : istDayStart(-29);
+    const end = endDate
+      ? (() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; })()
+      : new Date();
+
+    const empFilter = { role: 'employee' };
+    if (employeeId) empFilter._id = employeeId;
+    if (status === 'active') empFilter.isActive = true;
+    else if (status === 'inactive') empFilter.isActive = false;
+
+    const employeesList = await User.find(empFilter).sort({ name: 1 }).lean();
+    const employeeIds = employeesList.map((e) => e._id);
+
+    const callFilter = { timestamp: { $gte: start, $lte: end }, employeeId: { $in: employeeIds } };
+    const leadFilter = { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } };
+
+    const [calls, leads] = await Promise.all([
+      CallLog.find(callFilter).lean(),
+      Lead.find(leadFilter).lean(),
+    ]);
+
+    const statsMap = {};
+    employeesList.forEach((e) => {
+      statsMap[e._id.toString()] = {
+        employeeId: e._id.toString(), employeeName: e.name, email: e.email, phone: e.phone || '',
+        isActive: e.isActive, dailyTarget: e.dailyTarget || 0,
+        totalCalls: 0, connectedCalls: 0, leadsAssigned: 0, leadsConverted: 0
+      };
+    });
+    calls.forEach((c) => {
+      const s = statsMap[c.employeeId?.toString()];
+      if (!s) return;
+      s.totalCalls++;
+      if ((c.duration || 0) > 0) s.connectedCalls++;
+    });
+    leads.forEach((l) => {
+      const s = statsMap[l.assignedTo?.toString()];
+      if (!s) return;
+      s.leadsAssigned++;
+      if (l.status === 'converted') s.leadsConverted++;
+    });
+
+    const dayCount = Math.max(1, Math.round((end - start) / 86400000) + 1);
+
+    const perfList = Object.values(statsMap).map((s) => {
+      const conversionRate = s.leadsAssigned ? Math.round((s.leadsConverted / s.leadsAssigned) * 100) : 0;
+      const targetTotal = s.dailyTarget * dayCount;
+      const targetAchievement = s.dailyTarget > 0 ? Math.round((s.totalCalls / targetTotal) * 100) : null;
+      return { ...s, conversionRate, targetTotal, targetAchievement };
+    });
+
+    const dateLabel = start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+      ' to ' + end.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+
+    if (tab === 'analysis') {
+      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), calls: 0, leads: 0 }));
+      calls.forEach((c) => { hourly[istHourOf(c.timestamp)].calls++; });
+      leads.forEach((l) => { hourly[istHourOf(l.createdAt)].leads++; });
+
+      let topDialer = null, topConverter = null, bestTarget = null, needsAttention = null;
+      perfList.forEach((e) => {
+        if (!topDialer || e.totalCalls > topDialer.count) topDialer = { employeeName: e.employeeName, count: e.totalCalls };
+        if (!topConverter || e.leadsConverted > topConverter.count) topConverter = { employeeName: e.employeeName, count: e.leadsConverted };
+        if (e.targetAchievement != null) {
+          if (!bestTarget || e.targetAchievement > bestTarget.pct) bestTarget = { employeeName: e.employeeName, pct: e.targetAchievement };
+          if (!needsAttention || e.targetAchievement < needsAttention.pct) needsAttention = { employeeName: e.employeeName, pct: e.targetAchievement };
+        }
+      });
+
+      const empCount = employeesList.length || 1;
+      return res.json({
+        success: true,
+        data: {
+          dateLabel, hourly, topDialer, topConverter, bestTarget, needsAttention,
+          avgCallsPerEmployee: Math.round(calls.length / empCount),
+          avgLeadsPerEmployee: Math.round(leads.length / empCount),
+          dayCount
+        }
+      });
+    }
+
+    if (tab === 'dayWise') {
+      const dayMap = {};
+      calls.forEach((c) => {
+        const key = istDayKey(c.timestamp);
+        if (!dayMap[key]) dayMap[key] = { date: key, label: istDayLabel(c.timestamp), calls: 0, leadsCreated: 0, leadsConverted: 0 };
+        dayMap[key].calls++;
+      });
+      leads.forEach((l) => {
+        const key = istDayKey(l.createdAt);
+        if (!dayMap[key]) dayMap[key] = { date: key, label: istDayLabel(l.createdAt), calls: 0, leadsCreated: 0, leadsConverted: 0 };
+        dayMap[key].leadsCreated++;
+        if (l.status === 'converted') dayMap[key].leadsConverted++;
+      });
+      const daywise = Object.values(dayMap).sort((a, b) => b.date.localeCompare(a.date));
+      return res.json({ success: true, data: { dateLabel, daywise } });
+    }
+
+    if (tab === 'hourly') {
+      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), calls: 0, leads: 0 }));
+      calls.forEach((c) => { hourly[istHourOf(c.timestamp)].calls++; });
+      leads.forEach((l) => { hourly[istHourOf(l.createdAt)].leads++; });
+      const totalAll = (calls.length + leads.length) || 1;
+      return res.json({
+        success: true,
+        data: { dateLabel, hourly: hourly.map((h) => ({ ...h, pct: Number((((h.calls + h.leads) / totalAll) * 100).toFixed(2)) })) }
+      });
+    }
+
+    if (tab === 'target') {
+      const records = perfList
+        .filter((e) => e.dailyTarget > 0)
+        .sort((a, b) => (a.targetAchievement ?? 0) - (b.targetAchievement ?? 0));
+      return res.json({ success: true, data: { dateLabel, records } });
+    }
+
+    if (tab === 'attention') {
+      const records = perfList
+        .filter((e) => !e.isActive || e.totalCalls === 0 || (e.dailyTarget > 0 && e.targetAchievement < 50))
+        .map((e) => ({
+          ...e,
+          reason: !e.isActive
+            ? 'Inactive account'
+            : e.totalCalls === 0
+              ? 'No activity this period'
+              : `Below 50% of target (${e.targetAchievement}%)`
+        }));
+      return res.json({ success: true, data: { dateLabel, records } });
+    }
+
+    if (tab === 'directory') {
+      return res.json({ success: true, data: { dateLabel, employees: perfList } });
+    }
+
+    const activeCount = employeesList.filter((e) => e.isActive).length;
+    return res.json({
+      success: true,
+      data: {
+        dateLabel,
+        kpis: {
+          totalEmployees: employeesList.length,
+          activeEmployees: activeCount,
+          totalCalls: calls.length,
+          totalLeadsAssigned: leads.length
+        },
+        statusPie: [
+          { name: 'Active', value: activeCount, color: '#16A34A' },
+          { name: 'Inactive', value: employeesList.length - activeCount, color: '#DC2626' }
+        ].filter((d) => d.value > 0),
+        employeePerformance: perfList.sort((a, b) => b.totalCalls - a.totalCalls)
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/reports/client — client report by phone number
 router.get('/client', protect, isManager, async (req, res) => {
   try {
     const { phone, duration = 'all', tab = 'summary', page = 1, limit = 50 } = req.query;
     if (!phone) return res.status(400).json({ success: false, error: 'phone required' });
 
-    const filter = { contactNumber: { $regex: phone.replace(/\D/g, ''), $options: 'i' } };
+    const digits = phone.replace(/\D/g, '');
+    if (!digits) return res.status(400).json({ success: false, error: 'Enter a valid phone number' });
+
+    const filter = { contactNumber: { $regex: digits, $options: 'i' } };
 
     if (duration !== 'all') {
       const now = new Date();
