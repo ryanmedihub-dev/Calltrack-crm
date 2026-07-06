@@ -268,12 +268,7 @@ const NAV = [
         href: "/employees/workload-report",
         label: "Workload Report",
         Ic: ic.Activity,
-      },
-      {
-        href: "/employees/performance-reports",
-        label: "Performance Reports",
-        Ic: ic.AgentReport,
-      },
+      },     
     ],
   },
   null,

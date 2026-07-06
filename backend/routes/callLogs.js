@@ -219,15 +219,28 @@ router.post('/sync', protect, async (req, res) => {
       ).catch(() => {});
     }
 
-    // Auto-link to lead and update lead call stats / callLogs array
+    // Auto-link to lead and update lead call stats / callLogs array.
+    // Re-fetch ALL docs in this batch (not just freshly-inserted ones) — the mobile
+    // app resyncs the whole day's calls on every sync, so a call is often already
+    // in the DB (synced bare, before the post-call popup was filled in) by the time
+    // its enriched resync arrives. Using `leadId` as the "already counted" guard
+    // means every call still gets counted toward Lead.attempts exactly once, even
+    // if the lead didn't exist yet on an earlier sync and only appeared later.
+    const batchKeys = docs
+      .map((d) => ({ employeeId: req.user._id, contactNumber: d.contactNumber, timestamp: d.timestamp }))
+      .filter((k) => k.contactNumber && k.timestamp);
+    const batchDocs = batchKeys.length ? await CallLog.find({ $or: batchKeys }) : [];
+
     const phoneToLead = {};
-    const phones = inserted.map((l) => l.contactNumber).filter(Boolean);
+    const phones = [...new Set(batchDocs.map((l) => l.contactNumber).filter(Boolean))];
     if (phones.length) {
       const leads = await Lead.find({ phone: { $in: phones } });
       leads.forEach((l) => { phoneToLead[l.phone] = l; });
     }
 
-    for (const log of inserted) {
+    for (const log of batchDocs) {
+      if (log.leadId) continue; // already linked + counted on a previous sync
+
       const lead = phoneToLead[log.contactNumber];
 
       if (lead) {

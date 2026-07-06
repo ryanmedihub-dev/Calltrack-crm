@@ -244,26 +244,51 @@ router.delete('/bulk-delete', protect, isManager, async (req, res) => {
 // POST /api/leads/from-call (must be before /:id routes)
 router.post('/from-call', protect, async (req, res) => {
   try {
-    const { callId, name, phone, email, source, assignedTo, status = 'new' } = req.body;
+    const { callId, name, phone, email, source, assignedTo, status = 'new', lastCallNote, followUpDate } = req.body;
     if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+
+    // Look up the originating call (if we have it) so the very first attempt is
+    // reflected in the lead's call stats, not just future syncs.
+    let call = null;
+    if (callId) call = await CallLog.findById(callId).catch(() => null);
+    const alreadyCounted = call && call.leadId; // this call was already linked/counted elsewhere
+
     const existing = await Lead.findOne({ phone });
     if (existing) {
-      if (callId) {
-        await CallLog.findByIdAndUpdate(callId, { leadId: existing._id });
-        await Lead.findByIdAndUpdate(existing._id, {
-          $addToSet: { callLogs: callId },
-          $push: {
-            changelog: {
-              changedBy: req.user._id,
-              changedByName: req.user.name,
-              action: 'call_linked',
-              details: { callId, source: 'from_call' }
-            }
+      const update = {
+        $set: {
+          ...(lastCallNote  && { lastCallNote: lastCallNote.trim() }),
+          ...(status        && { lastCallSummary: status }),
+          ...(followUpDate  && { followUpDate: new Date(followUpDate) }),
+        },
+        $push: {
+          changelog: {
+            changedBy:     req.user._id,
+            changedByName: req.user.name,
+            action:        'call_linked',
+            details:       { callId, source: 'from_call' }
           }
-        });
+        }
+      };
+      if (callId) update.$addToSet = { callLogs: callId };
+
+      // Count the attempt here only if this call hasn't already been counted
+      // (e.g. via /api/calls/sync auto-linking) — avoids double counting.
+      if (!alreadyCounted) {
+        update.$inc = { attempts: 1, ...(call && call.duration > 0 ? { connectedCallCount: 1 } : {}) };
+        update.$set.lastCallAt            = call ? call.timestamp : new Date();
+        update.$set.lastCallType          = call ? call.callType   : undefined;
+        update.$set.lastCallDuration      = call ? (call.duration || 0) : 0;
+        update.$set.lastCallEmployee      = req.user.name;
+        update.$set.lastCallEmployeePhone = req.user.phone || '';
+        Object.keys(update.$set).forEach((k) => update.$set[k] === undefined && delete update.$set[k]);
       }
-      return res.json({ success: true, data: existing, message: 'Lead already exists, linked to call' });
+
+      const updated = await Lead.findByIdAndUpdate(existing._id, update, { new: true });
+      if (callId) await CallLog.findByIdAndUpdate(callId, { leadId: existing._id });
+      return res.json({ success: true, data: updated, message: 'Lead already exists, linked to call' });
     }
+
     const lead = await Lead.create({
       name: name || phone,
       phone: normalizePhone(phone) || phone,
@@ -273,6 +298,18 @@ router.post('/from-call', protect, async (req, res) => {
       status,
       capturedBy: req.user.name,
       callLogs: callId ? [callId] : [],
+      // Every call to /from-call represents an actual attempted call — count it,
+      // even though there's no prior Lead to increment.
+      attempts:             1,
+      connectedCallCount:   call && call.duration > 0 ? 1 : 0,
+      lastCallAt:            call ? call.timestamp : new Date(),
+      lastCallType:          call ? call.callType : undefined,
+      lastCallDuration:      call ? (call.duration || 0) : 0,
+      lastCallEmployee:      req.user.name,
+      lastCallEmployeePhone: req.user.phone || '',
+      lastCallNote:          lastCallNote ? lastCallNote.trim() : undefined,
+      lastCallSummary:       status,
+      followUpDate:          followUpDate ? new Date(followUpDate) : undefined,
       changelog: [{
         changedBy:     req.user._id,
         changedByName: req.user.name,

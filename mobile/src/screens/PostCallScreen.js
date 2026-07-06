@@ -165,8 +165,9 @@ export default function PostCallScreen({ call, onDone }) {
           ...(status       && { lastCallSummary: status }),
           ...(followUpDate && { followUpDate }),
         });
-      } else if (status || note.trim() || followUpDate) {
-        // No lead exists — create one from this call
+      } else {
+        // No lead exists — every submitted call is an attempt, so log/create
+        // one regardless of whether a status/note/follow-up was filled in.
         const contactName = call.contactName && call.contactName !== 'Unknown'
           ? call.contactName
           : call.contactNumber;
