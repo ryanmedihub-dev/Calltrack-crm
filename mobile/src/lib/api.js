@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
 // Hardcoded for production — Constants.expoConfig is unreliable in EAS builds
-const API_URL = 'https://callby.vercel.app';
+const API_URL = 'https://api.learcrm.com';
 
 const api = axios.create({ baseURL: API_URL, timeout: 15000 });
 
