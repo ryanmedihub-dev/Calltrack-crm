@@ -10,6 +10,7 @@ import api from '../../../lib/api';
 import { utcHourToISTLabel } from '../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DataTable } from '../../../components/report-shared';
+import DateRangeFilter, { formatRangeLabel } from '../../../components/DateRangeFilter';
 
 /* ── Icons ───────────────────────────────────────── */
 const Ico = ({ size = 16, children, className = '' }) => (
@@ -184,20 +185,28 @@ export default function AnalyticsPage() {
   const [stats, setStats] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState('today');
+  const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    Promise.all([api.get('/api/calls/stats'), api.get('/api/employees')])
-      .then(([s, e]) => {
-        setStats(s.data.data);
-        setEmployees(e.data.data);
-      })
+    const params = { range: dateRange.range };
+    if (dateRange.range === 'custom') {
+      params.startDate = dateRange.startDate;
+      params.endDate = dateRange.endDate;
+    }
+    setLoading(true);
+    api.get('/api/calls/stats', { params })
+      .then((s) => setStats(s.data.data))
       .catch(() => { })
       .finally(() => setLoading(false));
+  }, [dateRange]);
+
+  useEffect(() => {
+    api.get('/api/employees').then((e) => setEmployees(e.data.data)).catch(() => { });
   }, []);
 
-  const d = period === 'today' ? stats?.today : period === 'yesterday' ? stats?.yesterday : stats?.lastWeek;
+  const isTodayRange = dateRange.range === 'today';
+  const d = stats?.selected || stats?.today;
   const today = stats?.today;
   const yest = stats?.yesterday;
   const week = stats?.lastWeek;
@@ -205,13 +214,13 @@ export default function AnalyticsPage() {
   const connRate = pct(d?.connectedCalls, d?.totalCalls);
   const missRate = pct(d?.missed, d?.totalCalls);
   const outRate = pct(d?.outgoing, d?.totalCalls);
-  const _bestHourRaw = (stats?.callsPerHour || []).reduce((a, b) => b.count > a.count ? b : a, { hour: 0, count: 0 });
+  const _bestHourRaw = (d?.callsPerHour || []).reduce((a, b) => b.count > a.count ? b : a, { hour: 0, count: 0 });
   const bestHour = { ..._bestHourRaw, istLabel: _bestHourRaw.count ? utcHourToISTLabel(_bestHourRaw.hour) : null };
-  const topPerf = stats?.topDialers?.[0];
+  const topPerf = d?.topDialers?.[0];
   const avgDur = d?.totalCalls ? Math.round((d?.totalDuration || 0) / d?.totalCalls) : 0;
   const avgDurFmt = avgDur >= 60 ? `${Math.floor(avgDur / 60)}m ${avgDur % 60}s` : `${avgDur}s`;
 
-  const periodLabel = { today: 'Today', yesterday: 'Yesterday', lastWeek: 'Last Week' }[period];
+  const periodLabel = formatRangeLabel(dateRange);
 
   const metricCards = [
     {
@@ -221,7 +230,7 @@ export default function AnalyticsPage() {
       bg: '#EFF6FF',
       gradient: 'linear-gradient(135deg, #2563EB, #3B82F6)',
       sub: `${periodLabel}`,
-      dval: period === 'today' ? delta(today?.totalCalls, yest?.totalCalls) : null,
+      dval: isTodayRange ? delta(today?.totalCalls, yest?.totalCalls) : null,
       icon: <PhoneIco size={18} />,
     },
     {
@@ -231,7 +240,7 @@ export default function AnalyticsPage() {
       bg: '#F0FDF4',
       gradient: 'linear-gradient(135deg, #16A34A, #22C55E)',
       sub: `${d?.connectedCalls ?? 0} connected`,
-      dval: period === 'today' ? delta(connRate, pct(yest?.connectedCalls, yest?.totalCalls)) : null,
+      dval: isTodayRange ? delta(connRate, pct(yest?.connectedCalls, yest?.totalCalls)) : null,
       icon: <CheckIco size={18} />,
     },
     {
@@ -241,7 +250,7 @@ export default function AnalyticsPage() {
       bg: '#FFF1F2',
       gradient: 'linear-gradient(135deg, #DC2626, #EF4444)',
       sub: `${d?.missed ?? 0} missed calls`,
-      dval: period === 'today' ? delta(missRate, pct(yest?.missed, yest?.totalCalls)) : null,
+      dval: isTodayRange ? delta(missRate, pct(yest?.missed, yest?.totalCalls)) : null,
       icon: <MissedIco size={18} />,
     },
     {
@@ -261,7 +270,7 @@ export default function AnalyticsPage() {
       bg: '#F5F3FF',
       gradient: 'linear-gradient(135deg, #7C3AED, #8B5CF6)',
       sub: `${periodLabel}`,
-      dval: period === 'today' ? delta(today?.uniqueClients, yest?.uniqueClients) : null,
+      dval: isTodayRange ? delta(today?.uniqueClients, yest?.uniqueClients) : null,
       icon: <UsersIco size={18} />,
     },
     {
@@ -288,23 +297,23 @@ export default function AnalyticsPage() {
     { name: 'Last 7 Days', incoming: week?.incoming || 0, outgoing: week?.outgoing || 0, missed: week?.missed || 0, connected: week?.connectedCalls || 0 },
   ] : [];
 
-  const hourData = (stats?.callsPerHour || []).map(h => ({
+  const hourData = (d?.callsPerHour || []).map(h => ({
     hour: utcHourToISTLabel(h.hour),
     rawHour: parseInt(h.hour),
     calls: h.count,
   }));
 
-  const empData = (stats?.topDialers || []).slice(0, 8).map((d, i) => ({
-    name: d.name.length > 10 ? d.name.split(' ')[0] : d.name,
-    fullName: d.name,
-    calls: d.count,
+  const empData = (d?.topDialers || []).slice(0, 8).map((td, i) => ({
+    name: td.name.length > 10 ? td.name.split(' ')[0] : td.name,
+    fullName: td.name,
+    calls: td.count,
     fill: AVATAR_COLORS[i % AVATAR_COLORS.length],
   }));
 
-  const outcomePie = today ? [
-    { name: 'Connected', value: today.connectedCalls || 0, color: '#22C55E' },
-    { name: 'Missed', value: today.missed || 0, color: '#EF4444' },
-    { name: 'Rejected', value: today.rejected || 0, color: '#8B5CF6' },
+  const outcomePie = d ? [
+    { name: 'Connected', value: d.connectedCalls || 0, color: '#22C55E' },
+    { name: 'Missed', value: d.missed || 0, color: '#EF4444' },
+    { name: 'Rejected', value: d.rejected || 0, color: '#8B5CF6' },
   ].filter(x => x.value > 0) : [];
 
   const qualityData = [
@@ -323,7 +332,7 @@ export default function AnalyticsPage() {
   }));
 
   const agentRows = employees.map((emp) => {
-    const dialerData = stats?.topDialers?.find((dd) => dd.employeeId === emp._id);
+    const dialerData = d?.topDialers?.find((dd) => dd.employeeId === emp._id);
     const callCount = dialerData?.count ?? 0;
     const connRate = callCount > 0 ? Math.round((dialerData?.connected || 0) / callCount * 100) : null;
     return { ...emp, callCount, connRate, missedCount: dialerData?.missed };
@@ -368,26 +377,7 @@ export default function AnalyticsPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-              {[
-                ['today', 'Today'],
-                ['yesterday', 'Yesterday'],
-                ['lastWeek', 'Last 7 Days'],
-              ].map(([v, l]) => (
-                <button
-                  key={v}
-                  onClick={() => setPeriod(v)}
-                  className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200"
-                  style={
-                    period === v
-                      ? { background: '#fff', color: '#0F172A', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }
-                      : { color: '#64748B' }
-                  }
-                >
-                  {l}
-                </button>
-              ))}
-            </div>
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
           </div>
         </motion.div>
 
@@ -472,14 +462,14 @@ export default function AnalyticsPage() {
           >
             <div className="mb-4">
               <h3 className="text-sm font-bold text-gray-900">Call Outcomes</h3>
-              <p className="text-xs text-gray-500 mt-0.5">Today's distribution</p>
+              <p className="text-xs text-gray-500 mt-0.5">{periodLabel}'s distribution</p>
             </div>
             {outcomePie.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[220px] gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <PhoneIco size={24} />
                 </div>
-                <p className="text-sm text-gray-500">No calls yet today</p>
+                <p className="text-sm text-gray-500">No calls yet for {periodLabel.toLowerCase()}</p>
               </div>
             ) : (
               <>
@@ -512,7 +502,7 @@ export default function AnalyticsPage() {
                       <span className="font-bold text-gray-900">
                         {o.value}{' '}
                         <span className="font-normal text-gray-400">
-                          ({pct(o.value, today?.totalCalls)}%)
+                          ({pct(o.value, d?.totalCalls)}%)
                         </span>
                       </span>
                     </div>
@@ -536,12 +526,14 @@ export default function AnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-gray-900">Hourly Activity</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Calls dialled per hour — today</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Calls dialled per hour — {periodLabel.toLowerCase()}</p>
                 </div>
-                <span className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs font-semibold text-green-600">Live</span>
-                </span>
+                {isTodayRange && (
+                  <span className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-xs font-semibold text-green-600">Live</span>
+                  </span>
+                )}
               </div>
             </div>
             <ResponsiveContainer width="100%" height={240}>
@@ -600,7 +592,7 @@ export default function AnalyticsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-gray-900">Top Performers</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Calls made today by agent</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Calls made {periodLabel.toLowerCase()} by agent</p>
                 </div>
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-full border border-blue-100">
                   <AwardIco size={12} />
@@ -613,7 +605,7 @@ export default function AnalyticsPage() {
                 <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <UsersIco size={24} />
                 </div>
-                <p className="text-sm text-gray-500">No call data today</p>
+                <p className="text-sm text-gray-500">No call data for {periodLabel.toLowerCase()}</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={Math.max(220, empData.length * 38)}>
@@ -663,7 +655,7 @@ export default function AnalyticsPage() {
                 <p className="text-xs text-gray-500 mt-0.5">Today vs Yesterday performance comparison</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-6">
               {qualityData.map(({ name, today: t, yest: y, color, suffix }) => {
                 const diff = t - y;
                 return (
@@ -764,7 +756,7 @@ export default function AnalyticsPage() {
             <div>
               <h3 className="text-sm font-bold text-gray-900">Agent Performance</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                {employees.length} agents · Today's metrics
+                {employees.length} agents · {periodLabel}'s metrics
               </p>
             </div>
             <div className="flex items-center gap-2">

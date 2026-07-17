@@ -20,6 +20,7 @@ import {
 } from 'recharts';
 import api from '../../../../lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
+import DateRangeFilter, { formatRangeLabel } from '../../../../components/DateRangeFilter';
 
 /* ── Icons ───────────────────────────────────────── */
 const Ico = ({ size = 16, children, className = '' }) => (
@@ -142,7 +143,7 @@ const ChartTip = ({ active, payload, label }) => {
 
 const PAGES = [
   {
-    href: '/calls',
+    href: '/reports/calllogs',
     label: 'Call Logs',
     desc: 'All call records with filters',
     color: '#2563EB',
@@ -158,7 +159,7 @@ const PAGES = [
     icon: <ClockIco />,
   },
   {
-    href: '/calls/agent-report',
+    href: '/reports/Employess',
     label: 'Agent Reports',
     desc: 'Per-agent performance',
     color: '#D97706',
@@ -166,7 +167,7 @@ const PAGES = [
     icon: <UsersIco />,
   },
   {
-    href: '/calls/attempt-reports',
+    href: '/reports/calllogs',
     label: 'Attempt Reports',
     desc: 'Call attempt patterns',
     color: '#7C3AED',
@@ -194,16 +195,26 @@ const PAGES = [
 export default function CallsOverviewPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
 
   useEffect(() => {
+    const params = { range: dateRange.range };
+    if (dateRange.range === 'custom') {
+      params.startDate = dateRange.startDate;
+      params.endDate = dateRange.endDate;
+    }
+    setLoading(true);
     api
-      .get('/api/calls/stats')
+      .get('/api/calls/stats', { params })
       .then((r) => setStats(r.data.data))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [dateRange]);
 
-  const today = stats?.today;
+  const isTodayRange = dateRange.range === 'today';
+  const rangeLabel = formatRangeLabel(dateRange);
+  const selected = stats?.selected || stats?.today;
+  const today = selected;
   const yest = stats?.yesterday;
   const week = stats?.lastWeek;
 
@@ -273,7 +284,7 @@ export default function CallsOverviewPage() {
 
   const barData = stats
     ? [
-        { name: 'Today', calls: today?.totalCalls || 0, fill: '#2563EB' },
+        { name: rangeLabel, calls: today?.totalCalls || 0, fill: '#2563EB' },
         { name: 'Yesterday', calls: yest?.totalCalls || 0, fill: '#60A5FA' },
         { name: 'Last Week', calls: week?.totalCalls || 0, fill: '#93C5FD' },
       ]
@@ -291,7 +302,7 @@ export default function CallsOverviewPage() {
   // Line data for trend
   const lineData = stats
     ? [
-        { period: 'Today', calls: today?.totalCalls || 0, connected: today?.connectedCalls || 0 },
+        { period: rangeLabel, calls: today?.totalCalls || 0, connected: today?.connectedCalls || 0 },
         { period: 'Yesterday', calls: yest?.totalCalls || 0, connected: yest?.connectedCalls || 0 },
         { period: 'Last Week', calls: week?.totalCalls || 0, connected: week?.connectedCalls || 0 },
       ]
@@ -300,9 +311,9 @@ export default function CallsOverviewPage() {
   // Quick stats cards
   const quickStats = [
     {
-      label: "Today's Total",
+      label: `${rangeLabel}'s Total`,
       value: today?.totalCalls || 0,
-      change: trends.total,
+      change: isTodayRange ? trends.total : null,
       color: '#2563EB',
       icon: <PhoneIco />,
     },
@@ -311,7 +322,7 @@ export default function CallsOverviewPage() {
       value: today?.totalCalls
         ? `${Math.round((today?.connectedCalls || 0) / today?.totalCalls * 100)}%`
         : '0%',
-      change: trends.connected,
+      change: isTodayRange ? trends.connected : null,
       color: '#16A34A',
       icon: <ConnectedIco />,
     },
@@ -373,6 +384,7 @@ export default function CallsOverviewPage() {
               High-level summary across all call reports
             </p>
           </div>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </motion.div>
 
         {/* Quick Stats */}
@@ -452,7 +464,7 @@ export default function CallsOverviewPage() {
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Period Summary</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Today vs Yesterday vs Last Week</p>
+                <p className="text-xs text-gray-500 mt-0.5">{rangeLabel} vs Yesterday vs Last Week</p>
               </div>
               <span className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-full border border-blue-100">
                 <span className="text-xs font-semibold text-blue-600">📊 Summary</span>
@@ -466,7 +478,7 @@ export default function CallsOverviewPage() {
                       Metric
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                      Today
+                      {rangeLabel}
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
                       Yesterday
@@ -513,7 +525,7 @@ export default function CallsOverviewPage() {
                           {r.week ?? '—'}
                         </td>
                         <td className="px-6 py-3 text-right hidden lg:table-cell">
-                          {trend !== null && trend !== undefined && r.today ? (
+                          {isTodayRange && trend !== null && trend !== undefined && r.today ? (
                             <span
                               className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${
                                 trend >= 0
@@ -544,7 +556,7 @@ export default function CallsOverviewPage() {
             className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300"
           >
             <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900">Today's Mix</h3>
+              <h3 className="text-sm font-bold text-gray-900">{rangeLabel}'s Mix</h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 {today?.totalCalls || 0} total calls
               </p>
@@ -554,7 +566,7 @@ export default function CallsOverviewPage() {
                 <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <PhoneIco />
                 </div>
-                <p className="text-sm text-gray-500">No calls yet today</p>
+                <p className="text-sm text-gray-500">No calls yet for {rangeLabel.toLowerCase()}</p>
               </div>
             ) : (
               <>
@@ -736,7 +748,7 @@ export default function CallsOverviewPage() {
             <div>
               <h4 className="text-lg font-bold">Quick Insights</h4>
               <p className="text-blue-100 text-sm mt-1">
-                Key takeaways from today's call data
+                Key takeaways from {rangeLabel.toLowerCase()}'s call data
               </p>
             </div>
             <div className="flex flex-wrap gap-4">
@@ -749,24 +761,26 @@ export default function CallsOverviewPage() {
                 </p>
               </div>
               <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
-                <p className="text-xs text-blue-200">Today's Progress</p>
+                <p className="text-xs text-blue-200">{rangeLabel}'s Progress</p>
                 <p className="text-lg font-bold">
                   {today?.totalCalls || 0} calls
                 </p>
               </div>
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
-                <p className="text-xs text-blue-200">vs Yesterday</p>
-                <p className="text-lg font-bold flex items-center gap-1">
-                  {trends.total !== null && trends.total !== undefined ? (
-                    <>
-                      {trends.total >= 0 ? '+' : ''}
-                      {trends.total}%
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </p>
-              </div>
+              {isTodayRange && (
+                <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
+                  <p className="text-xs text-blue-200">vs Yesterday</p>
+                  <p className="text-lg font-bold flex items-center gap-1">
+                    {trends.total !== null && trends.total !== undefined ? (
+                      <>
+                        {trends.total >= 0 ? '+' : ''}
+                        {trends.total}%
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </motion.div>

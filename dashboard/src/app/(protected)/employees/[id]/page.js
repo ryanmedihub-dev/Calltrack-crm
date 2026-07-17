@@ -101,7 +101,7 @@ export default function EmployeeDetailPage() {
     <div className="space-y-5 animate-fade-in">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <a href="/employees" className="transition-colors" style={{ color:'#94A3B8' }}
+        <a href="/reports/Employess" className="transition-colors" style={{ color:'#94A3B8' }}
           onMouseEnter={e=>e.currentTarget.style.color='#2563EB'}
           onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>← Employees</a>
         <span style={{ color:'#E2E8F0' }}>/</span>

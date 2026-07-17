@@ -8,6 +8,51 @@ const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
 const { createDownloadJob } = require('../lib/downloadJobs');
 
+// Returns UTC start/end of a calendar day in IST (UTC+5:30).
+function getISTDateBounds(offsetDays = 0) {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  nowIST.setUTCHours(0, 0, 0, 0);
+  nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
+  const start = new Date(nowIST.getTime() - IST_OFFSET_MS);
+  const end   = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+// Returns UTC start/end (7-day span) of the current calendar week (Mon–Sun) in IST.
+function getISTWeekBounds() {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const day = nowIST.getUTCDay(); // 0=Sun..6=Sat
+  const diffToMonday = (day + 6) % 7;
+  nowIST.setUTCHours(0, 0, 0, 0);
+  nowIST.setUTCDate(nowIST.getUTCDate() - diffToMonday);
+  const start = new Date(nowIST.getTime() - IST_OFFSET_MS);
+  const end   = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+// Returns UTC start/end for an IST calendar-date range given as 'YYYY-MM-DD' strings.
+function getISTCustomBounds(startDateStr, endDateStr) {
+  let s = startDateStr || new Date().toISOString().slice(0, 10);
+  let e = endDateStr || s;
+  if (e < s) { const t = s; s = e; e = t; }
+  const start = new Date(`${s}T00:00:00+05:30`);
+  const end   = new Date(new Date(`${e}T00:00:00+05:30`).getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+// Resolves a named/custom range keyword to UTC {start, end} bounds.
+function resolveDateRange(range, startDate, endDate) {
+  switch (range) {
+    case 'yesterday': return getISTDateBounds(-1);
+    case 'thisWeek':  return getISTWeekBounds();
+    case 'custom':    return getISTCustomBounds(startDate, endDate);
+    case 'today':
+    default:          return getISTDateBounds(0);
+  }
+}
+
 // POST /api/leads — create lead (any authenticated user)
 router.post('/', protect, async (req, res) => {
   try {
@@ -51,7 +96,7 @@ router.post('/', protect, async (req, res) => {
 // GET /api/leads — all leads with filters + search
 router.get('/', protect, isManager, async (req, res) => {
   try {
-    const { status, assignedTo, search, tags, page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1' } = req.query;
+    const { status, assignedTo, search, tags, page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate } = req.query;
     const filter = {};
     if (status) filter.status = status;
     if (assignedTo) filter.assignedTo = assignedTo;
@@ -62,6 +107,10 @@ router.get('/', protect, isManager, async (req, res) => {
         { phone: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
       ];
+    }
+    if (range) {
+      const { start, end } = resolveDateRange(range, startDate, endDate);
+      filter.createdAt = { $gte: start, $lt: end };
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sort = { [sortBy]: parseInt(sortDir) };

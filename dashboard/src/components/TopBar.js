@@ -8,11 +8,8 @@ const PAGE_TITLES = {
   '/dashboard':             'Dashboard',
   '/analytics':             'Analytics',
   '/analytics/advanced':    'Advanced Analytics',
-  '/employees':             'Employees',
   '/employees/leaderboard': 'Leaderboard',
-  '/leads':                 'Leads',
   '/leads/pipeline':        'Pipeline',
-  '/calls':                 'Call Logs',
   '/calls/live':            'Live Monitor',
   '/calls/targets':         'Daily Targets',
   '/reports':               'Periodic Reports',
@@ -27,20 +24,17 @@ const PAGE_TITLES = {
 const PAGE_SUBTITLES = {
   '/dashboard':    'Real-time operations overview',
   '/analytics':    'Trends and performance insights',
-  '/calls':        'Review all call activity',
   '/calls/live':   'Monitor active calls in real time',
-  '/employees':    'Manage your team',
-  '/leads':        'Track and convert contacts',
   '/reports':      'Generate and export reports',
   '/settings':     'Configure your workspace',
 };
 
 const PARENTS = {
   analytics: { label: 'Analytics', href: '/analytics' },
-  employees: { label: 'Employees', href: '/employees' },
-  leads:     { label: 'Leads',     href: '/leads'     },
-  calls:     { label: 'Call Logs', href: '/calls'     },
-  reports:   { label: 'Reports',   href: '/reports'   },
+  employees: { label: 'Employees', href: '/reports/Employess' },
+  leads:     { label: 'Leads',     href: '/reports/lead'       },
+  calls:     { label: 'Call Logs', href: '/reports/calllogs'   },
+  reports:   { label: 'Reports',   href: '/reports'            },
 };
 
 function buildCrumbs(pathname) {

@@ -8,16 +8,9 @@ import {
 } from 'recharts';
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
+import DateRangeFilter, { formatRangeLabel } from '../../../components/DateRangeFilter';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* ── Timezone helpers ─────────────────────────────── */
-const TIMEZONES = [
-  { label: 'IST (India)', value: 'Asia/Kolkata' },
-  { label: 'UTC', value: 'UTC' },
-  { label: 'EST (US)', value: 'America/New_York' },
-  { label: 'PST (US)', value: 'America/Los_Angeles' },
-  { label: 'GST (Gulf)', value: 'Asia/Dubai' },
-];
 
 function parseUTC(ts) {
   if (!ts) return new Date(NaN);
@@ -161,12 +154,12 @@ function trend(cur, prev) {
 }
 
 const KPI = [
-  { key: 'totalCalls', label: 'Total Calls', Icon: PhoneIco, grad: 'linear-gradient(135deg,#2563EB,#3B82F6)', href: '/calls' },
-  { key: 'incoming', label: 'Incoming', Icon: InIco, grad: 'linear-gradient(135deg,#16A34A,#22C55E)', href: '/calls?callType=incoming' },
-  { key: 'outgoing', label: 'Outgoing', Icon: OutIco, grad: 'linear-gradient(135deg,#D97706,#F59E0B)', href: '/calls?callType=outgoing' },
-  { key: 'missed', label: 'Missed', Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', href: '/calls?callType=missed' },
-  { key: 'connectedCalls', label: 'Connected', Icon: CheckIco, grad: 'linear-gradient(135deg,#0D9488,#14B8A6)', href: '/calls' },
-  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco, grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', href: '/calls' },
+  { key: 'totalCalls', label: 'Total Calls', Icon: PhoneIco, grad: 'linear-gradient(135deg,#2563EB,#3B82F6)', href: '/reports/calllogs' },
+  { key: 'incoming', label: 'Incoming', Icon: InIco, grad: 'linear-gradient(135deg,#16A34A,#22C55E)', href: '/reports/calllogs' },
+  { key: 'outgoing', label: 'Outgoing', Icon: OutIco, grad: 'linear-gradient(135deg,#D97706,#F59E0B)', href: '/reports/calllogs' },
+  { key: 'missed', label: 'Missed', Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', href: '/reports/calllogs' },
+  { key: 'connectedCalls', label: 'Connected', Icon: CheckIco, grad: 'linear-gradient(135deg,#0D9488,#14B8A6)', href: '/reports/calllogs' },
+  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco, grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', href: '/reports/calllogs' },
 ];
 
 const KpiCard = ({ label, value, Icon, grad, href, delta, idx }) => {
@@ -413,12 +406,24 @@ export default function DashboardPage() {
   const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [tzOpen, setTzOpen] = useState(false);
   const [leadStats, setLeadStats] = useState({});
+  const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
   const channelRef = useRef(null);
+  const dateRangeRef = useRef(dateRange);
+
+  useEffect(() => {
+    dateRangeRef.current = dateRange;
+  }, [dateRange]);
 
   const fetchStats = async (spin = false) => {
     if (spin) setRefreshing(true);
     try {
-      const r = await api.get('/api/calls/stats');
+      const dr = dateRangeRef.current;
+      const params = { range: dr.range };
+      if (dr.range === 'custom') {
+        params.startDate = dr.startDate;
+        params.endDate = dr.endDate;
+      }
+      const r = await api.get('/api/calls/stats', { params });
       setStats(r.data.data);
     } catch { } finally {
       setRefreshing(false);
@@ -445,6 +450,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchStats();
+  }, [dateRange]);
+
+  useEffect(() => {
     fetchLeadStats();
     api.get('/api/employees').then((r) => setEmployees(r.data.data)).catch(() => { });
     api
@@ -472,14 +480,17 @@ export default function DashboardPage() {
 
   const today = stats?.today;
   const yest = stats?.yesterday;
+  const selected = stats?.selected || today;
+  const isTodayRange = dateRange.range === 'today';
+  const rangeLabel = formatRangeLabel(dateRange);
 
-  const pieData = today
+  const pieData = selected
     ? [
-      { name: 'Incoming', value: today.incoming || 0, color: '#22C55E' },
-      { name: 'Outgoing', value: today.outgoing || 0, color: '#F59E0B' },
-      { name: 'Connected', value: today.connectedCalls || 0, color: '#14B8A6' },
-      { name: 'Missed', value: today.missed || 0, color: '#EF4444' },
-      { name: 'Rejected', value: today.rejected || 0, color: '#8B5CF6' },
+      { name: 'Incoming', value: selected.incoming || 0, color: '#22C55E' },
+      { name: 'Outgoing', value: selected.outgoing || 0, color: '#F59E0B' },
+      { name: 'Connected', value: selected.connectedCalls || 0, color: '#14B8A6' },
+      { name: 'Missed', value: selected.missed || 0, color: '#EF4444' },
+      { name: 'Rejected', value: selected.rejected || 0, color: '#8B5CF6' },
     ].filter((d) => d.value > 0)
     : [];
 
@@ -497,7 +508,6 @@ export default function DashboardPage() {
     timeZone: timezone,
   });
 
-  const tzLabel = TIMEZONES.find((t) => t.value === timezone)?.label || timezone;
   const totalLeads = Object.values(leadStats).reduce((a, b) => a + b, 0);
 
   return (
@@ -519,52 +529,9 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Timezone selector */}
-            <div className="relative">
-              <button
-                onClick={() => setTzOpen((o) => !o)}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-sm font-medium text-gray-700 transition-colors duration-200"
-              >
-                <GlobeIco />
-                <span className="hidden sm:inline">{tzLabel}</span>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              <AnimatePresence>
-                {tzOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="absolute right-0 top-full mt-2 z-30 bg-white rounded-xl shadow-2xl border border-gray-100 min-w-[200px] overflow-hidden"
-                  >
-                    {TIMEZONES.map((tz) => (
-                      <button
-                        key={tz.value}
-                        onClick={() => {
-                          setTimezone(tz.value);
-                          setTzOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-3 text-sm transition-colors duration-150 ${timezone === tz.value
-                            ? 'bg-blue-50 text-blue-600 font-semibold'
-                            : 'text-gray-700 hover:bg-gray-50'
-                          }`}
-                      >
-                        {tz.label}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+            {/* Date range filter */}
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          
             <button
               onClick={() => fetchStats(true)}
               disabled={refreshing}
@@ -588,11 +555,11 @@ export default function DashboardPage() {
               key={cfg.key}
               idx={i}
               label={cfg.label}
-              value={today?.[cfg.key]}
+              value={selected?.[cfg.key]}
               Icon={cfg.Icon}
               grad={cfg.grad}
               href={cfg.href}
-              delta={cfg.key !== 'uniqueClients' ? trend(today?.[cfg.key], yest?.[cfg.key]) : null}
+              delta={isTodayRange && cfg.key !== 'uniqueClients' ? trend(selected?.[cfg.key], yest?.[cfg.key]) : null}
             />
           ))}
         </div>
@@ -615,7 +582,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <Link
-              href="/leads"
+              href="/reports/lead"
               className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors duration-200"
             >
               View all →
@@ -626,7 +593,7 @@ export default function DashboardPage() {
               const count = leadStats[s.key] ?? 0;
               const pct = totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0;
               return (
-                <Link href={`/leads?status=${s.key}`} key={s.key}>
+                <Link href="/reports/lead" key={s.key}>
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -676,15 +643,17 @@ export default function DashboardPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Calls Per Hour</h3>
-                <p className="text-xs text-gray-500 mt-1">Today's activity · {tzLabel}</p>
+                <p className="text-xs text-gray-500 mt-1">{rangeLabel} activity ·</p>
               </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-xs font-semibold text-green-600">Live</span>
-              </div>
+              {isTodayRange && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-xs font-semibold text-green-600">Live</span>
+                </div>
+              )}
             </div>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={stats?.callsPerHour || []} barCategoryGap="40%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+              <BarChart data={selected?.callsPerHour || []} barCategoryGap="40%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#2563EB" stopOpacity={0.9} />
@@ -728,15 +697,15 @@ export default function DashboardPage() {
             className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
           >
             <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900">Today's Breakdown</h3>
-              <p className="text-xs text-gray-500 mt-1">{today?.totalCalls || 0} total calls</p>
+              <h3 className="text-sm font-bold text-gray-900">{rangeLabel} Breakdown</h3>
+              <p className="text-xs text-gray-500 mt-1">{selected?.totalCalls || 0} total calls</p>
             </div>
             {pieData.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[220px] gap-4">
                 <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <PhoneIco size={24} />
                 </div>
-                <p className="text-sm text-gray-500">No calls yet today</p>
+                <p className="text-sm text-gray-500">No calls yet for {rangeLabel.toLowerCase()}</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={220}>
@@ -779,7 +748,7 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Top Dialers</h3>
-                <p className="text-xs text-gray-500 mt-1">Today's leaders</p>
+                <p className="text-xs text-gray-500 mt-1">{rangeLabel}'s leaders</p>
               </div>
               <Link
                 href="/employees/leaderboard"
@@ -788,7 +757,7 @@ export default function DashboardPage() {
                 View all
               </Link>
             </div>
-            {(stats?.topDialers?.length ?? 0) === 0 ? (
+            {(selected?.topDialers?.length ?? 0) === 0 ? (
               <div className="flex flex-col items-center justify-center h-[260px] gap-3">
                 <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
                   <StarIco />
@@ -797,8 +766,8 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {(stats.topDialers || []).slice(0, 7).map((d, i) => {
-                  const pct = Math.min(100, (d.count / (stats.topDialers[0]?.count || 1)) * 100);
+                {(selected.topDialers || []).slice(0, 7).map((d, i) => {
+                  const pct = Math.min(100, (d.count / (selected.topDialers[0]?.count || 1)) * 100);
                   const MEDAL = ['#F59E0B', '#94A3B8', '#B45309'];
                   const MEDAL_BG = ['rgba(245,158,11,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
                   return (
@@ -843,7 +812,7 @@ export default function DashboardPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Live Call Feed</h3>
-                <p className="text-xs text-gray-500 mt-1">Streaming in real time · {tzLabel}</p>
+                <p className="text-xs text-gray-500 mt-1">Streaming in real time ·</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
@@ -953,7 +922,7 @@ export default function DashboardPage() {
         >
           <h3 className="text-sm font-bold text-gray-900 mb-4">Period Comparison</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <PeriodPanel title="Today" data={stats?.today} />
+            <PeriodPanel title={rangeLabel} data={selected} />
             <PeriodPanel title="Yesterday" data={stats?.yesterday} />
             <PeriodPanel title="Last Week" data={stats?.lastWeek} />
           </div>
