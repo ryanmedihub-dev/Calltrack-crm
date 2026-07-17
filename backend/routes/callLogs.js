@@ -207,51 +207,63 @@ router.post('/sync', protect, async (req, res) => {
       }
     });
 
-    const docs = calls.map((c) => ({
-      contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
-      contactName:   c.contactName,
-      callType:      c.callType,
-      duration:      c.duration,
-      timestamp:     c.timestamp,
-      notes:         c.notes,
-      callStatus:    c.callStatus,
-      employeeId:    req.user._id,
-      synced:        true
-    }));
+    const docs = calls
+      .map((c) => ({
+        contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
+        contactName:   c.contactName,
+        callType:      c.callType,
+        duration:      c.duration,
+        timestamp:     c.timestamp,
+        notes:         c.notes,
+        callStatus:    c.callStatus,
+        employeeId:    req.user._id,
+        synced:        true
+      }))
+      .filter((d) => d.contactNumber && d.timestamp && d.callType);
 
-    let inserted = [];
-    try {
-      inserted = await CallLog.insertMany(docs, { ordered: false });
-    } catch (bulkErr) {
-      if (bulkErr.code === 11000 || bulkErr.name === 'MongoBulkWriteError') {
-        inserted = bulkErr.insertedDocs || [];
-      } else {
-        throw bulkErr;
-      }
+    // The mobile app resyncs the whole day's calls on every sync (e.g. once the
+    // post-call popup is filled in, the same call is resent with notes/callStatus
+    // added). We used to rely on a unique DB index on (employeeId, contactNumber,
+    // timestamp) to turn those repeat sends into no-ops via insertMany — but that
+    // index silently failed to build in production (Mongoose swallows index-build
+    // errors), so every resync inserted a fresh duplicate row instead of being
+    // deduped. Upserting on that same natural key here makes dedup work
+    // independently of whether the DB index exists at all.
+    //
+    // Also collapse same-key entries within this single payload first — an
+    // unordered bulkWrite can't rely on a (possibly still-missing) unique index to
+    // stop two upserts for the same not-yet-existing key racing each other.
+    const byKey = new Map();
+    for (const d of docs) {
+      const key = `${d.employeeId}_${d.contactNumber}_${new Date(d.timestamp).toISOString()}`;
+      const prev = byKey.get(key);
+      byKey.set(key, prev ? {
+        ...prev,
+        notes:      d.notes      || prev.notes,
+        callStatus: d.callStatus || prev.callStatus,
+        duration:   d.duration   || prev.duration,
+      } : d);
     }
 
-    // For docs that already existed (skipped by insertMany), update enriched fields
-    // (notes, callStatus) if the employee just added them.
-    const insertedKeys = new Set(
-      inserted.map((d) => `${d.contactNumber}_${Math.floor(new Date(d.timestamp).getTime() / 60000)}`)
-    );
-    for (const doc of docs) {
-      if (!doc.notes && !doc.callStatus) continue;
-      const docKey = `${doc.contactNumber}_${Math.floor(new Date(doc.timestamp).getTime() / 60000)}`;
-      if (insertedKeys.has(docKey)) continue;
-      const enrichedSet = {};
-      if (doc.notes)      enrichedSet.notes      = doc.notes;
-      if (doc.callStatus) enrichedSet.callStatus = doc.callStatus;
-      if (!Object.keys(enrichedSet).length) continue;
-      const ts = new Date(doc.timestamp).getTime();
-      await CallLog.updateOne(
-        {
-          employeeId:    req.user._id,
-          contactNumber: doc.contactNumber,
-          timestamp:     { $gte: new Date(ts - 180000), $lte: new Date(ts + 180000) },
+    const ops = [...byKey.values()].map((d) => {
+      const setOnInsert = { callType: d.callType, duration: d.duration, contactName: d.contactName, synced: true };
+      const set = {};
+      if (d.notes)      set.notes      = d.notes;
+      if (d.callStatus) set.callStatus = d.callStatus;
+      return {
+        updateOne: {
+          filter: { employeeId: d.employeeId, contactNumber: d.contactNumber, timestamp: d.timestamp },
+          update: { $setOnInsert: setOnInsert, ...(Object.keys(set).length ? { $set: set } : {}) },
+          upsert: true,
         },
-        { $set: enrichedSet }
-      ).catch(() => {});
+      };
+    });
+
+    let inserted = [];
+    if (ops.length) {
+      const result = await CallLog.bulkWrite(ops, { ordered: false });
+      const newIds = Object.values(result.upsertedIds || {});
+      if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
     }
 
     // Auto-link to lead and update lead call stats / callLogs array.

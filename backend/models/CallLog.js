@@ -25,4 +25,15 @@ callLogSchema.index({ leadId: 1 });
 // Prevents duplicate entries when the mobile retries a sync
 callLogSchema.index({ employeeId: 1, contactNumber: 1, timestamp: 1 }, { unique: true });
 
-module.exports = mongoose.model('CallLog', callLogSchema);
+const CallLog = mongoose.model('CallLog', callLogSchema);
+
+// Mongoose builds indexes in the background and swallows the error by default —
+// this index previously failed to build silently (pre-existing duplicate data
+// violated the uniqueness constraint) and nobody noticed. The /sync route no
+// longer depends on this index for dedup, but surface build failures loudly so
+// a missing index is never silently invisible again.
+CallLog.on('index', (err) => {
+  if (err) console.error('[CallLog] index build failed:', err.message);
+});
+
+module.exports = CallLog;

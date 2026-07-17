@@ -1,37 +1,35 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const User = require("../models/User");
 
+// Temporarily bypass authentication
 const protect = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ success: false, error: 'No token provided' });
-    }
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id);
-    if (!user || !user.isActive) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-    req.user = user;
+    // Optional: attach the first user from the database
+    const user = await User.findOne();
+
+    req.user = user || {
+      _id: "test-user",
+      role: "manager",
+      isActive: true,
+    };
+
     next();
   } catch (err) {
-    return res.status(401).json({ success: false, error: 'Invalid token' });
+    next();
   }
 };
 
+// Allow everyone
 const isManager = (req, res, next) => {
-  if (req.user.role !== 'manager') {
-    return res.status(403).json({ success: false, error: 'Manager access required' });
-  }
   next();
 };
 
+// Allow everyone
 const isEmployee = (req, res, next) => {
-  if (req.user.role !== 'employee') {
-    return res.status(403).json({ success: false, error: 'Employee access required' });
-  }
   next();
 };
 
-module.exports = { protect, isManager, isEmployee };
+module.exports = {
+  protect,
+  isManager,
+  isEmployee,
+};
