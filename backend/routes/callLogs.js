@@ -246,14 +246,23 @@ router.post('/sync', protect, async (req, res) => {
     }
 
     const ops = [...byKey.values()].map((d) => {
-      const setOnInsert = { callType: d.callType, duration: d.duration, contactName: d.contactName, synced: true };
+      const setOnInsert = { callType: d.callType, contactName: d.contactName, synced: true };
       const set = {};
       if (d.notes)      set.notes      = d.notes;
       if (d.callStatus) set.callStatus = d.callStatus;
       return {
         updateOne: {
           filter: { employeeId: d.employeeId, contactNumber: d.contactNumber, timestamp: d.timestamp },
-          update: { $setOnInsert: setOnInsert, ...(Object.keys(set).length ? { $set: set } : {}) },
+          update: {
+            $setOnInsert: setOnInsert,
+            // Android's CallLog.Calls.DURATION isn't always finalized the instant a call
+            // ends — the first sync of a call can carry a 0 that only gets corrected on a
+            // later resync once the OS finalizes it. $max (instead of folding duration into
+            // $setOnInsert/$set) means a later correct value can heal an earlier 0, while a
+            // later spurious 0 can never regress an already-correct duration.
+            $max: { duration: d.duration || 0 },
+            ...(Object.keys(set).length ? { $set: set } : {}),
+          },
           upsert: true,
         },
       };
