@@ -62,7 +62,7 @@ async function scheduleFollowUpNotifications() {
           data:  { type: 'followup', key: fu.key },
           sound: true,
         },
-        trigger: { date: fireAt },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt },
       });
     }
   } catch (err) {

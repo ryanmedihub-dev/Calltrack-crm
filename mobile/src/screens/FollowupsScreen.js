@@ -11,6 +11,9 @@ import MiniCalendar from '../components/MiniCalendar';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import { getPendingFollowUps, saveNote, getNote } from '../utils/callNotes';
+import { getCached, setCached } from '../utils/cache';
+
+const FOLLOWUP_LEADS_CACHE_KEY = 'followup_leads';
 
 const RESCHEDULE_HOUR_SLOTS = [
   { label: '8 AM', h: 8 }, { label: '9 AM', h: 9 }, { label: '10 AM', h: 10 },
@@ -249,6 +252,7 @@ export default function FollowupsScreen({ onAddNote }) {
           leadId:        l._id,
         }));
       setLeads(leadItems);
+      setCached(FOLLOWUP_LEADS_CACHE_KEY, leadItems);
     } catch {}
 
     setItems(local.map((f) => ({
@@ -261,7 +265,14 @@ export default function FollowupsScreen({ onAddNote }) {
     })));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    // Paint instantly from the last cached lead list instead of flashing the
+    // "No follow-ups yet" empty state while the network round trip is in flight.
+    getCached(FOLLOWUP_LEADS_CACHE_KEY).then((cached) => {
+      if (cached) setLeads(cached);
+    });
+    load();
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
