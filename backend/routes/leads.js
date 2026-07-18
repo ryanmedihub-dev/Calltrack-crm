@@ -452,7 +452,7 @@ router.get('/:id', protect, async (req, res) => {
     const linkedIds = new Set((lead.callLogs || []).map((c) => c._id.toString()));
     const callsByNumber = await CallLog.find({ contactNumber: lead.phone })
       .populate('employeeId', 'name phone')
-      .sort({ timestamp: -1 })
+      .sort({ timestamp: -1, _id: -1 })
       .limit(50)
       .lean();
 

@@ -87,7 +87,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 
     const calls = await CallLog.find(filter)
       .populate('employeeId', 'name phone')
-      .sort({ timestamp: -1 })
+      .sort({ timestamp: -1, _id: -1 })
       .lean();
 
     const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
@@ -376,7 +376,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       const total = await CallLog.countDocuments(filter);
       const historyCalls = await CallLog.find(filter)
         .populate('employeeId', 'name phone')
-        .sort({ timestamp: -1 })
+        .sort({ timestamp: -1, _id: -1 })
         .skip((pageNum - 1) * pageSize)
         .limit(pageSize)
         .lean();
@@ -837,7 +837,7 @@ router.get('/client', protect, isManager, async (req, res) => {
 
     const calls = await CallLog.find(filter)
       .populate('employeeId', 'name phone')
-      .sort({ timestamp: -1 })
+      .sort({ timestamp: -1, _id: -1 })
       .lean();
 
     const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };

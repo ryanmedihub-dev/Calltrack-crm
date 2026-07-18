@@ -400,7 +400,7 @@ router.get('/', protect, isManager, async (req, res) => {
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [callsRaw, total] = await Promise.all([
-      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter)
     ]);
     const calls = callsRaw.map(enrichWithEmployee);
@@ -470,7 +470,7 @@ router.get('/stats', protect, isManager, async (req, res) => {
 // GET /api/calls/realtime — latest 50 calls
 router.get('/realtime', protect, isManager, async (req, res) => {
   try {
-    const callsRaw = await CallLog.find().populate('employeeId', 'name phone').sort({ timestamp: -1 }).limit(50).lean();
+    const callsRaw = await CallLog.find().populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
     return res.json({ success: true, data: callsRaw.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -561,7 +561,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     }
 
     const rows = ['Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n'];
-    const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1 }).lean().cursor();
+    const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1, _id: -1 }).lean().cursor();
     for await (const doc of cursor) {
       const d   = new Date(doc.timestamp);
       const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
@@ -684,7 +684,7 @@ router.get('/employee/:id', protect, async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const mongoose = require('mongoose');
     const [callsRaw, total, [agg]] = await Promise.all([
-      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter),
       CallLog.aggregate([
         { $match: { employeeId: new mongoose.Types.ObjectId(req.params.id) } },
