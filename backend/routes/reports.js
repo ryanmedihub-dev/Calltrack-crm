@@ -15,6 +15,19 @@ function fmtDuration(seconds) {
   return `${s}s`;
 }
 
+// Parses a 'YYYY-MM-DD' IST calendar-date string (as sent by the dashboard's
+// date-range filters) into the UTC instant of that day's IST start/end — using
+// the server's local time here (as the old `new Date(str); setHours(...)` code
+// did) would shift the boundary by up to 5.5h wherever the server isn't IST,
+// causing report totals to disagree with the /calls/stats and /leads counts
+// that deep-linked dashboard/overview cards promise to match.
+function istDateStrStart(dateStr) {
+  return new Date(`${dateStr}T00:00:00+05:30`);
+}
+function istDateStrEnd(dateStr) {
+  return new Date(istDateStrStart(dateStr).getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
 function istDayStart(offsetDays = 0) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   const nowIST = new Date(Date.now() + IST_OFFSET_MS);
@@ -72,12 +85,8 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       tab = 'summary', page = 1, limit = 100
     } = req.query;
 
-    const start = startDate
-      ? (() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; })()
-      : istDayStart(0);
-    const end = endDate
-      ? (() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; })()
-      : new Date();
+    const start = startDate ? istDateStrStart(startDate) : istDayStart(0);
+    const end = endDate ? istDateStrEnd(endDate) : new Date();
 
     const filter = { timestamp: { $gte: start, $lte: end } };
     if (employeeId) filter.employeeId = employeeId;
@@ -436,12 +445,10 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
 
     const filter = {};
     if (startDate) {
-      const d = new Date(startDate); d.setHours(0, 0, 0, 0);
-      filter.createdAt = { ...(filter.createdAt || {}), $gte: d };
+      filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
     }
     if (endDate) {
-      const d = new Date(endDate); d.setHours(23, 59, 59, 999);
-      filter.createdAt = { ...(filter.createdAt || {}), $lte: d };
+      filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
     }
     if (employeeId) filter.assignedTo = employeeId;
     if (status) filter.status = status;
@@ -655,12 +662,8 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
   try {
     const { startDate, endDate, employeeId, status, tab = 'summary' } = req.query;
 
-    const start = startDate
-      ? (() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; })()
-      : istDayStart(-29);
-    const end = endDate
-      ? (() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; })()
-      : new Date();
+    const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
+    const end = endDate ? istDateStrEnd(endDate) : new Date();
 
     const empFilter = { role: 'employee' };
     if (employeeId) empFilter._id = employeeId;

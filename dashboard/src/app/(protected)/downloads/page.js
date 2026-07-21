@@ -47,9 +47,16 @@ export default function DownloadsPage() {
 
   useEffect(() => {
     load();
-    const t = setInterval(() => load(true), 30000);
-    return () => clearInterval(t);
   }, [load]);
+
+  // Poll much more often while a file is still being generated, so a
+  // "Processing…" row flips to ready/failed within a few seconds instead of
+  // sitting there for up to 30s with no visible progress.
+  useEffect(() => {
+    const hasProcessing = jobs.some((j) => j.status === 'processing');
+    const t = setInterval(() => load(true), hasProcessing ? 3000 : 30000);
+    return () => clearInterval(t);
+  }, [load, jobs]);
 
   const handleDownload = async (job) => {
     setBusyId(job._id);
@@ -84,6 +91,8 @@ export default function DownloadsPage() {
     }
   };
 
+  const processingCount = jobs.filter((j) => j.status === 'processing').length;
+
   return (
     <div className="space-y-5 animate-fade-in">
       <div className="page-header">
@@ -97,8 +106,14 @@ export default function DownloadsPage() {
       </div>
 
       <div className="page-card overflow-hidden">
-        <div className="px-5 py-3.5" style={{ borderBottom: '1px solid #E2E8F0' }}>
+        <div className="px-5 py-3.5 flex items-center gap-3" style={{ borderBottom: '1px solid #E2E8F0' }}>
           <h3 className="font-bold text-sm" style={{ color: '#0F172A' }}>{jobs.length} file{jobs.length === 1 ? '' : 's'}</h3>
+          {processingCount > 0 && (
+            <span className="badge inline-flex items-center gap-1.5" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+              <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              {processingCount} generating…
+            </span>
+          )}
         </div>
         <div className="px-5 py-4">
           <DataTable
@@ -112,37 +127,55 @@ export default function DownloadsPage() {
                 render: (job) => (
                   <>
                     <p className="font-mono text-xs font-medium" style={{ color: '#0F172A' }}>{job.filename}</p>
+                    {job.status === 'processing' && (
+                      <span className="badge inline-flex items-center gap-1.5" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                        <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        Processing…
+                      </span>
+                    )}
                     {job.status === 'failed' && <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626' }}>Failed</span>}
                   </>
                 ),
               },
               { key: 'label', label: 'Type', render: (job) => <span className="text-xs" style={{ color: '#475569' }}>{job.label}</span> },
-              { key: 'sizeBytes', label: 'Size', searchable: false, render: (job) => <span className="text-xs tabular-nums" style={{ color: '#475569' }}>{formatBytes(job.sizeBytes)}</span> },
+              {
+                key: 'sizeBytes', label: 'Size', searchable: false,
+                render: (job) => (
+                  <span className="text-xs tabular-nums" style={{ color: '#475569' }}>
+                    {job.status === 'processing' ? '—' : formatBytes(job.sizeBytes)}
+                  </span>
+                ),
+              },
               { key: 'createdAt', label: 'Created', searchable: false, render: (job) => <span className="text-xs" style={{ color: '#94A3B8' }}>{fmtDateTime(job.createdAt)}</span> },
               { key: 'expiresAt', label: 'Expires In', searchable: false, render: (job) => <span className="text-xs font-medium" style={{ color: '#D97706' }}>{formatExpiresIn(job.expiresAt)}</span> },
               {
                 key: 'actions', label: 'Actions', align: 'right', sortable: false, searchable: false,
-                render: (job) => (
-                  <div className="flex items-center justify-end gap-1.5">
-                    <button
-                      onClick={() => handleDownload(job)}
-                      disabled={busyId === job._id}
-                      className="btn-secondary text-[11px] py-1 px-2.5"
-                      title="Download"
-                    >
-                      <DownloadIco />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(job)}
-                      disabled={busyId === job._id}
-                      className="btn-secondary text-[11px] py-1 px-2.5"
-                      style={{ color: '#DC2626' }}
-                      title="Delete"
-                    >
-                      <TrashIco />
-                    </button>
-                  </div>
-                ),
+                render: (job) => {
+                  const processing = job.status === 'processing';
+                  return (
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => handleDownload(job)}
+                        disabled={busyId === job._id || processing}
+                        className="btn-secondary text-[11px] py-1 px-2.5"
+                        title={processing ? 'Still generating…' : 'Download'}
+                      >
+                        {processing
+                          ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin opacity-50" />
+                          : <DownloadIco />}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(job)}
+                        disabled={busyId === job._id}
+                        className="btn-secondary text-[11px] py-1 px-2.5"
+                        style={{ color: '#DC2626' }}
+                        title="Delete"
+                      >
+                        <TrashIco />
+                      </button>
+                    </div>
+                  );
+                },
               },
             ]}
           />

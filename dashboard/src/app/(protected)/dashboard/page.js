@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
-import DateRangeFilter, { formatRangeLabel } from '../../../components/DateRangeFilter';
+import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../components/DateRangeFilter';
 import { motion, AnimatePresence } from 'framer-motion';
 
 
@@ -153,14 +153,24 @@ function trend(cur, prev) {
   return Math.round(((cur - prev) / prev) * 100);
 }
 
+// `callType` (when set) is added as a report filter so the destination page's
+// total lines up with the exact number shown on the card — see `kpiHref` below.
 const KPI = [
-  { key: 'totalCalls', label: 'Total Calls', Icon: PhoneIco, grad: 'linear-gradient(135deg,#2563EB,#3B82F6)', href: '/reports/calllogs' },
-  { key: 'incoming', label: 'Incoming', Icon: InIco, grad: 'linear-gradient(135deg,#16A34A,#22C55E)', href: '/reports/calllogs' },
-  { key: 'outgoing', label: 'Outgoing', Icon: OutIco, grad: 'linear-gradient(135deg,#D97706,#F59E0B)', href: '/reports/calllogs' },
-  { key: 'missed', label: 'Missed', Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', href: '/reports/calllogs' },
-  { key: 'connectedCalls', label: 'Connected', Icon: CheckIco, grad: 'linear-gradient(135deg,#0D9488,#14B8A6)', href: '/reports/calllogs' },
-  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco, grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)', href: '/reports/calllogs' },
+  { key: 'totalCalls', label: 'Total Calls', Icon: PhoneIco, grad: 'linear-gradient(135deg,#2563EB,#3B82F6)' },
+  { key: 'incoming', label: 'Incoming', Icon: InIco, grad: 'linear-gradient(135deg,#16A34A,#22C55E)', callType: 'incoming' },
+  { key: 'outgoing', label: 'Outgoing', Icon: OutIco, grad: 'linear-gradient(135deg,#D97706,#F59E0B)', callType: 'outgoing' },
+  { key: 'missed', label: 'Missed', Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', callType: 'missed' },
+  { key: 'connectedCalls', label: 'Connected', Icon: CheckIco, grad: 'linear-gradient(135deg,#0D9488,#14B8A6)' },
+  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco, grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)' },
 ];
+
+// Builds a /reports/calllogs link carrying the same date window (and call type,
+// when relevant) the KPI card's own number was computed over.
+function kpiHref(cfg, fromDate, toDate) {
+  const params = new URLSearchParams({ fromDate, toDate });
+  if (cfg.callType) params.set('callType', cfg.callType);
+  return `/reports/calllogs?${params.toString()}`;
+}
 
 const KpiCard = ({ label, value, Icon, grad, href, delta, idx }) => {
   const card = (
@@ -430,12 +440,21 @@ export default function DashboardPage() {
     }
   };
 
+  // Filtered the same way as fetchStats so the Lead Pipeline cards match
+  // whatever date range is selected — and so their deep links into
+  // /reports/lead land on the same set of leads the card counted.
   const fetchLeadStats = async () => {
     try {
+      const dr = dateRangeRef.current;
+      const params = { limit: 1, range: dr.range };
+      if (dr.range === 'custom') {
+        params.startDate = dr.startDate;
+        params.endDate = dr.endDate;
+      }
       const results = await Promise.all(
         LEAD_STATUSES.map((s) =>
           api
-            .get('/api/leads', { params: { status: s.key, limit: 1 } })
+            .get('/api/leads', { params: { ...params, status: s.key } })
             .then((r) => ({ key: s.key, count: r.data.data?.total ?? 0 }))
             .catch(() => ({ key: s.key, count: 0 }))
         )
@@ -450,10 +469,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchStats();
+    fetchLeadStats();
   }, [dateRange]);
 
   useEffect(() => {
-    fetchLeadStats();
     api.get('/api/employees').then((r) => setEmployees(r.data.data)).catch(() => { });
     api
       .get('/api/calls/realtime')
@@ -483,6 +502,7 @@ export default function DashboardPage() {
   const selected = stats?.selected || today;
   const isTodayRange = dateRange.range === 'today';
   const rangeLabel = formatRangeLabel(dateRange);
+  const { fromDate, toDate } = rangeToDates(dateRange);
 
   const pieData = selected
     ? [
@@ -558,7 +578,7 @@ export default function DashboardPage() {
               value={selected?.[cfg.key]}
               Icon={cfg.Icon}
               grad={cfg.grad}
-              href={cfg.href}
+              href={kpiHref(cfg, fromDate, toDate)}
               delta={isTodayRange && cfg.key !== 'uniqueClients' ? trend(selected?.[cfg.key], yest?.[cfg.key]) : null}
             />
           ))}
@@ -582,7 +602,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <Link
-              href="/reports/lead"
+              href={`/reports/lead?fromDate=${fromDate}&toDate=${toDate}`}
               className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors duration-200"
             >
               View all →
@@ -593,7 +613,7 @@ export default function DashboardPage() {
               const count = leadStats[s.key] ?? 0;
               const pct = totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0;
               return (
-                <Link href="/reports/lead" key={s.key}>
+                <Link href={`/reports/lead?status=${s.key}&fromDate=${fromDate}&toDate=${toDate}`} key={s.key}>
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}

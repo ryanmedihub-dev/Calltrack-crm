@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const { protect, isManager } = require('../middleware/auth');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
-const { createDownloadJob } = require('../lib/downloadJobs');
+const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 
 function fmtDuration(seconds) {
   if (!seconds || seconds <= 0) return '0s';
@@ -64,8 +65,9 @@ function resolveStatsRange(range, startDate, endDate) {
 }
 
 // Aggregation-based period stats — no full doc loads
-async function computePeriodStats(start, end) {
+async function computePeriodStats(start, end, employeeId) {
   const match = { timestamp: { $gte: start, $lt: end } };
+  if (employeeId) match.employeeId = new mongoose.Types.ObjectId(employeeId);
 
   const [summary, perHour, employees, notPickupRes, neverAttRes] = await Promise.all([
     CallLog.aggregate([
@@ -418,25 +420,30 @@ router.get('/', protect, isManager, async (req, res) => {
 // (custom also takes ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD, IST calendar dates)
 router.get('/stats', protect, isManager, async (req, res) => {
   try {
-    const { range = 'today', startDate, endDate } = req.query;
+    const { range = 'today', startDate, endDate, employee } = req.query;
+    const employeeId = employee && mongoose.Types.ObjectId.isValid(employee) ? employee : null;
 
     const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
     const { start: ystStart,   end: ystEnd   } = getISTDateBounds(-1);
     const lw7Start = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
     const lw7End   = new Date(ystEnd);
+    const lm30Start = new Date(ystEnd); lm30Start.setDate(lm30Start.getDate() - 30);
+    const lm30End   = new Date(ystEnd);
 
     const isToday = range === 'today';
     const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate);
 
-    const [todayStats, yesterdayStats, lastWeekStats, selectedStats] = await Promise.all([
-      computePeriodStats(todayStart, todayEnd),
-      computePeriodStats(ystStart, ystEnd),
-      computePeriodStats(lw7Start, lw7End),
-      isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd)
+    const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
+      computePeriodStats(todayStart, todayEnd, employeeId),
+      computePeriodStats(ystStart, ystEnd, employeeId),
+      computePeriodStats(lw7Start, lw7End, employeeId),
+      computePeriodStats(lm30Start, lm30End, employeeId),
+      isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId)
     ]);
 
     const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
-    lastWeekStats.period = `${fmtDate(lw7Start)} to ${fmtDate(new Date(lw7End.getTime() - 86400000))}`;
+    lastWeekStats.period  = `${fmtDate(lw7Start)} to ${fmtDate(new Date(lw7End.getTime() - 86400000))}`;
+    lastMonthStats.period = `${fmtDate(lm30Start)} to ${fmtDate(new Date(lm30End.getTime() - 86400000))}`;
 
     const selected = isToday ? todayStats : selectedStats;
     selected.date = range === 'custom'
@@ -449,8 +456,10 @@ router.get('/stats', protect, isManager, async (req, res) => {
         today:     { ...todayStats,     date: fmtDate(todayStart) },
         yesterday: { ...yesterdayStats, date: fmtDate(ystStart) },
         lastWeek:  lastWeekStats,
+        lastMonth: lastMonthStats,
         selected,
         range,
+        employee: employeeId,
         totalToday:     todayStats.totalCalls,
         missedToday:    todayStats.missed,
         incomingToday:  todayStats.incoming,
@@ -546,6 +555,7 @@ router.get('/my-stats', protect, async (req, res) => {
 
 // GET /api/calls/export — CSV export (manager); also registered in the Downloads Center
 router.get('/export', protect, isManager, async (req, res) => {
+  let job = null;
   try {
     const { employeeId, callType, startDate, endDate } = req.query;
     const filter = {};
@@ -559,6 +569,14 @@ router.get('/export', protect, isManager, async (req, res) => {
         filter.timestamp.$lte = ed;
       }
     }
+    const filename = `calls_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
+
+    // Registered before the CSV is built (which can take a while on a large
+    // date range) so the Downloads Center shows a "Processing…" row right
+    // away instead of nothing until the export finishes.
+    try {
+      job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename });
+    } catch {}
 
     const rows = ['Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n'];
     const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1, _id: -1 }).lean().cursor();
@@ -577,12 +595,10 @@ router.get('/export', protect, isManager, async (req, res) => {
       ].join(',') + '\n');
     }
     const csv = rows.join('');
-    const filename = `calls_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    let job = null;
-    try {
-      job = await createDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename, content: csv });
-    } catch {}
+    if (job) {
+      try { job = await completeDownloadJob(job._id, csv); } catch {}
+    }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -592,6 +608,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     }
     return res.status(200).send(csv);
   } catch (err) {
+    if (job) { try { await failDownloadJob(job._id, err.message); } catch {} }
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -682,7 +699,6 @@ router.get('/employee/:id', protect, async (req, res) => {
       if (endDate)   filter.timestamp.$lte = new Date(endDate);
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const mongoose = require('mongoose');
     const [callsRaw, total, [agg]] = await Promise.all([
       CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter),

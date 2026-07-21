@@ -38,6 +38,31 @@ const RANGE_OPTIONS = [
   { key: 'thisWeek', label: 'This Week' },
 ];
 
+/**
+ * Resolves a { range, startDate, endDate } filter value into concrete
+ * { fromDate, toDate } IST calendar-date strings (inclusive on both ends).
+ * Used to deep-link dashboard/overview cards into report pages with a date
+ * filter that covers exactly the same days the card's count was computed
+ * over, so the destination report's total matches the card.
+ */
+export function rangeToDates(value) {
+  const today = todayIST();
+  switch (value?.range) {
+    case 'yesterday': {
+      const d = addDays(today, -1);
+      return { fromDate: d, toDate: d };
+    }
+    case 'thisWeek':
+      return { fromDate: mondayOf(today), toDate: today };
+    case 'custom':
+      if (value.startDate) return { fromDate: value.startDate, toDate: value.endDate || value.startDate };
+      return { fromDate: today, toDate: today };
+    case 'today':
+    default:
+      return { fromDate: today, toDate: today };
+  }
+}
+
 /** Human label for the current filter value — usable outside the component too. */
 export function formatRangeLabel(value) {
   if (!value) return 'Today';

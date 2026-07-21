@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -536,6 +537,19 @@ function Field({ label, children }) {
 const PINNED_STORAGE_KEY = "lr_pinned_numbers";
 
 export default function LeadReportsPage() {
+  return (
+    <Suspense fallback={null}>
+      <LeadReportsPageContent />
+    </Suspense>
+  );
+}
+
+function LeadReportsPageContent() {
+  const searchParams = useSearchParams();
+  const statusParam = searchParams.get("status");
+  const fromDateParam = searchParams.get("fromDate");
+  const toDateParam = searchParams.get("toDate");
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [employees, setEmployees] = useState([]);
@@ -546,13 +560,27 @@ export default function LeadReportsPage() {
   const [pinned, setPinned] = useState({});
 
   const [filters, setFilters] = useState({
-    fromDate: "",
-    toDate: "",
+    fromDate: fromDateParam || "",
+    toDate: toDateParam || "",
     employee: "",
-    status: "",
+    status: statusParam || "",
     source: "",
     leadTime: "",
   });
+
+  // Re-sync when the deep-linked ?status=/?fromDate=/?toDate= change (e.g.
+  // navigating here again from a different overview card) without clobbering
+  // filters the user has since edited.
+  useEffect(() => {
+    if (statusParam || fromDateParam || toDateParam) {
+      setFilters((f) => ({
+        ...f,
+        ...(statusParam && { status: statusParam }),
+        ...(fromDateParam && { fromDate: fromDateParam }),
+        ...(toDateParam && { toDate: toDateParam }),
+      }));
+    }
+  }, [statusParam, fromDateParam, toDateParam]);
 
   useEffect(() => {
     try {

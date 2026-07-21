@@ -1,12 +1,38 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
 const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
-const { createDownloadJob } = require('../lib/downloadJobs');
+const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
+
+// Human-readable description for a single changelog entry, used by GET /logs
+function describeChangelogEntry(action, details) {
+  details = details || {};
+  switch (action) {
+    case 'created':
+      return details.source ? `Lead created via ${details.source}` : 'Lead created';
+    case 'status_changed':
+      return details.from || details.to
+        ? `Status changed from "${details.from || 'unknown'}" to "${details.to || 'unknown'}"`
+        : 'Status changed';
+    case 'assigned':
+      return details.source === 'bulk_upload_replace'
+        ? 'Assigned during bulk upload'
+        : 'Lead assigned to a team member';
+    case 'call_linked':
+      return details.callType ? `Call linked (${details.callType})` : 'Call linked to lead';
+    case 'note_added':
+      return details.text ? `Note added: "${details.text}"` : 'Note added';
+    case 'updated':
+      return 'Lead details updated';
+    default:
+      return 'Lead activity';
+  }
+}
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
 function getISTDateBounds(offsetDays = 0) {
@@ -144,6 +170,66 @@ router.get('/assigned', protect, async (req, res) => {
       Lead.countDocuments({ assignedTo: req.user._id })
     ]);
     return res.json({ success: true, data: { leads, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/leads/logs — activity/audit trail across all leads' changelogs (must be before /:id)
+router.get('/logs', protect, isManager, async (req, res) => {
+  try {
+    const { search, action, employee, page = 1, limit = 40 } = req.query;
+    const pageNum  = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, parseInt(limit) || 40);
+    const skip = (pageNum - 1) * limitNum;
+
+    const leadMatch = {};
+    if (search) {
+      leadMatch.$or = [
+        { name:  { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const changelogMatch = {};
+    if (action) changelogMatch['changelog.action'] = action;
+    if (employee && mongoose.Types.ObjectId.isValid(employee)) {
+      changelogMatch['changelog.changedBy'] = new mongoose.Types.ObjectId(employee);
+    }
+
+    const [result] = await Lead.aggregate([
+      { $match: leadMatch },
+      { $unwind: '$changelog' },
+      ...(Object.keys(changelogMatch).length ? [{ $match: changelogMatch }] : []),
+      { $sort: { 'changelog.changedAt': -1 } },
+      {
+        $facet: {
+          data: [
+            { $skip: skip },
+            { $limit: limitNum },
+            { $project: {
+              _id:         '$changelog._id',
+              leadId:      '$_id',
+              leadName:    '$name',
+              leadPhone:   '$phone',
+              action:      '$changelog.action',
+              timestamp:   '$changelog.changedAt',
+              performedBy: '$changelog.changedByName',
+              details:     '$changelog.details',
+            } },
+          ],
+          total: [{ $count: 'count' }],
+        },
+      },
+    ]);
+
+    const total = result?.total?.[0]?.count || 0;
+    const logs = (result?.data || []).map((l) => ({
+      ...l,
+      description: describeChangelogEntry(l.action, l.details),
+    }));
+
+    return res.json({ success: true, data: { logs, total, page: pageNum, pages: Math.ceil(total / limitNum) } });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -376,6 +462,7 @@ router.post('/from-call', protect, async (req, res) => {
 
 // GET /api/leads/export — CSV export (manager); also registered in the Downloads Center
 router.get('/export', protect, isManager, async (req, res) => {
+  let job = null;
   try {
     const { status, assignedTo, startDate, endDate, search, tags } = req.query;
     const filter = {};
@@ -397,6 +484,14 @@ router.get('/export', protect, isManager, async (req, res) => {
         filter.createdAt.$lte = ed;
       }
     }
+    const filename = `leads_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
+
+    // Registered before the CSV is built (which can take a while over a large
+    // lead set) so the Downloads Center shows a "Processing…" row right away
+    // instead of nothing until the export finishes.
+    try {
+      job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Leads Export', filename });
+    } catch {}
 
     const rows = ['Name,Phone,Email,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n'];
     const cursor = Lead.find(filter).populate('assignedTo', 'name').sort({ createdAt: -1 }).lean().cursor();
@@ -418,12 +513,10 @@ router.get('/export', protect, isManager, async (req, res) => {
       ].join(',') + '\n');
     }
     const csv = rows.join('');
-    const filename = `leads_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    let job = null;
-    try {
-      job = await createDownloadJob({ ownerId: req.user._id, label: 'Leads Export', filename, content: csv });
-    } catch {}
+    if (job) {
+      try { job = await completeDownloadJob(job._id, csv); } catch {}
+    }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -433,6 +526,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     }
     return res.status(200).send(csv);
   } catch (err) {
+    if (job) { try { await failDownloadJob(job._id, err.message); } catch {} }
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
   }
 });

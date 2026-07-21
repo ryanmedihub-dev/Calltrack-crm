@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import api from '../../../../lib/api';
 import { fmtDate, fmtTime } from '../../../../lib/timezone';
 import { DataTable } from '../../../../components/report-shared';
@@ -101,9 +102,9 @@ export default function EmployeeDetailPage() {
     <div className="space-y-5 animate-fade-in">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm">
-        <a href="/reports/Employess" className="transition-colors" style={{ color:'#94A3B8' }}
+        <Link href="/reports/Employess" className="transition-colors" style={{ color:'#94A3B8' }}
           onMouseEnter={e=>e.currentTarget.style.color='#2563EB'}
-          onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>← Employees</a>
+          onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>← Employees</Link>
         <span style={{ color:'#E2E8F0' }}>/</span>
         <span className="font-medium" style={{ color:'#0F172A' }}>{employee?.name||'Loading…'}</span>
       </div>

@@ -17,8 +17,42 @@ async function createDownloadJob({ ownerId, label, filename, mimeType = 'text/cs
     mimeType,
     content,
     sizeBytes,
+    status: 'ready',
     expiresAt: new Date(Date.now() + TTL_MS),
   });
 }
 
-module.exports = { createDownloadJob, MAX_CONTENT_BYTES };
+// Registers the job before its file content exists, so the Downloads Center
+// shows a "Processing…" row the moment a large server-side export (CallLog/Lead
+// cursor scans that can take a while) starts, instead of nothing appearing
+// until the whole CSV has been built.
+async function createPendingDownloadJob({ ownerId, label, filename, mimeType = 'text/csv' }) {
+  return DownloadJob.create({
+    owner: ownerId,
+    label,
+    filename,
+    mimeType,
+    status: 'processing',
+    expiresAt: new Date(Date.now() + TTL_MS),
+  });
+}
+
+async function completeDownloadJob(jobId, content) {
+  const sizeBytes = Buffer.byteLength(content, 'utf8');
+  if (sizeBytes > MAX_CONTENT_BYTES) {
+    return failDownloadJob(jobId, `File too large (${sizeBytes} bytes, max ${MAX_CONTENT_BYTES})`);
+  }
+  return DownloadJob.findByIdAndUpdate(jobId, { content, sizeBytes, status: 'ready' }, { new: true });
+}
+
+async function failDownloadJob(jobId, errorMessage) {
+  return DownloadJob.findByIdAndUpdate(jobId, { status: 'failed', error: errorMessage }, { new: true });
+}
+
+module.exports = {
+  createDownloadJob,
+  createPendingDownloadJob,
+  completeDownloadJob,
+  failDownloadJob,
+  MAX_CONTENT_BYTES,
+};

@@ -24,7 +24,7 @@ export default function PerformanceReportsPage() {
       try {
         const r = await api.get('/api/calls/stats');
         const d = r.data?.data;
-        const key = period === 'today' ? 'today' : period === 'week' ? 'thisWeek' : 'thisMonth';
+        const key = period === 'today' ? 'today' : period === 'week' ? 'lastWeek' : 'lastMonth';
         setDialers(d?.[key]?.topDialers || d?.today?.topDialers || []);
       } catch { setDialers([]); }
       setLoading(false);

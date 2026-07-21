@@ -6,7 +6,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis
 import api from '../../../../lib/api';
 import { STATUSES, statusStyle, statusLabel } from '../../../../lib/leadStatus';
 import { LeadStatusBadge, ChartTip, Ico } from '../../../../components/report-shared';
-import DateRangeFilter, { formatRangeLabel } from '../../../../components/DateRangeFilter';
+import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../../components/DateRangeFilter';
 
 const LeadIco = ({ s = 16 }) => <Ico size={s}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="23" y1="11" x2="17" y2="11" /><line x1="20" y1="8" x2="20" y2="14" /></Ico>;
 const PipelineIco = ({ s = 16 }) => <Ico size={s}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></Ico>;
@@ -67,6 +67,7 @@ export default function LeadsOverviewPage() {
   const barData = STATUSES.map(s => ({ name: statusLabel(s), count: counts[s] || 0 }));
   const convRate = total > 0 ? Math.round(((counts.converted || 0) / total) * 100) : 0;
   const rangeLabel = formatRangeLabel(dateRange);
+  const { fromDate, toDate } = rangeToDates(dateRange);
 
   const quickStats = [
     { label: 'Total Leads', value: total, color: '#2563EB', icon: <LeadIco /> },
@@ -148,7 +149,7 @@ export default function LeadsOverviewPage() {
             const style = statusStyle(s);
             return (
               <motion.div key={s} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                <Link href="/reports/lead">
+                <Link href={`/reports/lead?status=${s}&fromDate=${fromDate}&toDate=${toDate}`}>
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 cursor-pointer hover:border-blue-200 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300">
                     <div className="flex items-center justify-between mb-2">
                       <LeadStatusBadge status={s} style={style} label={statusLabel(s)} />

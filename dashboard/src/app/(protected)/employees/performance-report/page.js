@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../../lib/api';
 import { StatCard, Skeleton, ChartTip, PhoneIco, CheckIco, UsersIco } from '../../../../components/report-shared';
@@ -7,6 +8,17 @@ import { StatCard, Skeleton, ChartTip, PhoneIco, CheckIco, UsersIco } from '../.
 const PERIODS = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }];
 
 export default function EmployeePerformanceReportPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmployeePerformanceReportContent />
+    </Suspense>
+  );
+}
+
+function EmployeePerformanceReportContent() {
+  const searchParams = useSearchParams();
+  const empParam = searchParams.get('emp');
+
   const [employees, setEmployees] = useState([]);
   const [selected, setSelected] = useState('');
   const [period, setPeriod] = useState('week');
@@ -18,9 +30,10 @@ export default function EmployeePerformanceReportPage() {
     api.get('/api/employees').then(r => {
       const emps = r.data?.data || [];
       setEmployees(emps);
-      if (emps.length) setSelected(emps[0]._id);
+      const preselect = empParam && emps.some(e => e._id === empParam) ? empParam : emps[0]?._id;
+      if (preselect) setSelected(preselect);
     }).catch(() => {}).finally(() => setLoadingEmp(false));
-  }, []);
+  }, [empParam]);
 
   useEffect(() => {
     if (!selected) return;

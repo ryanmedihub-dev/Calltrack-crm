@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   BarChart,
   Bar,
@@ -411,8 +412,8 @@ function PinnedNumber({ number, pinned, onToggle }) {
   );
 }
 
-/* Generic inline text editor used for Call History "Notes" and "Remarks" columns.
-   Notes save via PATCH /api/calls/:id/notes, Remarks via PATCH /api/calls/:id/remarks. */
+/* Generic inline text editor used for the Call History "Notes" column.
+   Saves via PATCH /api/calls/:id/notes. */
 function EditableCell({ initial, onSave, placeholder = "Add note" }) {
   const [value, setValue] = useState(initial || "");
   const [editing, setEditing] = useState(false);
@@ -536,6 +537,20 @@ function Field({ label, children }) {
 const PINNED_STORAGE_KEY = "cr_pinned_numbers";
 
 export default function PeriodicReportsPage() {
+  return (
+    <Suspense fallback={null}>
+      <PeriodicReportsPageContent />
+    </Suspense>
+  );
+}
+
+function PeriodicReportsPageContent() {
+  const searchParams = useSearchParams();
+  const callTypeParam = searchParams.get("callType");
+  const employeeParam = searchParams.get("employeeId");
+  const fromDateParam = searchParams.get("fromDate");
+  const toDateParam = searchParams.get("toDate");
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [employees, setEmployees] = useState([]);
@@ -546,13 +561,28 @@ export default function PeriodicReportsPage() {
   const [pinned, setPinned] = useState({});
 
   const [filters, setFilters] = useState({
-    fromDate: "",
-    toDate: "",
-    employee: "",
-    callType: "",
+    fromDate: fromDateParam || "",
+    toDate: toDateParam || "",
+    employee: employeeParam || "",
+    callType: callTypeParam || "",
     duration: "",
     callTime: "",
   });
+
+  // Re-sync when deep-linked ?callType=/?employeeId=/?fromDate=/?toDate= change
+  // (e.g. arriving here again from a different dashboard card) without
+  // clobbering filters the user has since edited.
+  useEffect(() => {
+    if (callTypeParam || employeeParam || fromDateParam || toDateParam) {
+      setFilters((f) => ({
+        ...f,
+        ...(callTypeParam && { callType: callTypeParam }),
+        ...(employeeParam && { employee: employeeParam }),
+        ...(fromDateParam && { fromDate: fromDateParam }),
+        ...(toDateParam && { toDate: toDateParam }),
+      }));
+    }
+  }, [callTypeParam, employeeParam, fromDateParam, toDateParam]);
 
   useEffect(() => {
     try {
@@ -611,12 +641,6 @@ export default function PeriodicReportsPage() {
   const saveNote = async (callId, notes) => {
     try {
       await api.patch(`/api/calls/${callId}/notes`, { notes });
-    } catch {}
-  };
-
-  const saveRemarks = async (callId, remarks) => {
-    try {
-      await api.patch(`/api/calls/${callId}/remarks`, { remarks });
     } catch {}
   };
 
