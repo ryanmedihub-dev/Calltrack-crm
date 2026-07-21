@@ -86,8 +86,30 @@ export async function getPendingCount() {
 }
 
 // ── Main sync ─────────────────────────────────────────────────────
+//
+// syncCallLogs() is triggered from several independent places (a 60s timer,
+// the app-foreground handler, each screen's mount effect, pull-to-refresh) with
+// no coordination between them. On a slow connection a single sync can still be
+// in flight when the next trigger fires, so without a guard here every one of
+// those triggers fires its own overlapping POST /api/calls/sync — each one
+// separately flipping its caller's "syncing" UI state, which is what shows up
+// as the app "blinking". Collapsing concurrent callers onto one in-flight
+// promise, plus a short cooldown between attempts, fixes that at the source.
+const MIN_SYNC_INTERVAL_MS = 15000;
+let syncInFlight = null;
+let lastSyncAt = 0;
 
-export async function syncCallLogs() {
+export function syncCallLogs() {
+  if (syncInFlight) return syncInFlight;
+  if (Date.now() - lastSyncAt < MIN_SYNC_INTERVAL_MS) {
+    return Promise.resolve({ synced: 0, message: 'Synced recently' });
+  }
+  syncInFlight = doSyncCallLogs().finally(() => { syncInFlight = null; });
+  return syncInFlight;
+}
+
+async function doSyncCallLogs() {
+  lastSyncAt = Date.now();
   if (__DEV__ && console.tron) {
     console.tron.log('🔄 syncCallLogs triggered');
   }

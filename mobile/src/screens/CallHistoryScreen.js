@@ -13,6 +13,9 @@ import { Colors, CALL_TYPE } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import { groupCallsByDate } from '../utils/groupCallsByDate';
 import { syncCallLogs } from '../services/callLogService';
+import { getCached, setCached } from '../utils/cache';
+
+const CALLS_CACHE_KEY = 'calls_page1';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -306,17 +309,26 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   const searchRef = useRef(null);
 
   useEffect(() => {
+    // Paint instantly from whatever was cached last time instead of showing a
+    // blank/skeleton screen while the network round trip is still in flight.
+    getCached(CALLS_CACHE_KEY).then((cached) => {
+      if (cached) setCalls(cached);
+    });
     AsyncStorage.getItem('user').then((str) => {
       if (str) {
         const u = JSON.parse(str);
         setUserId(u._id);
         setUserName(u.name || '');
+        // Fetch the call list immediately instead of waiting on syncCallLogs()
+        // to finish first — sync can take a while on a slow connection, and
+        // there's no reason the list needs to block on it.
+        fetchCalls(1, u._id);
         setSyncing(true);
         syncCallLogs()
           .catch(() => {})
           .finally(() => {
-            fetchCalls(1, u._id);
             setSyncing(false);
+            fetchCalls(1, u._id); // pick up anything the sync just landed
           });
       }
     });
@@ -334,6 +346,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
       setCalls((prev) => (p === 1 ? data : [...prev, ...data]));
       setHasMore(p < res.data.data.pages);
       setPage(p);
+      if (p === 1) setCached(CALLS_CACHE_KEY, data);
     } catch {} finally { setLoading(false); }
   };
 

@@ -8,6 +8,9 @@ import api from '../lib/api';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import MiniCalendar from '../components/MiniCalendar';
+import { getCached, setCached } from '../utils/cache';
+
+const LEADS_CACHE_KEY = 'leads_assigned';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -407,11 +410,18 @@ export default function LeadsScreen() {
     try {
       const res  = await api.get('/api/leads/assigned', { params: { limit: 200 } });
       const data = res.data.data;
-      setLeads(Array.isArray(data) ? data : (data?.leads || []));
+      const list = Array.isArray(data) ? data : (data?.leads || []);
+      setLeads(list);
+      setCached(LEADS_CACHE_KEY, list);
     } catch {}
   };
 
   useEffect(() => {
+    // Paint instantly from the last cached list (e.g. after a tab-switch
+    // remount) instead of blanking back to the full-screen spinner every time.
+    getCached(LEADS_CACHE_KEY).then((cached) => {
+      if (cached) { setLeads(cached); setLoading(false); }
+    });
     fetchLeads().finally(() => setLoading(false));
   }, []);
 

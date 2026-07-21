@@ -8,6 +8,7 @@ import api from '../lib/api';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import { formatDuration } from '../utils/formatDuration';
+import { getCached, setCached } from '../utils/cache';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -231,24 +232,33 @@ export default function AnalyticsScreen() {
         api.get('/api/calls/my-stats', { params: { period: p } }),
         api.get(`/api/calls/employee/${uid}`, { params: { page: 1, limit: 300, ...getPeriodParams(p) } }),
       ]);
-      setStats(sr.data.data);
-      setCalls(cr.data.data.calls || []);
+      const statsData = sr.data.data;
+      const callsData = cr.data.data.calls || [];
+      setStats(statsData);
+      setCalls(callsData);
+      setCached(`analytics_${p}`, { stats: statsData, calls: callsData });
     } catch {}
   }, []);
 
   useEffect(() => {
+    // Paint instantly from the last cached period data instead of a blank
+    // screen while the network round trip is in flight.
+    getCached(`analytics_${period}`).then((cached) => {
+      if (cached) { setStats(cached.stats); setCalls(cached.calls); setLoading(false); }
+    });
     AsyncStorage.getItem('user').then((str) => {
-      if (str) {
-        const u = JSON.parse(str);
-        setUserId(u._id);
-        load(u._id, period).finally(() => setLoading(false));
-      } else {
-        setLoading(false);
-      }
+      if (str) setUserId(JSON.parse(str)._id);
+      else setLoading(false);
     });
   }, []);
 
-  useEffect(() => { if (userId) load(userId, period); }, [period, userId]);
+  // Single source of truth for fetching — previously the mount effect above
+  // also called load() directly, so the first time userId got set this effect
+  // and that call fired two concurrent load() calls (4 concurrent requests).
+  useEffect(() => {
+    if (!userId) return;
+    load(userId, period).finally(() => setLoading(false));
+  }, [period, userId]);
 
   const onRefresh = async () => {
     setRefreshing(true);
