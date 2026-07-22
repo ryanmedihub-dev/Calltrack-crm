@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['manager', 'employee'], default: 'employee' },
   phone: { type: String },
   deviceId:    { type: String },
+  tlName:      { type: String, default: '' },
   fcmToken:    { type: String, default: null },
   dailyTarget: { type: Number, default: 0 },
   isActive:    { type: Boolean, default: true },

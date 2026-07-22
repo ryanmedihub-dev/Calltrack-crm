@@ -99,8 +99,9 @@ export default function AddNoteModal({ call, visible, onClose }) {
     if (call._id) {
       try {
         await api.patch(`/api/calls/${call._id}/notes`, {
-          notes:      note       || undefined,
-          callStatus: undefined,
+          notes:        note       || undefined,
+          callStatus:   undefined,
+          followUpDate: followDate,
         });
       } catch {}
     }

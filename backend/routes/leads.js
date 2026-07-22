@@ -658,29 +658,29 @@ router.post('/:id/note', protect, async (req, res) => {
 router.patch('/:id/link-call', protect, isManager, async (req, res) => {
   try {
     const { callId } = req.body;
-    await CallLog.findByIdAndUpdate(callId, { leadId: req.params.id });
+    if (!callId) return res.status(400).json({ success: false, error: 'callId required' });
     const call = await CallLog.findById(callId).populate('employeeId', 'name phone');
-    if (call) {
-      await Lead.findByIdAndUpdate(req.params.id, {
-        $inc: { attempts: 1 },
-        $set: {
-          lastCallAt:            call.timestamp,
-          lastCallType:          call.callType,
-          lastCallDuration:      call.duration,
-          lastCallEmployee:      call.employeeId?.name  || 'Unknown',
-          lastCallEmployeePhone: call.employeeId?.phone || '',
-        },
-        $addToSet: { callLogs: callId },
-        $push: {
-          changelog: {
-            changedBy:     req.user._id,
-            changedByName: req.user.name,
-            action:        'call_linked',
-            details:       { callId, callType: call.callType, duration: call.duration, timestamp: call.timestamp }
-          }
+    if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+    await CallLog.findByIdAndUpdate(callId, { leadId: req.params.id });
+    await Lead.findByIdAndUpdate(req.params.id, {
+      $inc: { attempts: 1 },
+      $set: {
+        lastCallAt:            call.timestamp,
+        lastCallType:          call.callType,
+        lastCallDuration:      call.duration,
+        lastCallEmployee:      call.employeeId?.name  || 'Unknown',
+        lastCallEmployeePhone: call.employeeId?.phone || '',
+      },
+      $addToSet: { callLogs: callId },
+      $push: {
+        changelog: {
+          changedBy:     req.user._id,
+          changedByName: req.user.name,
+          action:        'call_linked',
+          details:       { callId, callType: call.callType, duration: call.duration, timestamp: call.timestamp }
         }
-      });
-    }
+      }
+    });
     return res.json({ success: true, message: 'Call linked to lead' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

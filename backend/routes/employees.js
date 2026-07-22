@@ -24,10 +24,10 @@ router.get('/', protect, isManager, async (req, res) => {
 // POST /api/employees
 router.post('/', protect, isManager, async (req, res) => {
   try {
-    const { name, email, password, phone, deviceId } = req.body;
+    const { name, email, password, phone, deviceId, tlName } = req.body;
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ success: false, error: 'Email already registered' });
-    const user = await User.create({ name, email, password, role: 'employee', phone, deviceId });
+    const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName });
     return res.status(201).json({ success: true, data: user, message: 'Employee created' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -49,6 +49,9 @@ router.get('/:id', protect, isManager, async (req, res) => {
 router.patch('/:id/status', protect, isManager, async (req, res) => {
   try {
     const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'isActive must be a boolean' });
+    }
     const employee = await User.findByIdAndUpdate(req.params.id, { isActive }, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     return res.json({ success: true, data: employee });
@@ -75,8 +78,8 @@ router.patch('/:id/target', protect, isManager, async (req, res) => {
 // PUT /api/employees/:id
 router.put('/:id', protect, isManager, async (req, res) => {
   try {
-    const { name, phone, deviceId } = req.body;
-    const employee = await User.findByIdAndUpdate(req.params.id, { name, phone, deviceId }, { new: true });
+    const { name, phone, deviceId, tlName } = req.body;
+    const employee = await User.findByIdAndUpdate(req.params.id, { name, phone, deviceId, tlName }, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     return res.json({ success: true, data: employee });
   } catch (err) {

@@ -29,6 +29,7 @@ router.post('/', protect, isManager, async (req, res) => {
 router.put('/:id', protect, isManager, async (req, res) => {
   try {
     const { title, category, content } = req.body;
+    if (!title || !content) return res.status(400).json({ success: false, error: 'Title and content required' });
     const script = await CallScript.findOneAndUpdate(
       { _id: req.params.id, managerId: req.user._id },
       { title, category, content, updatedAt: new Date() },

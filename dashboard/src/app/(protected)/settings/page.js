@@ -69,7 +69,7 @@ export default function SettingsPage() {
   const [pw,        setPw]        = useState({ current:'', next:'', confirm:'' });
   const [prefs,     setPrefs]     = useState(DEFAULT_PREFS);
   const [employees, setEmployees] = useState([]);
-  const [newEmp,    setNewEmp]    = useState({ name:'', email:'', password:'', phone:'', deviceId:'' });
+  const [newEmp,    setNewEmp]    = useState({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'' });
   const [creatingEmp, setCreatingEmp] = useState(false);
   const [empSaving,   setEmpSaving]   = useState(false);
 
@@ -114,7 +114,7 @@ export default function SettingsPage() {
     try {
       await api.post('/api/employees', newEmp);
       toast.success('Employee created');
-      setNewEmp({ name:'', email:'', password:'', phone:'', deviceId:'' });
+      setNewEmp({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'' });
       setCreatingEmp(false); loadEmployees();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed to create employee'); }
     finally { setEmpSaving(false); }
@@ -318,6 +318,7 @@ export default function SettingsPage() {
                       { key:'password', label:'Password',   type:'password', placeholder:'Min 6 chars' },
                       { key:'phone',    label:'Phone',      type:'text',     placeholder:'10-digit' },
                       { key:'deviceId', label:'Device ID',  type:'text',     placeholder:'Optional' },
+                      { key:'tlName',   label:'TL Name',    type:'text',     placeholder:'Optional' },
                     ].map(({ key, label, type, placeholder }) => (
                       <div key={key}>
                         <label className="block text-xs font-medium mb-1" style={{ color:'#94A3B8' }}>{label}</label>

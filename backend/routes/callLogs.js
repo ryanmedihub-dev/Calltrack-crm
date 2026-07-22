@@ -639,7 +639,7 @@ router.get('/pending-followups', protect, async (req, res) => {
 // PATCH /api/calls/:id/notes — add notes or status to a call log
 router.patch('/:id/notes', protect, async (req, res) => {
   try {
-    const { notes, callStatus } = req.body;
+    const { notes, callStatus, followUpDate } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
@@ -650,11 +650,13 @@ router.patch('/:id/notes', protect, async (req, res) => {
     if (callStatus !== undefined) call.callStatus = callStatus;
     await call.save();
 
-    // Propagate callStatus/notes to linked lead's tracking fields
+    // Propagate callStatus/notes/followUpDate to linked lead's tracking fields
+    // (follow-up dates live on Lead, not CallLog — see GET /pending-followups)
     if (call.leadId) {
       const leadUpdate = {};
       if (callStatus) leadUpdate.lastCallSummary = callStatus;
       if (notes && notes.trim()) leadUpdate.lastCallNote = notes.trim();
+      if (followUpDate !== undefined) leadUpdate.followUpDate = followUpDate ? new Date(followUpDate) : null;
       if (Object.keys(leadUpdate).length) {
         await Lead.findByIdAndUpdate(call.leadId, { $set: leadUpdate }).catch(() => {});
       }

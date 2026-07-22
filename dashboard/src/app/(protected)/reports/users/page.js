@@ -94,11 +94,11 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', phone: '' });
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', phone: '', tlName: '' });
   const [addSaving, setAddSaving] = useState(false);
 
   const [editUser, setEditUser] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', deviceId: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', deviceId: '', tlName: '' });
   const [editSaving, setEditSaving] = useState(false);
 
   const [deleteUser, setDeleteUser] = useState(null);
@@ -126,7 +126,7 @@ export default function UsersPage() {
       await api.post('/api/employees', addForm);
       toast.success('User added');
       setShowAdd(false);
-      setAddForm({ name: '', email: '', password: '', phone: '' });
+      setAddForm({ name: '', email: '', password: '', phone: '', tlName: '' });
       fetchUsers();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to add user');
@@ -135,7 +135,7 @@ export default function UsersPage() {
     }
   };
 
-  const openEdit = (u) => { setEditUser(u); setEditForm({ name: u.name || '', phone: u.phone || '', deviceId: u.deviceId || '' }); };
+  const openEdit = (u) => { setEditUser(u); setEditForm({ name: u.name || '', phone: u.phone || '', deviceId: u.deviceId || '', tlName: u.tlName || '' }); };
   const handleEdit = async (e) => {
     e.preventDefault();
     setEditSaving(true);
@@ -185,6 +185,7 @@ export default function UsersPage() {
       ),
     },
     { key: 'phone', label: 'Phone', render: (u) => u.phone || '—' },
+    { key: 'tlName', label: 'TL Name', render: (u) => u.tlName || '—' },
     { key: 'isActive', label: 'Status', sortable: false, searchable: false, render: (u) => <StatusToggle user={u} onSaved={patchLocal} /> },
     { key: 'dailyTarget', label: 'Daily Target', align: 'right', sortable: false, searchable: false, render: (u) => <TargetCell user={u} onSaved={patchLocal} /> },
     { key: 'createdAt', label: 'Joined', align: 'right', searchable: false, render: (u) => fmtDate(u.createdAt) },
@@ -255,6 +256,7 @@ export default function UsersPage() {
                 { k: 'email', l: 'Email', t: 'email', ph: 'john@company.com', req: true },
                 { k: 'password', l: 'Password', t: 'password', ph: 'Min 6 characters', req: true },
                 { k: 'phone', l: 'Phone (optional)', t: 'text', ph: '+91 99999 99999', req: false },
+                { k: 'tlName', l: 'TL Name (optional)', t: 'text', ph: 'e.g. Priya Singh', req: false },
               ].map(({ k, l, t, ph, req }) => (
                 <div key={k}>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
@@ -298,6 +300,10 @@ export default function UsersPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Device ID (optional)</label>
                 <input type="text" value={editForm.deviceId} onChange={(e) => setEditForm({ ...editForm, deviceId: e.target.value })} className="form-input" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">TL Name</label>
+                <input type="text" value={editForm.tlName} onChange={(e) => setEditForm({ ...editForm, tlName: e.target.value })} className="form-input" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>

@@ -4,6 +4,9 @@ import api from '../lib/api';
 const PREFIX = 'callnote_';
 
 function makeKey(call) {
+  if (call._id) return `${PREFIX}id_${call._id}`;
+  // Fallback for calls without a server id — collides across repeat calls to
+  // the same number/day/type, so only used when _id is unavailable.
   const date = new Date(call.timestamp).toISOString().split('T')[0];
   const num  = (call.contactNumber || '').replace(/\D/g, '');
   return `${PREFIX}${num}_${date}_${call.callType}`;

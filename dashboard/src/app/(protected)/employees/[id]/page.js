@@ -120,6 +120,7 @@ export default function EmployeeDetailPage() {
             <p className="text-lg font-bold" style={{ color:'#0F172A' }}>{employee.name}</p>
             <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.email}</p>
             {employee.phone && <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.phone}</p>}
+            {employee.tlName && <p className="text-sm" style={{ color:'#94A3B8' }}>TL: {employee.tlName}</p>}
           </div>
           <span className="badge"
             style={employee.isActive
