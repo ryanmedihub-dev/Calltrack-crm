@@ -8,6 +8,7 @@ import { Colors } from '../theme/colors';
 import TagChip from './TagChip';
 import { TAGS } from '../utils/tagColors';
 import { getNote, saveNote } from '../utils/callNotes';
+import { queueNoteUpdate } from '../services/callLogService';
 import api from '../lib/api';
 
 function DatePicker({ value, onChange }) {
@@ -95,15 +96,20 @@ export default function AddNoteModal({ call, visible, onClose }) {
       tags,
       followUp: followDate ? { date: followDate, done: false } : null,
     });
-    // Persist to backend so follow-up survives reinstall / other devices
+    // Persist to backend immediately so follow-up survives reinstall / other
+    // devices. If offline/failed, queue it — the same triggers that already
+    // drive syncCallLogs() (foreground, timer, call-ended) will retry it.
     if (call._id) {
+      const patch = {
+        notes:        note       || undefined,
+        callStatus:   undefined,
+        followUpDate: followDate,
+      };
       try {
-        await api.patch(`/api/calls/${call._id}/notes`, {
-          notes:        note       || undefined,
-          callStatus:   undefined,
-          followUpDate: followDate,
-        });
-      } catch {}
+        await api.patch(`/api/calls/${call._id}/notes`, patch);
+      } catch {
+        await queueNoteUpdate(call._id, patch);
+      }
     }
     setSaving(false);
     onClose?.();

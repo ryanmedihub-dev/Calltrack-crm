@@ -90,6 +90,7 @@ export default function PostCallScreen({ call, onDone }) {
 
   const handleSkip = () => {
     if (saving || savingWa) return;
+    syncCallLogs().catch(() => {}); // fire-and-forget so a skipped call still syncs promptly
     onDone();
   };
 

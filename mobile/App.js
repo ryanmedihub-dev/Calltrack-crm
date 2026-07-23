@@ -24,7 +24,7 @@ import * as Notifications from 'expo-notifications';
 import { requestCallPermissions, requestOverlayPermission } from './src/services/phoneStateService';
 import { applyTrackedSim } from './src/services/simService';
 import { getPendingFollowUps } from './src/utils/callNotes';
-import { syncCallLogs, processPendingQueue, getPendingCount } from './src/services/callLogService';
+import { syncCallLogs, processPendingQueue, getPendingCount, flushPendingNoteUpdates } from './src/services/callLogService';
 import { setLogoutCallback } from './src/lib/api';
 
 const { CallLogModule } = NativeModules;
@@ -191,9 +191,14 @@ function App() {
       finally { isCheckingRef.current = false; }
     };
 
-    // Path 1: Direct event from ContentObserver (app is alive during call)
+    // Path 1: Direct event from ContentObserver (app is alive during call).
+    // Trigger sync immediately (not just the popup) so the call log shows up
+    // on the dashboard right away instead of waiting for the 60s timer —
+    // syncCallLogs()'s in-flight/cooldown guard makes this safe to call
+    // alongside every other trigger.
     const callEndedSub = DeviceEventEmitter.addListener('onCallEnded', (data) => {
       notifyPostCall(data);
+      doSync();
     });
 
     // Path 2: Native onResume signal (app was killed, native stored the call)
@@ -225,6 +230,7 @@ function App() {
     syncTimer.current = setInterval(doSync, 60_000);
 
     processPendingQueue().then(() => getPendingCount().then(setPendingCount));
+    flushPendingNoteUpdates();
     refreshFollowUpBadge();
     pollNativePending();
     setTimeout(() => pollNativePending(), 1500);
@@ -241,6 +247,7 @@ function App() {
 
   const doSync = async () => {
     try { await syncCallLogs(); } catch {}
+    flushPendingNoteUpdates();
   };
 
   const refreshFollowUpBadge = async () => {

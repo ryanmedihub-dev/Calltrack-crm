@@ -166,6 +166,45 @@ async function doSyncCallLogs() {
   }
 }
 
+// ── Pending note/follow-up updates (offline retry for AddNoteModal) ─
+//
+// AddNoteModal PATCHes /api/calls/:id/notes immediately on Save for
+// "webhook-like" instant sync, but a plain try/catch around that call means
+// an update made while offline was previously just lost. Queue it here by
+// call id (exact match, no fuzzy phone/timestamp matching needed since the
+// call is already a synced backend record with a real _id) and flush it
+// from the same triggers that already drive syncCallLogs().
+const NOTE_QUEUE_KEY = 'calltrack_pending_note_updates';
+
+export async function queueNoteUpdate(callId, patch) {
+  try {
+    const raw   = await AsyncStorage.getItem(NOTE_QUEUE_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    const next  = queue.filter((q) => q.callId !== callId); // latest edit wins
+    next.push({ callId, patch, queuedAt: Date.now() });
+    await AsyncStorage.setItem(NOTE_QUEUE_KEY, JSON.stringify(next.slice(-200)));
+  } catch {}
+}
+
+export async function flushPendingNoteUpdates() {
+  try {
+    const raw = await AsyncStorage.getItem(NOTE_QUEUE_KEY);
+    if (!raw) return;
+    const queue = JSON.parse(raw);
+    if (!queue.length) return;
+
+    const remaining = [];
+    for (const item of queue) {
+      try {
+        await api.patch(`/api/calls/${item.callId}/notes`, item.patch);
+      } catch {
+        remaining.push(item);
+      }
+    }
+    await AsyncStorage.setItem(NOTE_QUEUE_KEY, JSON.stringify(remaining));
+  } catch {}
+}
+
 export async function getLastSyncTime() {
   const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
   return raw ? new Date(parseInt(raw, 10)) : null;
