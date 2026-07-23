@@ -489,6 +489,8 @@ export default function DashboardPage() {
       setLiveFeed((prev) => [data, ...prev].slice(0, 30));
       fetchStats();
     });
+
+
     return () => {
       clearInterval(interval);
       channel.unbind_all();
@@ -915,14 +917,7 @@ export default function DashboardPage() {
                             {fmtTime(log.timestamp, timezone)}
                           </td>
                           <td className="px-4 py-3">
-                            {!log.hasLead && (
-                              <button
-                                onClick={() => setLeadModal(log)}
-                                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-colors duration-200 border border-blue-100 hover:border-blue-600 whitespace-nowrap"
-                              >
-                                + Lead
-                              </button>
-                            )}
+                            {log.remarks || '—'}
                           </td>
                         </motion.tr>
                       ))}
