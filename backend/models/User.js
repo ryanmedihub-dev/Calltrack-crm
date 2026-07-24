@@ -10,7 +10,7 @@ const userSchema = new mongoose.Schema({
   deviceId:    { type: String },
   tlName:      { type: String, default: '' },
   fcmToken:    { type: String, default: null },
-  dailyTarget: { type: Number, default: 0 },
+  dailyTarget: { type: Number, default: 100 },
   isActive:    { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });

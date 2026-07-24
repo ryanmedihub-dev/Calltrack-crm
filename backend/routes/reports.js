@@ -4,6 +4,8 @@ const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
+const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
+const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 
 function fmtDuration(seconds) {
   if (!seconds || seconds <= 0) return '0s';
@@ -39,6 +41,7 @@ function istDayStart(offsetDays = 0) {
 // Helper: get employee display name from a populated call doc
 function empName(c)  { return c.employeeId?.name  || 'Unknown'; }
 function empPhone(c) { return c.employeeId?.phone || ''; }
+function empTL(c)    { return c.employeeId?.tlName || ''; }
 
 // IST-aware bucketing helpers (server runs in UTC on most hosts — never use
 // Date#getHours()/#toLocaleDateString() without timeZone, it silently
@@ -81,7 +84,7 @@ function applyCallTimeFilter(filter, callTime) {
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
     const {
-      startDate, endDate, employeeId, callType, duration, callTime,
+      startDate, endDate, employeeId, callType, duration, callTime, tlName,
       tab = 'summary', page = 1, limit = 100
     } = req.query;
 
@@ -90,12 +93,16 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 
     const filter = { timestamp: { $gte: start, $lte: end } };
     if (employeeId) filter.employeeId = employeeId;
+    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
     applyDurationFilter(filter, duration);
     applyCallTimeFilter(filter, callTime);
 
+    // Only the fields actually read below (notes/callStatus/leadId/synced are
+    // never used by this route) — cuts payload/memory for wide date ranges.
     const calls = await CallLog.find(filter)
-      .populate('employeeId', 'name phone')
+      .select('employeeId callType contactNumber contactName duration timestamp')
+      .populate('employeeId', 'name phone tlName')
       .sort({ timestamp: -1, _id: -1 })
       .lean();
 
@@ -118,7 +125,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
       if (!id) return;
       if (!empSummary[id]) empSummary[id] = {
-        employeeId: id, employeeName: empName(c),
+        employeeId: id, employeeName: empName(c), tlName: empTL(c),
         totalCalls: 0, totalDuration: 0,
         incoming: 0, incomingConnected: 0, incomingDuration: 0,
         outgoing: 0, outgoingConnected: 0, outgoingDuration: 0,
@@ -384,16 +391,34 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       const pageNum = parseInt(page), pageSize = parseInt(limit);
       const total = await CallLog.countDocuments(filter);
       const historyCalls = await CallLog.find(filter)
-        .populate('employeeId', 'name phone')
+        .populate('employeeId', 'name phone tlName')
         .sort({ timestamp: -1, _id: -1 })
         .skip((pageNum - 1) * pageSize)
         .limit(pageSize)
         .lean();
+
+      // Global first-ever-contact check for the visible page only (cheap —
+      // one page's worth of numbers), mirrors the New/Repeat export column.
+      const numbers = [...new Set(historyCalls.map((c) => c.contactNumber).filter(Boolean))];
+      const firstSeenAgg = numbers.length
+        ? await CallLog.aggregate([
+            { $match: { contactNumber: { $in: numbers } } },
+            { $group: { _id: '$contactNumber', first: { $min: '$timestamp' } } }
+          ])
+        : [];
+      const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
+
       return res.json({
         success: true,
         data: {
           total,
-          calls: historyCalls.map(c => ({ ...c, employeeName: empName(c), employeePhone: empPhone(c) })),
+          calls: historyCalls.map(c => ({
+            ...c,
+            employeeName: empName(c),
+            employeePhone: empPhone(c),
+            employeeTL: empTL(c),
+            contactType: firstSeenMap.get(c.contactNumber) === new Date(c.timestamp).getTime() ? 'New' : 'Repeat'
+          })),
           pages: Math.ceil(total / pageSize),
           page: pageNum
         }
@@ -439,7 +464,7 @@ function round1(n) { return Math.round(n * 10) / 10; }
 router.get('/leads-periodic', protect, isManager, async (req, res) => {
   try {
     const {
-      startDate, endDate, employeeId, status, source, leadTime,
+      startDate, endDate, employeeId, status, source, leadTime, tlName,
       tab = 'summary', page = 1, limit = 500
     } = req.query;
 
@@ -451,12 +476,13 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
       filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
     }
     if (employeeId) filter.assignedTo = employeeId;
+    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (status) filter.status = status;
     if (source) filter.source = { $regex: source, $options: 'i' };
     applyLeadTimeFilter(filter, leadTime);
 
     const leads = await Lead.find(filter)
-      .populate('assignedTo', 'name')
+      .populate('assignedTo', 'name tlName')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -468,6 +494,7 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
       : 'All Leads';
 
     const empNameOf = (l) => l.assignedTo?.name || 'Unassigned';
+    const empTLOf = (l) => l.assignedTo?.tlName || '';
     const pageNum = parseInt(page), pageSize = parseInt(limit);
 
     if (tab === 'summary') {
@@ -501,7 +528,7 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
       leads.forEach((l) => {
         const id = l.assignedTo?._id?.toString() || 'unassigned';
         if (!empMap[id]) empMap[id] = {
-          employeeName: empNameOf(l), total: 0, new: 0, contacted: 0,
+          employeeName: empNameOf(l), tlName: empTLOf(l), total: 0, new: 0, contacted: 0,
           follow_up: 0, converted: 0, lost: 0, attemptsSum: 0
         };
         const e = empMap[id];
@@ -644,7 +671,7 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
 
     if (tab === 'leadList') {
       const leadsList = leads.slice(0, pageSize).map((l) => ({
-        _id: l._id, employeeName: empNameOf(l), phone: l.phone, name: l.name,
+        _id: l._id, employeeName: empNameOf(l), tlName: empTLOf(l), phone: l.phone, name: l.name,
         status: l.status, source: l.source || '—', attempts: l.attempts || 0,
         followUpDate: l.followUpDate || null, createdAt: l.createdAt, lastCallNote: l.lastCallNote || ''
       }));
@@ -660,13 +687,14 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
 // GET /api/reports/employees-periodic — Employee Reports page
 router.get('/employees-periodic', protect, isManager, async (req, res) => {
   try {
-    const { startDate, endDate, employeeId, status, tab = 'summary' } = req.query;
+    const { startDate, endDate, employeeId, status, tlName, tab = 'summary' } = req.query;
 
     const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
     const empFilter = { role: 'employee' };
     if (employeeId) empFilter._id = employeeId;
+    if (tlName) empFilter.tlName = tlName;
     if (status === 'active') empFilter.isActive = true;
     else if (status === 'inactive') empFilter.isActive = false;
 
@@ -677,22 +705,23 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const leadFilter = { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } };
 
     const [calls, leads] = await Promise.all([
-      CallLog.find(callFilter).lean(),
-      Lead.find(leadFilter).lean(),
+      CallLog.find(callFilter).select('employeeId duration').lean(),
+      Lead.find(leadFilter).select('assignedTo status').lean(),
     ]);
 
     const statsMap = {};
     employeesList.forEach((e) => {
       statsMap[e._id.toString()] = {
         employeeId: e._id.toString(), employeeName: e.name, email: e.email, phone: e.phone || '',
-        isActive: e.isActive, dailyTarget: e.dailyTarget || 0,
-        totalCalls: 0, connectedCalls: 0, leadsAssigned: 0, leadsConverted: 0
+        tlName: e.tlName || '', isActive: e.isActive, dailyTarget: e.dailyTarget || 0,
+        totalCalls: 0, connectedCalls: 0, totalDuration: 0, leadsAssigned: 0, leadsConverted: 0
       };
     });
     calls.forEach((c) => {
       const s = statsMap[c.employeeId?.toString()];
       if (!s) return;
       s.totalCalls++;
+      s.totalDuration += c.duration || 0;
       if ((c.duration || 0) > 0) s.connectedCalls++;
     });
     leads.forEach((l) => {
@@ -708,7 +737,7 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
       const conversionRate = s.leadsAssigned ? Math.round((s.leadsConverted / s.leadsAssigned) * 100) : 0;
       const targetTotal = s.dailyTarget * dayCount;
       const targetAchievement = s.dailyTarget > 0 ? Math.round((s.totalCalls / targetTotal) * 100) : null;
-      return { ...s, conversionRate, targetTotal, targetAchievement };
+      return { ...s, conversionRate, targetTotal, targetAchievement, totalTalktime: fmtDuration(s.totalDuration) };
     });
 
     const dateLabel = start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
@@ -817,6 +846,120 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
   }
 });
 
+function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
+
+// GET /api/reports/employees/export — full-field CSV of every employee
+// (base User fields + performance aggregates, including total talktime),
+// streamed row-by-row rather than buffered. Also registered in the
+// Downloads Center. Must be declared before any /employees-periodic-style
+// param routes, though none currently conflict with this literal path.
+router.get('/employees/export', protect, isManager, async (req, res) => {
+  let job = null;
+  try {
+    const { startDate, endDate, status, tlName } = req.query;
+    const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
+    const end = endDate ? istDateStrEnd(endDate) : new Date();
+
+    const empFilter = { role: 'employee' };
+    if (tlName) empFilter.tlName = tlName;
+    if (status === 'active') empFilter.isActive = true;
+    else if (status === 'inactive') empFilter.isActive = false;
+
+    const employeesList = await User.find(empFilter).sort({ name: 1 }).lean();
+    const employeeIds = employeesList.map((e) => e._id);
+
+    const [callAgg, leadAgg] = await Promise.all([
+      CallLog.aggregate([
+        { $match: { timestamp: { $gte: start, $lte: end }, employeeId: { $in: employeeIds } } },
+        { $group: {
+          _id: '$employeeId',
+          totalCalls: { $sum: 1 },
+          connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+          totalDuration: { $sum: { $ifNull: ['$duration', 0] } }
+        }}
+      ]),
+      Lead.aggregate([
+        { $match: { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } } },
+        { $group: {
+          _id: '$assignedTo',
+          leadsAssigned: { $sum: 1 },
+          leadsConverted: { $sum: { $cond: [{ $eq: ['$status', 'converted'] }, 1, 0] } }
+        }}
+      ])
+    ]);
+    const callMap = new Map(callAgg.map((c) => [c._id.toString(), c]));
+    const leadMap = new Map(leadAgg.map((l) => [l._id.toString(), l]));
+    const dayCount = Math.max(1, Math.round((end - start) / 86400000) + 1);
+
+    const filename = `employees_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
+    try {
+      job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Employee Directory Export', filename });
+    } catch {}
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const header = [
+      'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
+      'Total Calls', 'Connected Calls', 'Total Talktime', 'Total Talktime (s)',
+      'Leads Assigned', 'Leads Converted', 'Conversion Rate (%)', 'Target Achievement (%)',
+      'Joined At'
+    ].join(',') + '\n';
+    res.write(header);
+    let jobBuf = [header];
+    let jobBytes = Buffer.byteLength(header, 'utf8');
+    let jobOverflowed = false;
+
+    for (const e of employeesList) {
+      const c = callMap.get(e._id.toString()) || { totalCalls: 0, connectedCalls: 0, totalDuration: 0 };
+      const l = leadMap.get(e._id.toString()) || { leadsAssigned: 0, leadsConverted: 0 };
+      const target = e.dailyTarget || 0;
+      const targetTotal = target * dayCount;
+      const targetAchievement = target > 0 ? Math.round((c.totalCalls / targetTotal) * 100) : '';
+      const conversionRate = l.leadsAssigned ? Math.round((l.leadsConverted / l.leadsAssigned) * 100) : 0;
+
+      const line = [
+        csvEsc(e.name),
+        e.email || '',
+        e.phone || '',
+        e.role || '',
+        csvEsc(e.tlName),
+        target,
+        e.isActive ? 'Yes' : 'No',
+        c.totalCalls,
+        c.connectedCalls,
+        fmtDuration(c.totalDuration),
+        c.totalDuration,
+        l.leadsAssigned,
+        l.leadsConverted,
+        conversionRate,
+        targetAchievement,
+        new Date(e.createdAt).toLocaleDateString('en-IN')
+      ].join(',') + '\n';
+      res.write(line);
+
+      if (!jobOverflowed) {
+        jobBytes += Buffer.byteLength(line, 'utf8');
+        if (jobBytes > 8 * 1024 * 1024) { jobOverflowed = true; jobBuf = null; }
+        else jobBuf.push(line);
+      }
+    }
+    res.end();
+
+    if (job) {
+      try {
+        job = jobOverflowed
+          ? await failDownloadJob(job._id, 'Export too large to store for re-download — the direct download completed successfully.')
+          : await completeDownloadJob(job._id, jobBuf.join(''));
+      } catch {}
+    }
+  } catch (err) {
+    if (job) { try { await failDownloadJob(job._id, err.message); } catch {} }
+    if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+    else res.end();
+  }
+});
+
 // GET /api/reports/client — client report by phone number
 router.get('/client', protect, isManager, async (req, res) => {
   try {
@@ -839,7 +982,7 @@ router.get('/client', protect, isManager, async (req, res) => {
     }
 
     const calls = await CallLog.find(filter)
-      .populate('employeeId', 'name phone')
+      .populate('employeeId', 'name phone tlName')
       .sort({ timestamp: -1, _id: -1 })
       .lean();
 
@@ -851,13 +994,20 @@ router.get('/client', protect, isManager, async (req, res) => {
     const notPickupByClient = byType.outgoing.filter((c) => !c.duration || c.duration === 0).length;
     const neverAttended = byType.missed.filter((c) => !byType.outgoing.find((o) => o.contactNumber === c.contactNumber)).length;
 
+    if (calls.length === 0) {
+      return res.json({
+        success: true,
+        data: { phone, noResults: true }
+      });
+    }
+
     if (tab === 'summary') {
       const empSummary = {};
       calls.forEach((c) => {
         const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
         if (!id) return;
         if (!empSummary[id]) empSummary[id] = {
-          employeeId: id, employeeName: empName(c), employeePhone: empPhone(c),
+          employeeId: id, employeeName: empName(c), employeePhone: empPhone(c), tlName: empTL(c),
           totalCalls: 0, totalDuration: 0,
           incomingTotal: 0, incomingConnected: 0, incomingDuration: 0,
           outgoingTotal: 0, outgoingConnected: 0, outgoingDuration: 0,
@@ -922,6 +1072,7 @@ router.get('/client', protect, isManager, async (req, res) => {
           ...c,
           employeeName:  empName(c),
           employeePhone: empPhone(c),
+          employeeTL:    empTL(c),
         })),
         pages: Math.ceil(calls.length / pageSize)
       }

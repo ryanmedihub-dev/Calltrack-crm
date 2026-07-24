@@ -6,7 +6,8 @@ const Lead = require('../models/Lead');
 const { protect, isManager } = require('../middleware/auth');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
-const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
+const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
+const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 
 function fmtDuration(seconds) {
   if (!seconds || seconds <= 0) return '0s';
@@ -100,17 +101,23 @@ async function computePeriodStats(start, end, employeeId) {
       { $group: { _id: { $hour: '$timestamp' }, count: { $sum: 1 } } }
     ]),
 
-    // Per-employee stats — lookup User for name
+    // Per-employee stats — lookup User for name/tlName
     CallLog.aggregate([
       { $match: match },
       { $group: {
-        _id:   '$employeeId',
-        count: { $sum: 1 },
-        first: { $min: '$timestamp' },
-        last:  { $max: '$timestamp' }
+        _id:            '$employeeId',
+        count:          { $sum: 1 },
+        connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+        missed:         { $sum: { $cond: [{ $eq: ['$callType', 'missed'] }, 1, 0] } },
+        first:          { $min: '$timestamp' },
+        last:           { $max: '$timestamp' }
       }},
       { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'userInfo' } },
-      { $addFields: { name: { $arrayElemAt: ['$userInfo.name', 0] } } },
+      { $addFields: {
+        name:    { $arrayElemAt: ['$userInfo.name', 0] },
+        tlName:  { $arrayElemAt: ['$userInfo.tlName', 0] },
+        dailyTarget: { $arrayElemAt: ['$userInfo.dailyTarget', 0] }
+      }},
       { $project: { userInfo: 0 } },
       { $sort: { count: -1 } }
     ]),
@@ -140,7 +147,7 @@ async function computePeriodStats(start, end, employeeId) {
       missed: 0, rejected: 0, neverAttended: 0, notPickupByClient: 0,
       uniqueClients: 0, workingHours: '0s', workingHoursSec: 0,
       connectedCalls: 0, callsPerHour: Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 })),
-      topDialers: [], activeEmployees: 0, avgDuration: 0
+      topDialers: [], employeeStats: [], activeEmployees: 0, avgDuration: 0
     };
   }
 
@@ -157,6 +164,24 @@ async function computePeriodStats(start, end, employeeId) {
   const topDialers = employees.slice(0, 5).map((e) => ({
     employeeId: e._id.toString(), name: e.name, count: e.count
   }));
+
+  // Full per-employee breakdown (not capped at top 5) — used by Analytics
+  // Agent Performance and the Daily Targets page, which need every employee's
+  // numbers, not just the day's leaders.
+  const employeeStats = employees.map((e) => {
+    const target = e.dailyTarget || 0;
+    return {
+      employeeId: e._id.toString(),
+      name: e.name,
+      tlName: e.tlName || '',
+      count: e.count,
+      connectedCalls: e.connectedCalls,
+      missed: e.missed,
+      connRate: e.count > 0 ? Math.round((e.connectedCalls / e.count) * 100) : 0,
+      dailyTarget: target,
+      targetAchievement: target > 0 ? Math.round((e.count / target) * 100) : null,
+    };
+  });
 
   return {
     totalCalls: s.totalCalls,
@@ -178,6 +203,7 @@ async function computePeriodStats(start, end, employeeId) {
     connectedCalls: s.connectedCalls,
     callsPerHour,
     topDialers,
+    employeeStats,
     activeEmployees: employees.length,
     avgDuration: s.totalCalls > 0 ? Math.round(s.totalDuration / s.totalCalls) : 0
   };
@@ -190,6 +216,11 @@ function enrichWithEmployee(doc) {
     ...doc,
     employeeName:  doc.employeeId?.name  || 'Unknown',
     employeePhone: doc.employeeId?.phone || '',
+    employeeTL:    doc.employeeId?.tlName || '',
+    // The schema field is `notes`; `remarks` is the name the UI has always
+    // shown as a column label — expose both so existing `.notes` readers
+    // keep working while `.remarks` stops rendering blank.
+    remarks:       doc.notes || '',
   };
 }
 
@@ -402,7 +433,7 @@ router.get('/', protect, isManager, async (req, res) => {
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [callsRaw, total] = await Promise.all([
-      CallLog.find(filter).populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      CallLog.find(filter).populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter)
     ]);
     const calls = callsRaw.map(enrichWithEmployee);
@@ -468,6 +499,7 @@ router.get('/stats', protect, isManager, async (req, res) => {
         avgDuration:    todayStats.avgDuration,
         activeEmployees: todayStats.activeEmployees,
         topDialers:     todayStats.topDialers,
+        employeeStats:  todayStats.employeeStats,
         callsPerHour:   todayStats.callsPerHour
       }
     });
@@ -479,7 +511,7 @@ router.get('/stats', protect, isManager, async (req, res) => {
 // GET /api/calls/realtime — latest 50 calls
 router.get('/realtime', protect, isManager, async (req, res) => {
   try {
-    const callsRaw = await CallLog.find().populate('employeeId', 'name phone').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
+    const callsRaw = await CallLog.find().populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
     return res.json({ success: true, data: callsRaw.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -553,13 +585,20 @@ router.get('/my-stats', protect, async (req, res) => {
   }
 });
 
-// GET /api/calls/export — CSV export (manager); also registered in the Downloads Center
+function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
+
+// GET /api/calls/export — CSV export (manager); also registered in the Downloads Center.
+// Streams the response (res.write per row) instead of buffering the whole file in
+// memory, so large exports start downloading immediately and don't hold the full
+// CSV in Node memory. A capped copy is also accumulated to register with the
+// Downloads Center for re-download, matching the existing 8MB job-content limit.
 router.get('/export', protect, isManager, async (req, res) => {
   let job = null;
   try {
-    const { employeeId, callType, startDate, endDate } = req.query;
+    const { employeeId, callType, startDate, endDate, tlName } = req.query;
     const filter = {};
     if (employeeId) filter.employeeId = employeeId;
+    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType)   filter.callType   = callType;
     if (startDate || endDate) {
       filter.timestamp = {};
@@ -571,45 +610,72 @@ router.get('/export', protect, isManager, async (req, res) => {
     }
     const filename = `calls_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    // Registered before the CSV is built (which can take a while on a large
-    // date range) so the Downloads Center shows a "Processing…" row right
-    // away instead of nothing until the export finishes.
     try {
       job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename });
     } catch {}
 
-    const rows = ['Date,Time,Employee,Contact Name,Contact Number,Type,Duration (s),Notes\n'];
-    const cursor = CallLog.find(filter).populate('employeeId', 'name').sort({ timestamp: -1, _id: -1 }).lean().cursor();
-    for await (const doc of cursor) {
-      const d   = new Date(doc.timestamp);
-      const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
-      rows.push([
-        d.toLocaleDateString('en-IN'),
-        d.toLocaleTimeString('en-IN'),
-        esc(doc.employeeId?.name),
-        esc(doc.contactName),
-        doc.contactNumber || '',
-        doc.callType || '',
-        doc.duration || 0,
-        esc(doc.notes)
-      ].join(',') + '\n');
-    }
-    const csv = rows.join('');
-
-    if (job) {
-      try { job = await completeDownloadJob(job._id, csv); } catch {}
-    }
+    // Global first-ever-contact map: which contactNumbers (within this export's
+    // filter) were called for the very first time ever (across all history, not
+    // just this filtered window) — powers the "Contact Type" New/Repeat column.
+    const numbersInExport = await CallLog.find(filter).distinct('contactNumber');
+    const firstSeenAgg = numbersInExport.length
+      ? await CallLog.aggregate([
+          { $match: { contactNumber: { $in: numbersInExport } } },
+          { $group: { _id: '$contactNumber', first: { $min: '$timestamp' } } }
+        ])
+      : [];
+    const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    if (job) {
-      res.setHeader('X-Download-Job-Id', job._id.toString());
-      res.setHeader('X-Download-Expires-At', job.expiresAt.toISOString());
+
+    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Contact Type,Type,Call Status,Duration (s),Notes,Lead Linked,Synced\n';
+    res.write(header);
+
+    let jobBuf = [header];
+    let jobBytes = Buffer.byteLength(header, 'utf8');
+    let jobOverflowed = false;
+
+    const cursor = CallLog.find(filter).populate('employeeId', 'name tlName').sort({ timestamp: -1, _id: -1 }).lean().cursor();
+    for await (const doc of cursor) {
+      const d = new Date(doc.timestamp);
+      const contactType = firstSeenMap.get(doc.contactNumber) === d.getTime() ? 'New' : 'Repeat';
+      const line = [
+        d.toLocaleDateString('en-IN'),
+        d.toLocaleTimeString('en-IN'),
+        csvEsc(doc.employeeId?.name),
+        csvEsc(doc.employeeId?.tlName),
+        csvEsc(doc.contactName),
+        doc.contactNumber || '',
+        contactType,
+        doc.callType || '',
+        csvEsc(doc.callStatus),
+        doc.duration || 0,
+        csvEsc(doc.notes),
+        doc.leadId ? 'Yes' : 'No',
+        doc.synced ? 'Yes' : 'No',
+      ].join(',') + '\n';
+      res.write(line);
+
+      if (!jobOverflowed) {
+        jobBytes += Buffer.byteLength(line, 'utf8');
+        if (jobBytes > MAX_CONTENT_BYTES) { jobOverflowed = true; jobBuf = null; }
+        else jobBuf.push(line);
+      }
     }
-    return res.status(200).send(csv);
+    res.end();
+
+    if (job) {
+      try {
+        job = jobOverflowed
+          ? await failDownloadJob(job._id, 'Export too large to store for re-download from the Downloads Center — the direct download completed successfully.')
+          : await completeDownloadJob(job._id, jobBuf.join(''));
+      } catch {}
+    }
   } catch (err) {
     if (job) { try { await failDownloadJob(job._id, err.message); } catch {} }
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+    else res.end();
   }
 });
 

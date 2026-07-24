@@ -7,7 +7,8 @@ const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
-const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
+const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
+const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 
 // Human-readable description for a single changelog entry, used by GET /logs
 function describeChangelogEntry(action, details) {
@@ -460,14 +461,19 @@ router.post('/from-call', protect, async (req, res) => {
   }
 });
 
-// GET /api/leads/export — CSV export (manager); also registered in the Downloads Center
+function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
+
+// GET /api/leads/export — CSV export (manager); also registered in the Downloads Center.
+// Streams the response row-by-row instead of buffering the whole file in memory —
+// see the matching comment on GET /api/calls/export for the same rationale.
 router.get('/export', protect, isManager, async (req, res) => {
   let job = null;
   try {
-    const { status, assignedTo, startDate, endDate, search, tags } = req.query;
+    const { status, assignedTo, startDate, endDate, search, tags, tlName } = req.query;
     const filter = {};
     if (status)     filter.status     = status;
     if (assignedTo) filter.assignedTo = assignedTo;
+    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (tags)       filter.tags = { $in: tags.split(',') };
     if (search) {
       filter.$or = [
@@ -486,48 +492,72 @@ router.get('/export', protect, isManager, async (req, res) => {
     }
     const filename = `leads_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
-    // Registered before the CSV is built (which can take a while over a large
-    // lead set) so the Downloads Center shows a "Processing…" row right away
-    // instead of nothing until the export finishes.
     try {
       job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Leads Export', filename });
     } catch {}
 
-    const rows = ['Name,Phone,Email,Status,Assigned To,Source,Tags,Attempts,Connected Calls,Last Call At,Follow Up Date,Created At\n'];
-    const cursor = Lead.find(filter).populate('assignedTo', 'name').sort({ createdAt: -1 }).lean().cursor();
-    const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const header = [
+      'Name', 'Phone', 'Email', 'Status', 'Assigned To', 'Assigned TL', 'Source', 'Tags',
+      'Captured By', 'Imported By', 'Attempts', 'Connected Calls',
+      'Last Call At', 'Last Call Type', 'Last Call Duration (s)', 'Last Call Note', 'Last Call Summary',
+      'Last Call Employee', 'Last Call Employee Phone',
+      'Follow Up Date', 'Created At'
+    ].join(',') + '\n';
+    res.write(header);
+
+    let jobBuf = [header];
+    let jobBytes = Buffer.byteLength(header, 'utf8');
+    let jobOverflowed = false;
+
+    const cursor = Lead.find(filter).populate('assignedTo', 'name tlName').sort({ createdAt: -1 }).lean().cursor();
     for await (const doc of cursor) {
-      rows.push([
-        esc(doc.name),
+      const line = [
+        csvEsc(doc.name),
         doc.phone || '',
         doc.email || '',
         doc.status || '',
-        esc(doc.assignedTo?.name),
-        esc(doc.source),
-        esc((doc.tags || []).join('; ')),
+        csvEsc(doc.assignedTo?.name),
+        csvEsc(doc.assignedTo?.tlName),
+        csvEsc(doc.source),
+        csvEsc((doc.tags || []).join('; ')),
+        csvEsc(doc.capturedBy),
+        csvEsc(doc.importedBy),
         doc.attempts || 0,
         doc.connectedCallCount || 0,
         doc.lastCallAt ? new Date(doc.lastCallAt).toLocaleDateString('en-IN') : '',
+        csvEsc(doc.lastCallType),
+        doc.lastCallDuration || 0,
+        csvEsc(doc.lastCallNote),
+        csvEsc(doc.lastCallSummary),
+        csvEsc(doc.lastCallEmployee),
+        doc.lastCallEmployeePhone || '',
         doc.followUpDate ? new Date(doc.followUpDate).toLocaleDateString('en-IN') : '',
         new Date(doc.createdAt).toLocaleDateString('en-IN')
-      ].join(',') + '\n');
+      ].join(',') + '\n';
+      res.write(line);
+
+      if (!jobOverflowed) {
+        jobBytes += Buffer.byteLength(line, 'utf8');
+        if (jobBytes > MAX_CONTENT_BYTES) { jobOverflowed = true; jobBuf = null; }
+        else jobBuf.push(line);
+      }
     }
-    const csv = rows.join('');
+    res.end();
 
     if (job) {
-      try { job = await completeDownloadJob(job._id, csv); } catch {}
+      try {
+        job = jobOverflowed
+          ? await failDownloadJob(job._id, 'Export too large to store for re-download from the Downloads Center — the direct download completed successfully.')
+          : await completeDownloadJob(job._id, jobBuf.join(''));
+      } catch {}
     }
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    if (job) {
-      res.setHeader('X-Download-Job-Id', job._id.toString());
-      res.setHeader('X-Download-Expires-At', job.expiresAt.toISOString());
-    }
-    return res.status(200).send(csv);
   } catch (err) {
     if (job) { try { await failDownloadJob(job._id, err.message); } catch {} }
     if (!res.headersSent) res.status(500).json({ success: false, error: err.message });
+    else res.end();
   }
 });
 

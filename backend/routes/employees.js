@@ -21,6 +21,17 @@ router.get('/', protect, isManager, async (req, res) => {
   }
 });
 
+// GET /api/employees/tl-names — distinct Team Lead names, for filter dropdowns.
+// Must be declared before GET /:id so it isn't swallowed by the param route.
+router.get('/tl-names', protect, isManager, async (req, res) => {
+  try {
+    const names = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' } });
+    return res.json({ success: true, data: names.sort((a, b) => a.localeCompare(b)) });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/employees
 router.post('/', protect, isManager, async (req, res) => {
   try {
