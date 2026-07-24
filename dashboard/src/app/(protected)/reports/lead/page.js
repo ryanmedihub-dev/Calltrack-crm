@@ -21,7 +21,7 @@ import api from "../../../../lib/api";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
-import { DataTable } from "../../../../components/report-shared";
+import { DataTable, TLFilter, Truncate } from "../../../../components/report-shared";
 import {
   ArrowUp,
   ArrowDown,
@@ -485,6 +485,7 @@ const FILTER_LABELS = {
   status: "Status",
   source: "Source",
   leadTime: "Lead Time",
+  tl: "Team Lead",
 };
 function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
   const entries = Object.entries(filters).filter(([, v]) => !!v);
@@ -566,6 +567,7 @@ function LeadReportsPageContent() {
     status: statusParam || "",
     source: "",
     leadTime: "",
+    tl: "",
   });
 
   // Re-sync when the deep-linked ?status=/?fromDate=/?toDate= change (e.g.
@@ -605,6 +607,7 @@ function LeadReportsPageContent() {
       ...(filters.status && { status: filters.status }),
       ...(filters.source && { source: filters.source }),
       ...(filters.leadTime && { leadTime: filters.leadTime }),
+      ...(filters.tl && { tlName: filters.tl }),
     }),
     [filters],
   );
@@ -650,6 +653,7 @@ function LeadReportsPageContent() {
         ...(filters.toDate && { endDate: filters.toDate }),
         ...(filters.employee && { assignedTo: filters.employee }),
         ...(filters.status && { status: filters.status }),
+        ...(filters.tl && { tlName: filters.tl }),
       },
       filename: `leads-${filters.fromDate || "all"}_${filters.toDate || "today"}.csv`,
     });
@@ -664,6 +668,7 @@ function LeadReportsPageContent() {
       status: "",
       source: "",
       leadTime: "",
+      tl: "",
     });
 
   const pieData = (report?.pieData || []).map((d) => ({
@@ -782,7 +787,7 @@ function LeadReportsPageContent() {
                 className="overflow-hidden"
               >
                 <div className="px-5 pb-5 border-t border-gray-100 pt-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <Field label="From Date">
                       <div className="relative">
                         <input
@@ -863,6 +868,13 @@ function LeadReportsPageContent() {
                         <option value="afternoon">Afternoon (12PM–6PM)</option>
                         <option value="evening">Evening (6PM–12AM)</option>
                       </select>
+                    </Field>
+                    <Field label="Team Lead">
+                      <TLFilter
+                        value={filters.tl}
+                        onChange={(v) => setFilters({ ...filters, tl: v })}
+                        className="w-full"
+                      />
                     </Field>
                   </div>
 
@@ -1130,7 +1142,8 @@ function LeadReportsPageContent() {
                     loading={loading}
                     footer={employeeSummaryFooter}
                     columns={[
-                      { key: "employeeName", label: "Employee", width: 160 },
+                      { key: "employeeName", label: "Employee", width: 150, render: (r) => <Truncate text={r.employeeName} /> },
+                      { key: "tlName", label: "TL", width: 100, render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-gray-300">—</span> },
                       {
                         key: "total",
                         label: "Total",
@@ -1787,7 +1800,15 @@ function LeadReportsPageContent() {
                       : null
                   }
                   columns={[
-                    { key: "employeeName", label: "Assigned To", width: 140 },
+                    {
+                      key: "employeeName", label: "Assigned To", width: 140,
+                      render: (r) => (
+                        <div>
+                          <p><Truncate text={r.employeeName} /></p>
+                          {r.tlName && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.tlName} max={14} /></p>}
+                        </div>
+                      ),
+                    },
                     {
                       key: "phone",
                       label: "Contact Number",
@@ -1800,7 +1821,7 @@ function LeadReportsPageContent() {
                         />
                       ),
                     },
-                    { key: "name", label: "Contact Name", width: 160 },
+                    { key: "name", label: "Contact Name", width: 150, render: (r) => <Truncate text={r.name} /> },
                     {
                       key: "status",
                       label: "Status",

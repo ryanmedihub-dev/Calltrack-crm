@@ -21,7 +21,7 @@ import api from "../../../../lib/api";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
-import { DataTable } from "../../../../components/report-shared";
+import { DataTable, TLFilter, Truncate } from "../../../../components/report-shared";
 import {
   ArrowUp,
   ArrowDown,
@@ -490,6 +490,7 @@ const FILTER_LABELS = {
   callType: "Type",
   duration: "Duration",
   callTime: "Call Time",
+  tl: "Team Lead",
 };
 function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
   const entries = Object.entries(filters).filter(([, v]) => !!v);
@@ -567,6 +568,7 @@ function PeriodicReportsPageContent() {
     callType: callTypeParam || "",
     duration: "",
     callTime: "",
+    tl: "",
   });
 
   // Re-sync when deep-linked ?callType=/?employeeId=/?fromDate=/?toDate= change
@@ -607,6 +609,7 @@ function PeriodicReportsPageContent() {
       ...(filters.callType && { callType: filters.callType }),
       ...(filters.duration && { duration: filters.duration }),
       ...(filters.callTime && { callTime: filters.callTime }),
+      ...(filters.tl && { tlName: filters.tl }),
     }),
     [filters],
   );
@@ -661,6 +664,7 @@ function PeriodicReportsPageContent() {
       callType: "",
       duration: "",
       callTime: "",
+      tl: "",
     });
 
   const pieData = (report?.pieData || []).map((d) => ({
@@ -785,7 +789,7 @@ function PeriodicReportsPageContent() {
                 className="overflow-hidden"
               >
                 <div className="px-5 pb-5 border-t border-gray-100 pt-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <Field label="From Date">
                       <div className="relative">
                         <input
@@ -868,6 +872,13 @@ function PeriodicReportsPageContent() {
                         <option value="afternoon">Afternoon (12PM–6PM)</option>
                         <option value="evening">Evening (6PM–12AM)</option>
                       </select>
+                    </Field>
+                    <Field label="Team Lead">
+                      <TLFilter
+                        value={filters.tl}
+                        onChange={(v) => setFilters({ ...filters, tl: v })}
+                        className="w-full"
+                      />
                     </Field>
                   </div>
 
@@ -1136,7 +1147,8 @@ function PeriodicReportsPageContent() {
                     loading={loading}
                     footer={employeeSummaryFooter}
                     columns={[
-                      { key: "employeeName", label: "Employee", width: 180 },
+                      { key: "employeeName", label: "Employee", width: 160, render: (r) => <Truncate text={r.employeeName} /> },
+                      { key: "tlName", label: "TL", width: 110, render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-gray-300">—</span> },
                       {
                         key: "totalCalls",
                         label: "Total",
@@ -1830,7 +1842,15 @@ function PeriodicReportsPageContent() {
                       : null
                   }
                   columns={[
-                    { key: "employeeName", label: "Employee", width: 140 },
+                    {
+                      key: "employeeName", label: "Employee", width: 150,
+                      render: (r) => (
+                        <div>
+                          <p><Truncate text={r.employeeName} /></p>
+                          {r.employeeTL && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.employeeTL} max={14} /></p>}
+                        </div>
+                      ),
+                    },
                     {
                       key: "contactNumber",
                       label: "To Number",
@@ -1843,7 +1863,19 @@ function PeriodicReportsPageContent() {
                         />
                       ),
                     },
-                    { key: "contactName", label: "Contact Name", width: 160 },
+                    { key: "contactName", label: "Contact Name", width: 150, render: (r) => <Truncate text={r.contactName} /> },
+                    {
+                      key: "contactType",
+                      label: "Contact Type",
+                      width: 110,
+                      filterType: "select",
+                      filterOptions: ["New", "Repeat"],
+                      render: (r) => (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${r.contactType === "New" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-gray-100 text-gray-500 border border-gray-200"}`}>
+                          {r.contactType || "—"}
+                        </span>
+                      ),
+                    },
                     {
                       key: "date",
                       label: "Date",

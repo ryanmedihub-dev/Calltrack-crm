@@ -6,9 +6,9 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import api from '../../../../lib/api';
-import { triggerLocalExport } from '../../../../lib/downloads';
+import { triggerServerExport } from '../../../../lib/downloads';
 import {
-  DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton,
+  DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton, TLFilter, Truncate,
   PhoneIco, UsersIco, CheckIco, GaugeIco, TrophyIco, ClockIco, DownloadIco,
   GridIco, BarChartTabIco, CalendarTabIco, ClockTabIco, NoEntryIco, ClipboardIco,
 } from '../../../../components/report-shared';
@@ -117,13 +117,14 @@ export default function EmployeeReportsPage() {
   const [report, setReport] = useState(null);
   const [rowOverrides, setRowOverrides] = useState({}); // optimistic edits for directory tab
 
-  const [filters, setFilters] = useState({ fromDate: '', toDate: '', employee: '', status: '' });
+  const [filters, setFilters] = useState({ fromDate: '', toDate: '', employee: '', status: '', tl: '' });
 
   const buildParams = useCallback(() => ({
     ...(filters.fromDate && { startDate: filters.fromDate }),
     ...(filters.toDate && { endDate: filters.toDate }),
     ...(filters.employee && { employeeId: filters.employee }),
     ...(filters.status && { status: filters.status }),
+    ...(filters.tl && { tlName: filters.tl }),
   }), [filters]);
 
   const load = useCallback(async () => {
@@ -142,14 +143,14 @@ export default function EmployeeReportsPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/api/employees').then((r) => setEmployees(r.data.data || [])).catch(() => {}); }, []);
 
-  const exportCSV = () => {
-    const rows = report?.employeePerformance || [];
-    const csvRows = [
-      ['Employee', 'Status', 'Total Calls', 'Connected', 'Leads Assigned', 'Converted', 'Conv. Rate %', 'Target Achievement %'],
-      ...rows.map((r) => [r.employeeName, r.isActive ? 'Active' : 'Inactive', r.totalCalls, r.connectedCalls, r.leadsAssigned, r.leadsConverted, r.conversionRate, r.targetAchievement ?? ''])
-    ];
-    triggerLocalExport({ label: 'Employee Report', filename: 'employee-report.csv', csv: csvRows.map((r) => r.join(',')).join('\n') });
-  };
+  // Full-schema server-side export (every User field + performance aggregates,
+  // including total talktime) — replaces the old client-side CSV that only
+  // covered whatever columns happened to be on screen.
+  const exportCSV = () => triggerServerExport({
+    endpoint: '/api/reports/employees/export',
+    params: buildParams(),
+    filename: `employees-${filters.fromDate || 'all'}_${filters.toDate || 'today'}.csv`,
+  });
 
   const applyOverride = (id, patch) => setRowOverrides((o) => ({ ...o, [id]: { ...o[id], ...patch } }));
 
@@ -173,15 +174,15 @@ export default function EmployeeReportsPage() {
           </p>
           <h1 className="text-xl font-bold text-gray-900 mt-0.5">{report?.dateLabel || 'Employee Reports'}</h1>
         </div>
-        <button onClick={exportCSV} disabled={!performanceRows.length}
-          className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm disabled:opacity-40">
+        <button onClick={exportCSV}
+          className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm">
           <DownloadIco /> Export
         </button>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
           <Field label="From Date">
             <input type="date" className="form-input" value={filters.fromDate} onChange={(e) => setFilters({ ...filters, fromDate: e.target.value })} />
           </Field>
@@ -201,11 +202,14 @@ export default function EmployeeReportsPage() {
               <option value="inactive">Inactive only</option>
             </select>
           </Field>
+          <Field label="Team Lead">
+            <TLFilter value={filters.tl} onChange={(v) => setFilters({ ...filters, tl: v })} className="w-full" />
+          </Field>
           <button onClick={load} className="btn-primary justify-center h-[38px]">Apply</button>
         </div>
-        {(filters.employee || filters.status) && (
+        {(filters.employee || filters.status || filters.tl) && (
           <p className="text-xs text-gray-400 mt-3">
-            Filtering by {filters.employee ? employeeName : 'all employees'}{filters.status ? `, ${filters.status}` : ''}
+            Filtering by {filters.employee ? employeeName : 'all employees'}{filters.status ? `, ${filters.status}` : ''}{filters.tl ? `, TL: ${filters.tl}` : ''}
           </p>
         )}
       </div>
@@ -453,16 +457,18 @@ export default function EmployeeReportsPage() {
           <DataTable
             loading={loading}
             pageSize={25}
+            showRowNumber
             columns={[
               {
                 key: 'employeeName', label: 'Employee',
                 render: (r) => (
                   <div>
-                    <p className="font-semibold text-sm text-gray-900">{r.employeeName}</p>
-                    <p className="text-xs text-gray-400">{r.email}</p>
+                    <p className="font-semibold text-sm text-gray-900"><Truncate text={r.employeeName} /></p>
+                    <p className="text-xs text-gray-400 truncate">{r.email}</p>
                   </div>
                 ),
               },
+              { key: 'tlName', label: 'Team Lead', render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-gray-300">—</span> },
               { key: 'phone', label: 'Phone', searchable: false },
               {
                 key: 'isActive', label: 'Status', sortable: false, searchable: false,
@@ -472,8 +478,11 @@ export default function EmployeeReportsPage() {
                 key: 'dailyTarget', label: 'Daily Target', align: 'right', sortable: false, searchable: false,
                 render: (r) => <TargetCell employeeId={r.employeeId} initial={r.dailyTarget} onSaved={(v) => applyOverride(r.employeeId, { dailyTarget: v })} />,
               },
+              { key: 'targetAchievement', label: 'Achievement', align: 'right', sortable: false, searchable: false, render: (r) => <AchievementBar pct={r.targetAchievement} /> },
               { key: 'totalCalls', label: 'Calls (period)', align: 'right', searchable: false },
+              { key: 'totalTalktime', label: 'Total Talktime', align: 'right', searchable: false, render: (r) => r.totalTalktime || '0s' },
               { key: 'leadsAssigned', label: 'Leads (period)', align: 'right', searchable: false },
+              { key: 'conversionRate', label: 'Conv. Rate', align: 'right', searchable: false, render: (r) => `${r.conversionRate ?? 0}%` },
             ]}
             rows={directoryRows}
           />

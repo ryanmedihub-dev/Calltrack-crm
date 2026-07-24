@@ -6,7 +6,7 @@ import api from '../../../../lib/api';
 import Pagination from '../../../../components/Pagination';
 import { parseUTC } from '../../../../lib/timezone';
 import {
-  DataTable, EmptyState, Field, ChartTip, CallBadge,
+  DataTable, EmptyState, Field, ChartTip, CallBadge, Truncate,
   PhoneIco, GridIco, ClipboardIco,
 } from '../../../../components/report-shared';
 
@@ -99,7 +99,13 @@ export default function ClientReportsPage() {
           </div>
         </div>
 
-        {data && (
+        {data && data.noResults && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <EmptyState title="No results found" hint={`No calls on record for ${data.phone}. Check the number and try again.`} />
+          </div>
+        )}
+
+        {data && !data.noResults && (
           <>
             {/* Active search tag */}
             <div className="flex items-center gap-2 flex-wrap">
@@ -241,11 +247,12 @@ function ClientSummaryTab({ data }) {
               {
                 key: 'employeeName', label: 'Employee', render: (r) => (
                   <div>
-                    <p className="font-medium text-gray-900">{r.employeeName}</p>
+                    <p className="font-medium text-gray-900"><Truncate text={r.employeeName} /></p>
                     {r.employeePhone && <p className="text-xs text-gray-400">({r.employeePhone})</p>}
                   </div>
                 ),
               },
+              { key: 'tlName', label: 'TL', render: (r) => r.tlName ? <Truncate text={r.tlName} /> : <span className="text-gray-300">—</span> },
               { key: 'totalCalls', label: 'Total', align: 'right', searchable: false },
               { key: 'totalDuration', label: 'Duration', align: 'right', searchable: false },
               { key: 'connectedCalls', label: 'Connected', align: 'right', searchable: false, render: (r) => <span className="text-emerald-600 font-semibold">{r.connectedCalls || 0}</span> },
@@ -279,13 +286,28 @@ function ClientHistoryTab({ data, page, onPage }) {
         rows={calls}
         pageSize={50}
         emptyTitle="No records"
+        showRowNumber
+        maxBodyHeight={560}
         columns={[
-          { key: 'employeeName', label: 'Employee' },
+          {
+            key: 'employeeName', label: 'Employee', render: (r) => (
+              <div>
+                <p className="font-medium text-gray-900"><Truncate text={r.employeeName} /></p>
+                {r.employeeTL && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.employeeTL} max={14} /></p>}
+              </div>
+            ),
+          },
+          { key: 'contactName', label: 'Contact', searchable: false, render: (r) => <Truncate text={r.contactName} /> },
           { key: 'date', label: 'Date', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
           { key: 'time', label: 'Time', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) },
           { key: 'duration', label: 'Duration', align: 'right', searchable: false, render: (r) => (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—') },
           { key: 'callType', label: 'Call Type', searchable: false, render: (r) => <CallBadge type={r.callType} /> },
-          { key: 'notes', label: 'Notes', searchable: false, render: (r) => r.notes || '—' },
+          {
+            key: 'callStatus', label: 'Status', searchable: false, render: (r) => r.callStatus
+              ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100"><Truncate text={r.callStatus} /></span>
+              : <span className="text-gray-300">—</span>,
+          },
+          { key: 'notes', label: 'Notes', searchable: false, render: (r) => <Truncate text={r.notes} /> },
         ]}
       />
       <div className="mt-2"><Pagination page={page} pages={data?.pages || 1} onPage={onPage} /></div>

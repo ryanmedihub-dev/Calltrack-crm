@@ -1,6 +1,7 @@
 'use client';
 import { Fragment, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import api from '../lib/api';
 
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
@@ -186,6 +187,35 @@ export function LiveBanner({ count, label = 'new logs available — click to ref
         {count.toLocaleString()} {label}
       </button>
     </motion.div>
+  );
+}
+
+// Clips any free-text cell value to `max` characters with an ellipsis, showing
+// the full text on hover via `title` — keeps wide tables scannable when
+// contact/employee/note text runs long.
+export function Truncate({ text, max = 16 }) {
+  const s = text == null ? '' : String(text);
+  if (!s) return <span>—</span>;
+  if (s.length <= max) return <span>{s}</span>;
+  return <span title={s}>{s.slice(0, max - 1)}…</span>;
+}
+
+// Shared "Team Lead" filter dropdown — populated from GET /api/employees/tl-names.
+// Reused across Analytics, Daily Targets, and every Reports page's filter bar
+// so team-lead filtering behaves identically everywhere.
+export function TLFilter({ value, onChange, className = '' }) {
+  const [names, setNames] = useState([]);
+  useEffect(() => {
+    api.get('/api/employees/tl-names').then((r) => setNames(r.data.data || [])).catch(() => {});
+  }, []);
+  return (
+    <select
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      className={`px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-white text-gray-700 ${className}`}>
+      <option value="">All Team Leads</option>
+      {names.map((n) => <option key={n} value={n}>{n}</option>)}
+    </select>
   );
 }
 

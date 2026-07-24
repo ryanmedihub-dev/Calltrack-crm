@@ -9,7 +9,7 @@ import {
 import api from '../../../lib/api';
 import { utcHourToISTLabel } from '../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DataTable } from '../../../components/report-shared';
+import { DataTable, Truncate, TLFilter } from '../../../components/report-shared';
 import DateRangeFilter, { formatRangeLabel } from '../../../components/DateRangeFilter';
 
 /* ── Icons ───────────────────────────────────────── */
@@ -187,6 +187,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
   const [activeTab, setActiveTab] = useState('overview');
+  const [tlFilter, setTlFilter] = useState('');
 
   useEffect(() => {
     const params = { range: dateRange.range };
@@ -331,12 +332,23 @@ export default function AnalyticsPage() {
     fullMark: 100,
   }));
 
-  const agentRows = employees.map((emp) => {
-    const dialerData = d?.topDialers?.find((dd) => dd.employeeId === emp._id);
-    const callCount = dialerData?.count ?? 0;
-    const connRate = callCount > 0 ? Math.round((dialerData?.connected || 0) / callCount * 100) : null;
-    return { ...emp, callCount, connRate, missedCount: dialerData?.missed };
-  });
+  // Sourced from employeeStats (every employee, not just the day's top 5
+  // dialers) so agents with real activity outside the leaderboard don't show
+  // as 0 calls / NaN% — see backend computePeriodStats().
+  const agentRows = employees
+    .filter((emp) => !tlFilter || emp.tlName === tlFilter)
+    .map((emp) => {
+      const es = d?.employeeStats?.find((s) => s.employeeId === emp._id);
+      return {
+        ...emp,
+        callCount: es?.count ?? 0,
+        connectedCount: es?.connectedCalls ?? 0,
+        connRate: es?.count ? es.connRate : null,
+        missedCount: es?.count ? es.missed : null,
+        targetAchievement: es?.targetAchievement ?? null,
+      };
+    })
+    .sort((a, b) => b.callCount - a.callCount);
 
   if (loading) {
     return (
@@ -756,10 +768,11 @@ export default function AnalyticsPage() {
             <div>
               <h3 className="text-sm font-bold text-gray-900">Agent Performance</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                {employees.length} agents · {periodLabel}'s metrics
+                {agentRows.length} agents · {periodLabel}'s metrics
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <TLFilter value={tlFilter} onChange={setTlFilter} />
               <span className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 bg-green-50 text-green-600 rounded-full border border-green-100">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                 Live
@@ -773,7 +786,7 @@ export default function AnalyticsPage() {
               emptyTitle="No employees yet"
               columns={[
                 {
-                  key: '__idx', label: '#', align: 'left', sortable: false, searchable: false, width: 48,
+                  key: '__idx', label: '#', align: 'left', sortable: false, searchable: false, width: 44,
                   render: (_emp, i) => <span className="text-sm font-medium text-gray-400">{i + 1}</span>,
                 },
                 {
@@ -786,23 +799,17 @@ export default function AnalyticsPage() {
                       >
                         {emp.name?.[0]?.toUpperCase()}
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">{emp.name}</p>
-                        <p className="text-xs text-gray-400 hidden sm:block">{emp.email}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900"><Truncate text={emp.name} /></p>
+                        <p className="text-xs text-gray-400 hidden sm:block truncate">{emp.email}</p>
                       </div>
                     </div>
                   ),
                 },
                 {
-                  key: 'role', label: 'Role',
-                  render: (emp) => (
-                    <span
-                      className="text-xs font-medium px-2.5 py-1 rounded-full capitalize"
-                      style={{ background: '#EFF6FF', color: '#2563EB' }}
-                    >
-                      {emp.role}
-                    </span>
-                  ),
+                  key: 'tlName', label: 'Team Lead', filterType: 'select',
+                  filterOptions: [...new Set(agentRows.map((e) => e.tlName).filter(Boolean))],
+                  render: (emp) => emp.tlName ? <Truncate text={emp.tlName} /> : <span className="text-gray-300">—</span>,
                 },
                 {
                   key: 'callCount', label: 'Calls', align: 'right',
@@ -817,11 +824,34 @@ export default function AnalyticsPage() {
                 },
                 {
                   key: 'connRate', label: 'Conn. Rate', align: 'right', searchable: false,
-                  render: (emp) => <span className="text-sm font-semibold text-green-600">{emp.connRate != null ? `${emp.connRate}%` : '—'}</span>,
+                  render: (emp) => (
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="w-14 h-1.5 rounded-full bg-gray-100 overflow-hidden hidden sm:block">
+                        <div className="h-full rounded-full bg-green-500" style={{ width: `${emp.connRate ?? 0}%` }} />
+                      </div>
+                      <span className="text-sm font-semibold text-green-600 tabular-nums">{emp.connRate != null ? `${emp.connRate}%` : '—'}</span>
+                    </div>
+                  ),
                 },
                 {
                   key: 'missedCount', label: 'Missed', align: 'right', searchable: false,
-                  render: (emp) => <span className="text-sm font-semibold text-red-500">{emp.missedCount ?? '—'}</span>,
+                  render: (emp) => <span className="text-sm font-semibold text-red-500 tabular-nums">{emp.missedCount ?? '—'}</span>,
+                },
+                {
+                  key: 'targetAchievement', label: 'Target', align: 'right', searchable: false,
+                  render: (emp) => {
+                    if (emp.targetAchievement == null) return <span className="text-gray-300">—</span>;
+                    const pctv = emp.targetAchievement;
+                    const color = pctv >= 100 ? '#16A34A' : pctv >= 50 ? '#D97706' : '#DC2626';
+                    return (
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="w-14 h-1.5 rounded-full bg-gray-100 overflow-hidden hidden sm:block">
+                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, pctv)}%`, background: color }} />
+                        </div>
+                        <span className="text-sm font-semibold tabular-nums" style={{ color }}>{pctv}%</span>
+                      </div>
+                    );
+                  },
                 },
                 {
                   key: 'isActive', label: 'Status', searchable: false,

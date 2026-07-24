@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
-import { DataTable } from '../../../../components/report-shared';
+import { DataTable, TLFilter, Truncate } from '../../../../components/report-shared';
 
 const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
 
@@ -25,7 +25,8 @@ export default function DailyTargetsPage() {
   const [editId,     setEditId]     = useState(null);
   const [editVal,    setEditVal]    = useState('');
   const [loading,    setLoading]    = useState(true);
-  const [defTarget,  setDefTarget]  = useState(50);
+  const [defTarget,  setDefTarget]  = useState(100);
+  const [tlFilter,   setTlFilter]   = useState('');
 
   useEffect(() => {
     (async () => {
@@ -36,7 +37,10 @@ export default function DailyTargetsPage() {
         ]);
         setEmployees(empRes.data.data||[]);
         const counts = {};
-        (statsRes.data.data?.today?.topDialers||[]).forEach(d=>{ counts[d.employeeId]=d.count; });
+        // employeeStats covers every employee with activity today, not just
+        // the top-5 dialers topDialers is capped to — fixes most employees
+        // showing 0 calls regardless of actual activity.
+        (statsRes.data.data?.today?.employeeStats||[]).forEach(d=>{ counts[d.employeeId]=d.count; });
         setCallCounts(counts);
       } catch {}
       setLoading(false);
@@ -56,21 +60,25 @@ export default function DailyTargetsPage() {
   const setAllTargets = async () => {
     const n = parseInt(defTarget, 10);
     if (isNaN(n)||n<1) return toast.error('Enter a positive number');
+    const targets = tlFilter ? employees.filter((e) => e.tlName === tlFilter) : employees;
     try {
-      await Promise.all(employees.map(e=>api.patch(`/api/employees/${e._id}/target`,{dailyTarget:n})));
-      setEmployees(prev=>prev.map(e=>({...e,dailyTarget:n})));
-      toast.success(`Set ${n} calls target for all ${employees.length} agents`);
+      await Promise.all(targets.map(e=>api.patch(`/api/employees/${e._id}/target`,{dailyTarget:n})));
+      const ids = new Set(targets.map((e) => e._id));
+      setEmployees(prev=>prev.map(e=>ids.has(e._id)?{...e,dailyTarget:n}:e));
+      toast.success(`Set ${n} calls target for ${targets.length} agent${targets.length === 1 ? '' : 's'}${tlFilter ? ` under ${tlFilter}` : ''}`);
     } catch { toast.error('Failed to set targets'); }
   };
 
-  const getTarget = (emp) => emp.dailyTarget||50;
+  const getTarget = (emp) => emp.dailyTarget||100;
 
-  const totCalls   = Object.values(callCounts).reduce((a,b)=>a+b,0);
-  const totTargets = employees.reduce((a,e)=>a+getTarget(e),0);
+  const visibleEmployees = employees.filter((e) => !tlFilter || e.tlName === tlFilter);
+
+  const totCalls   = visibleEmployees.reduce((a,e)=>a+(callCounts[e._id]||0),0);
+  const totTargets = visibleEmployees.reduce((a,e)=>a+getTarget(e),0);
   const overallPct = totTargets ? Math.min(100, Math.round((totCalls/totTargets)*100)) : 0;
-  const achieved   = employees.filter(e=>(callCounts[e._id]||0)>=getTarget(e)).length;
+  const achieved   = visibleEmployees.filter(e=>(callCounts[e._id]||0)>=getTarget(e)).length;
 
-  const summaryRows = employees.map(emp => {
+  const summaryRows = visibleEmployees.map(emp => {
     const calls  = callCounts[emp._id]||0;
     const target = getTarget(emp);
     const gap    = Math.max(0,target-calls);
@@ -98,6 +106,7 @@ export default function DailyTargetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <TLFilter value={tlFilter} onChange={setTlFilter} />
           <input type="number" min="1" max="500" value={defTarget}
             onChange={e=>setDefTarget(e.target.value)}
             className="form-input w-20 text-center"/>
@@ -122,10 +131,10 @@ export default function DailyTargetsPage() {
 
       {/* Employee cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger">
-        {employees.length === 0 && (
+        {visibleEmployees.length === 0 && (
           <div className="col-span-full text-center py-16 text-sm" style={{ color:'#94A3B8' }}>No employees found</div>
         )}
-        {employees.map((emp,i)=>{
+        {visibleEmployees.map((emp,i)=>{
           const calls  = callCounts[emp._id]||0;
           const target = getTarget(emp);
           const done   = calls >= target;
@@ -141,7 +150,8 @@ export default function DailyTargetsPage() {
                     {emp.name.slice(0,2).toUpperCase()}
                   </div>
                   <div>
-                    <p className="font-semibold text-sm leading-none" style={{ color:'#0F172A' }}>{emp.name}</p>
+                    <p className="font-semibold text-sm leading-none" style={{ color:'#0F172A' }}><Truncate text={emp.name} /></p>
+                    {emp.tlName && <p className="text-[10px] mt-0.5" style={{ color:'#94A3B8' }}>TL: <Truncate text={emp.tlName} max={14} /></p>}
                     {done&&<span className="text-[10px] font-bold tracking-wide" style={{ color:'#16A34A' }}>TARGET MET ✓</span>}
                   </div>
                 </div>
@@ -191,7 +201,8 @@ export default function DailyTargetsPage() {
             getRowId={(emp) => emp._id}
             emptyTitle="No employees found"
             columns={[
-              { key: 'name', label: 'Agent', render: (emp) => <span className="font-medium" style={{ color:'#0F172A' }}>{emp.name}</span> },
+              { key: 'name', label: 'Agent', render: (emp) => <span className="font-medium" style={{ color:'#0F172A' }}><Truncate text={emp.name} /></span> },
+              { key: 'tlName', label: 'TL', render: (emp) => emp.tlName ? <Truncate text={emp.tlName} max={14} /> : <span style={{ color:'#CBD5E1' }}>—</span> },
               { key: 'calls', label: 'Calls', align: 'right', render: (emp) => <span style={{ fontWeight:700, color:'#2563EB' }}>{emp.calls}</span> },
               { key: 'target', label: 'Target', align: 'right', render: (emp) => <span style={{ color:'#374151' }}>{emp.target}</span> },
               {

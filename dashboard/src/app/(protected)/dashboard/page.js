@@ -9,6 +9,7 @@ import {
 import api from '../../../lib/api';
 import CallTypeBadge from '../../../components/CallTypeBadge';
 import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../components/DateRangeFilter';
+import { Truncate } from '../../../components/report-shared';
 import { motion, AnimatePresence } from 'framer-motion';
 
 
@@ -857,67 +858,67 @@ export default function DashboardPage() {
                 <p className="text-sm text-gray-500">Waiting for live calls…</p>
               </div>
             ) : (
-              <div className="overflow-x-auto -mx-2">
-                <div className="max-h-[300px] overflow-y-auto px-2">
+              <div className="rounded-xl border border-gray-100 overflow-hidden">
+                <div className="max-h-[340px] overflow-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 rounded-xl">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-gray-50 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                           Employee
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
                           Contact
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
                           Type
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                           Duration
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                           Time
                         </th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          remarks
+                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                          Remarks
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-gray-50 bg-white">
                       {liveFeed.map((log, i) => (
                         <motion.tr
                           key={i}
                           initial={{ opacity: 0, x: -20 }}
                           animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.02 }}
-                          className="hover:bg-gray-50/50 transition-colors duration-150"
+                          transition={{ delay: Math.min(i * 0.02, 0.3) }}
+                          className={`hover:bg-blue-50/40 transition-colors duration-150 ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}
                         >
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2.5">
                               <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
                                 {(log.employeeName || '?')[0].toUpperCase()}
                               </div>
-                              <span className="font-medium text-gray-900 truncate max-w-[80px]">
-                                {log.employeeName}
+                              <span className="font-medium text-gray-900">
+                                <Truncate text={log.employeeName} />
                               </span>
                             </div>
                           </td>
                           <td className="px-4 py-3 hidden sm:table-cell">
-                            <p className="text-gray-900">{log.contactNumber}</p>
+                            <p className="text-gray-900 tabular-nums">{log.contactNumber}</p>
                             {log.contactName && log.contactName !== 'Unknown' && (
-                              <p className="text-xs text-gray-500">{log.contactName}</p>
+                              <p className="text-xs text-gray-500"><Truncate text={log.contactName} /></p>
                             )}
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell">
                             <CallTypeBadge type={log.callType} />
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-gray-700">
+                          <td className="px-4 py-3 hidden lg:table-cell text-gray-700 tabular-nums whitespace-nowrap">
                             {log.duration ? `${Math.floor(log.duration / 60)}m ${log.duration % 60}s` : '—'}
                           </td>
-                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums">
                             {fmtTime(log.timestamp, timezone)}
                           </td>
-                          <td className="px-4 py-3">
-                            {log.remarks || '—'}
+                          <td className="px-4 py-3 text-gray-600">
+                            <Truncate text={log.remarks} />
                           </td>
                         </motion.tr>
                       ))}
