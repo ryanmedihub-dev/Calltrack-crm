@@ -8,16 +8,7 @@ const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
-
-function fmtDuration(seconds) {
-  if (!seconds || seconds <= 0) return '0s';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
+const fmtDuration = require('../lib/formatDuration');
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
 function getISTDateBounds(offsetDays = 0) {
@@ -629,7 +620,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Contact Type,Type,Call Status,Duration (s),Notes,Lead Linked,Synced\n';
+    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Contact Type,Type,Call Status,Duration,Notes,Lead Linked,Synced\n';
     res.write(header);
 
     let jobBuf = [header];
@@ -650,7 +641,7 @@ router.get('/export', protect, isManager, async (req, res) => {
         contactType,
         doc.callType || '',
         csvEsc(doc.callStatus),
-        doc.duration || 0,
+        fmtDuration(doc.duration),
         csvEsc(doc.notes),
         doc.leadId ? 'Yes' : 'No',
         doc.synced ? 'Yes' : 'No',

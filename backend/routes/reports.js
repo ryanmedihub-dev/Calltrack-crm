@@ -6,16 +6,7 @@ const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
-
-function fmtDuration(seconds) {
-  if (!seconds || seconds <= 0) return '0s';
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
+const fmtDuration = require('../lib/formatDuration');
 
 // Parses a 'YYYY-MM-DD' IST calendar-date string (as sent by the dashboard's
 // date-range filters) into the UTC instant of that day's IST start/end — using
@@ -901,7 +892,7 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
 
     const header = [
       'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
-      'Total Calls', 'Connected Calls', 'Total Talktime', 'Total Talktime (s)',
+      'Total Calls', 'Connected Calls', 'Total Talktime',
       'Leads Assigned', 'Leads Converted', 'Conversion Rate (%)', 'Target Achievement (%)',
       'Joined At'
     ].join(',') + '\n';
@@ -929,7 +920,6 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
         c.totalCalls,
         c.connectedCalls,
         fmtDuration(c.totalDuration),
-        c.totalDuration,
         l.leadsAssigned,
         l.leadsConverted,
         conversionRate,

@@ -9,6 +9,7 @@ const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
+const fmtDuration = require('../lib/formatDuration');
 
 // Human-readable description for a single changelog entry, used by GET /logs
 function describeChangelogEntry(action, details) {
@@ -502,7 +503,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     const header = [
       'Name', 'Phone', 'Email', 'Status', 'Assigned To', 'Assigned TL', 'Source', 'Tags',
       'Captured By', 'Imported By', 'Attempts', 'Connected Calls',
-      'Last Call At', 'Last Call Type', 'Last Call Duration (s)', 'Last Call Note', 'Last Call Summary',
+      'Last Call At', 'Last Call Type', 'Last Call Duration', 'Last Call Note', 'Last Call Summary',
       'Last Call Employee', 'Last Call Employee Phone',
       'Follow Up Date', 'Created At'
     ].join(',') + '\n';
@@ -529,7 +530,7 @@ router.get('/export', protect, isManager, async (req, res) => {
         doc.connectedCallCount || 0,
         doc.lastCallAt ? new Date(doc.lastCallAt).toLocaleDateString('en-IN') : '',
         csvEsc(doc.lastCallType),
-        doc.lastCallDuration || 0,
+        fmtDuration(doc.lastCallDuration),
         csvEsc(doc.lastCallNote),
         csvEsc(doc.lastCallSummary),
         csvEsc(doc.lastCallEmployee),
