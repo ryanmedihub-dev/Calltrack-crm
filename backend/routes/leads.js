@@ -503,7 +503,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     const header = [
       'Name', 'Phone', 'Email', 'Status', 'Assigned To', 'Assigned TL', 'Source', 'Tags',
       'Captured By', 'Imported By', 'Attempts', 'Connected Calls',
-      'Last Call At', 'Last Call Type', 'Last Call Duration', 'Last Call Note', 'Last Call Summary',
+      'Last Call At', 'Last Call Type', 'Last Call Duration', 'Last Call Remarks', 'Last Call Summary',
       'Last Call Employee', 'Last Call Employee Phone',
       'Follow Up Date', 'Created At'
     ].join(',') + '\n';
@@ -512,6 +512,11 @@ router.get('/export', protect, isManager, async (req, res) => {
     let jobBuf = [header];
     let jobBytes = Buffer.byteLength(header, 'utf8');
     let jobOverflowed = false;
+
+    // Batch rows into ~64KB chunks before flushing — see matching comment on
+    // GET /api/calls/export for why (cuts res.write() call count drastically).
+    const FLUSH_BYTES = 64 * 1024;
+    let outBuf = '';
 
     const cursor = Lead.find(filter).populate('assignedTo', 'name tlName').sort({ createdAt: -1 }).lean().cursor();
     for await (const doc of cursor) {
@@ -538,7 +543,9 @@ router.get('/export', protect, isManager, async (req, res) => {
         doc.followUpDate ? new Date(doc.followUpDate).toLocaleDateString('en-IN') : '',
         new Date(doc.createdAt).toLocaleDateString('en-IN')
       ].join(',') + '\n';
-      res.write(line);
+
+      outBuf += line;
+      if (outBuf.length >= FLUSH_BYTES) { res.write(outBuf); outBuf = ''; }
 
       if (!jobOverflowed) {
         jobBytes += Buffer.byteLength(line, 'utf8');
@@ -546,6 +553,7 @@ router.get('/export', protect, isManager, async (req, res) => {
         else jobBuf.push(line);
       }
     }
+    if (outBuf) res.write(outBuf);
     res.end();
 
     if (job) {

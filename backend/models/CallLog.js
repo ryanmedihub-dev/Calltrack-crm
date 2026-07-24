@@ -21,6 +21,10 @@ const callLogSchema = new mongoose.Schema({
 callLogSchema.index({ employeeId: 1, timestamp: -1 });
 callLogSchema.index({ timestamp: -1 });
 callLogSchema.index({ contactNumber: 1 });
+// Supports the "first ever contact" lookup used by the calls CSV export
+// (New/Repeat column) — an indexed { $sort: timestamp, $limit: 1 } per
+// contact number instead of scanning every historical call for that number.
+callLogSchema.index({ contactNumber: 1, timestamp: 1 });
 callLogSchema.index({ leadId: 1 });
 // Prevents duplicate entries when the mobile retries a sync
 callLogSchema.index({ employeeId: 1, contactNumber: 1, timestamp: 1 }, { unique: true });

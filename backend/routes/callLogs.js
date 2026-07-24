@@ -608,13 +608,27 @@ router.get('/export', protect, isManager, async (req, res) => {
     // Global first-ever-contact map: which contactNumbers (within this export's
     // filter) were called for the very first time ever (across all history, not
     // just this filtered window) — powers the "Contact Type" New/Repeat column.
-    const numbersInExport = await CallLog.find(filter).distinct('contactNumber');
-    const firstSeenAgg = numbersInExport.length
-      ? await CallLog.aggregate([
-          { $match: { contactNumber: { $in: numbersInExport } } },
-          { $group: { _id: '$contactNumber', first: { $min: '$timestamp' } } }
-        ])
-      : [];
+    // Single aggregation: group the filtered set down to its distinct numbers,
+    // then for each one a targeted indexed { $sort: timestamp, $limit: 1 }
+    // lookup (via the {contactNumber:1, timestamp:1} index) instead of the old
+    // two-round-trip distinct()+$group, which had to scan every historical call
+    // for those numbers — this is the main lever on export latency.
+    const firstSeenAgg = await CallLog.aggregate([
+      { $match: filter },
+      { $group: { _id: '$contactNumber' } },
+      { $lookup: {
+          from: 'calllogs',
+          let: { num: '$_id' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$contactNumber', '$$num'] } } },
+            { $sort: { timestamp: 1 } },
+            { $limit: 1 },
+            { $project: { _id: 0, timestamp: 1 } }
+          ],
+          as: 'first'
+      }},
+      { $project: { first: { $arrayElemAt: ['$first.timestamp', 0] } } }
+    ]).allowDiskUse(true);
     const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -626,6 +640,12 @@ router.get('/export', protect, isManager, async (req, res) => {
     let jobBuf = [header];
     let jobBytes = Buffer.byteLength(header, 'utf8');
     let jobOverflowed = false;
+
+    // Batch rows into ~64KB chunks before flushing to the response — cuts the
+    // number of res.write() calls (and underlying TCP writes) by two-plus
+    // orders of magnitude on large exports versus writing one row at a time.
+    const FLUSH_BYTES = 64 * 1024;
+    let outBuf = '';
 
     const cursor = CallLog.find(filter).populate('employeeId', 'name tlName').sort({ timestamp: -1, _id: -1 }).lean().cursor();
     for await (const doc of cursor) {
@@ -646,7 +666,9 @@ router.get('/export', protect, isManager, async (req, res) => {
         doc.leadId ? 'Yes' : 'No',
         doc.synced ? 'Yes' : 'No',
       ].join(',') + '\n';
-      res.write(line);
+
+      outBuf += line;
+      if (outBuf.length >= FLUSH_BYTES) { res.write(outBuf); outBuf = ''; }
 
       if (!jobOverflowed) {
         jobBytes += Buffer.byteLength(line, 'utf8');
@@ -654,6 +676,7 @@ router.get('/export', protect, isManager, async (req, res) => {
         else jobBuf.push(line);
       }
     }
+    if (outBuf) res.write(outBuf);
     res.end();
 
     if (job) {
