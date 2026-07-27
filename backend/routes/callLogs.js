@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
+const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
@@ -605,36 +606,17 @@ router.get('/export', protect, isManager, async (req, res) => {
       job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename });
     } catch {}
 
-    // Global first-ever-contact map: which contactNumbers (within this export's
-    // filter) were called for the very first time ever (across all history, not
-    // just this filtered window) — powers the "Contact Type" New/Repeat column.
-    // Single aggregation: group the filtered set down to its distinct numbers,
-    // then for each one a targeted indexed { $sort: timestamp, $limit: 1 }
-    // lookup (via the {contactNumber:1, timestamp:1} index) instead of the old
-    // two-round-trip distinct()+$group, which had to scan every historical call
-    // for those numbers — this is the main lever on export latency.
-    const firstSeenAgg = await CallLog.aggregate([
-      { $match: filter },
-      { $group: { _id: '$contactNumber' } },
-      { $lookup: {
-          from: 'calllogs',
-          let: { num: '$_id' },
-          pipeline: [
-            { $match: { $expr: { $eq: ['$contactNumber', '$$num'] } } },
-            { $sort: { timestamp: 1 } },
-            { $limit: 1 },
-            { $project: { _id: 0, timestamp: 1 } }
-          ],
-          as: 'first'
-      }},
-      { $project: { first: { $arrayElemAt: ['$first.timestamp', 0] } } }
-    ]).allowDiskUse(true);
-    const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
+    // Resolve employee names/TLs via one lookup instead of populate() on the
+    // cursor — populate() re-queries User per row as the cursor iterates,
+    // which turns a 10k-row export into 10k extra round-trips.
+    const employeeIds = await CallLog.distinct('employeeId', filter);
+    const employees = await User.find({ _id: { $in: employeeIds } }, 'name tlName').lean();
+    const employeeMap = new Map(employees.map((e) => [String(e._id), e]));
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Contact Type,Type,Call Status,Duration,Notes,Lead Linked,Synced\n';
+    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Type,Call Status,Duration,Notes,Lead Linked,Synced\n';
     res.write(header);
 
     let jobBuf = [header];
@@ -647,18 +629,17 @@ router.get('/export', protect, isManager, async (req, res) => {
     const FLUSH_BYTES = 64 * 1024;
     let outBuf = '';
 
-    const cursor = CallLog.find(filter).populate('employeeId', 'name tlName').sort({ timestamp: -1, _id: -1 }).lean().cursor();
+    const cursor = CallLog.find(filter).sort({ timestamp: -1, _id: -1 }).lean().cursor();
     for await (const doc of cursor) {
+      const employee = employeeMap.get(String(doc.employeeId));
       const d = new Date(doc.timestamp);
-      const contactType = firstSeenMap.get(doc.contactNumber) === d.getTime() ? 'New' : 'Repeat';
       const line = [
         d.toLocaleDateString('en-IN'),
         d.toLocaleTimeString('en-IN'),
-        csvEsc(doc.employeeId?.name),
-        csvEsc(doc.employeeId?.tlName),
+        csvEsc(employee?.name),
+        csvEsc(employee?.tlName),
         csvEsc(doc.contactName),
         doc.contactNumber || '',
-        contactType,
         doc.callType || '',
         csvEsc(doc.callStatus),
         fmtDuration(doc.duration),

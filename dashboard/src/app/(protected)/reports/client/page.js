@@ -290,24 +290,24 @@ function ClientHistoryTab({ data, page, onPage }) {
         maxBodyHeight={560}
         columns={[
           {
-            key: 'employeeName', label: 'Employee', render: (r) => (
+            key: 'employeeName', label: 'Employee', width: 160, render: (r) => (
               <div>
                 <p className="font-medium text-gray-900"><Truncate text={r.employeeName} /></p>
                 {r.employeeTL && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.employeeTL} max={14} /></p>}
               </div>
             ),
           },
-          { key: 'contactName', label: 'Contact', searchable: false, render: (r) => <Truncate text={r.contactName} /> },
-          { key: 'date', label: 'Date', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
-          { key: 'time', label: 'Time', searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) },
-          { key: 'duration', label: 'Duration', align: 'right', searchable: false, render: (r) => (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—') },
-          { key: 'callType', label: 'Call Type', searchable: false, render: (r) => <CallBadge type={r.callType} /> },
+          { key: 'contactName', label: 'Contact', width: 140, searchable: false, render: (r) => <Truncate text={r.contactName} /> },
+          { key: 'date', label: 'Date', width: 110, searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
+          { key: 'time', label: 'Time', width: 80, searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) },
+          { key: 'duration', label: 'Duration', width: 90, align: 'right', searchable: false, render: (r) => (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—') },
+          { key: 'callType', label: 'Call Type', width: 120, searchable: false, render: (r) => <CallBadge type={r.callType} /> },
           {
-            key: 'callStatus', label: 'Status', searchable: false, render: (r) => r.callStatus
+            key: 'callStatus', label: 'Status', width: 130, searchable: false, render: (r) => r.callStatus
               ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100"><Truncate text={r.callStatus} /></span>
               : <span className="text-gray-300">—</span>,
           },
-          { key: 'notes', label: 'Notes', searchable: false, render: (r) => <Truncate text={r.notes} /> },
+          { key: 'notes', label: 'Notes', width: 240, searchable: false, wrap: true, render: (r) => r.notes || <span className="text-gray-300">—</span> },
         ]}
       />
       <div className="mt-2"><Pagination page={page} pages={data?.pages || 1} onPage={onPage} /></div>

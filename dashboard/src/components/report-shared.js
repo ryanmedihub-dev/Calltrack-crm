@@ -475,7 +475,7 @@ export function DataTable({
                       className={`transition-colors hover:bg-blue-50/40 ${renderExpanded ? 'cursor-pointer' : ''} ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}>
                       {effectiveColumns.map((c) => (
                         <td key={c.key}
-                          className={`${cell} whitespace-nowrap text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
+                          className={`${cell} ${c.wrap ? 'whitespace-normal break-words align-top' : 'whitespace-nowrap overflow-hidden text-ellipsis'} text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
                           {c.render ? c.render(row, i) : (row[c.key] ?? '—')}
                         </td>
                       ))}

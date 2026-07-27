@@ -2,10 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
 const authRoutes      = require('./routes/auth');
 const callLogRoutes   = require('./routes/callLogs');
+const leadFunnelRoutes = require('./routes/leadFunnel');
 const leadRoutes      = require('./routes/leads');
 const reportRoutes    = require('./routes/reports');
 const auditRoutes     = require('./routes/auditLog');
@@ -33,6 +35,9 @@ const corsOptions = {
 };
 
 app.set('trust proxy', 1);
+// Gzips responses — CSV exports compress ~80-90%, cutting download time for the
+// Leads/Call Logs export routes far more than any server-side query speedup can.
+app.use(compression());
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 // Registering a client-built CSV JSON-escapes its content (inflating wire size up to ~2x),
@@ -93,6 +98,10 @@ app.use(async (_req, res, next) => {
 
 app.use('/api/auth',       authRoutes);
 app.use('/api/calls',      callLogRoutes);
+// leadFunnelRoutes MUST be mounted before leadRoutes — leads.js has a
+// GET /:id route that would otherwise swallow /api/leads/funnel-data,
+// treating "funnel-data" as a Lead _id and throwing a Mongoose cast error.
+app.use('/api/leads',      leadFunnelRoutes);
 app.use('/api/leads',      leadRoutes);
 app.use('/api/reports',    reportRoutes);
 app.use('/api/audit-logs', auditRoutes);

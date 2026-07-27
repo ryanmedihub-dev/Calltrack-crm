@@ -497,6 +497,13 @@ router.get('/export', protect, isManager, async (req, res) => {
       job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Leads Export', filename });
     } catch {}
 
+    // Resolve assignee names/TLs via one lookup instead of populate() on the
+    // cursor — populate() re-queries User per row as the cursor iterates,
+    // which turns a large export into thousands of extra round-trips.
+    const assignedToIds = await Lead.distinct('assignedTo', filter);
+    const employees = await User.find({ _id: { $in: assignedToIds } }, 'name tlName').lean();
+    const employeeMap = new Map(employees.map((e) => [String(e._id), e]));
+
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
@@ -518,15 +525,16 @@ router.get('/export', protect, isManager, async (req, res) => {
     const FLUSH_BYTES = 64 * 1024;
     let outBuf = '';
 
-    const cursor = Lead.find(filter).populate('assignedTo', 'name tlName').sort({ createdAt: -1 }).lean().cursor();
+    const cursor = Lead.find(filter).sort({ createdAt: -1 }).lean().cursor();
     for await (const doc of cursor) {
+      const employee = employeeMap.get(String(doc.assignedTo));
       const line = [
         csvEsc(doc.name),
         doc.phone || '',
         doc.email || '',
         doc.status || '',
-        csvEsc(doc.assignedTo?.name),
-        csvEsc(doc.assignedTo?.tlName),
+        csvEsc(employee?.name),
+        csvEsc(employee?.tlName),
         csvEsc(doc.source),
         csvEsc((doc.tags || []).join('; ')),
         csvEsc(doc.capturedBy),
