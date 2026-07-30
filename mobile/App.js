@@ -225,8 +225,10 @@ function App() {
       appState.current = nextState;
     });
 
-    // Path 5: Poll every 4s for native pending call only (does NOT open modal)
-    pollTimer.current = setInterval(pollNativePending, 4000);
+    // Path 5: Poll for native pending call only (does NOT open modal). Native now queues
+    // pending calls instead of a single overwritable slot, so a slower poll can no longer
+    // lose one — it just delays that call's popup by a few seconds.
+    pollTimer.current = setInterval(pollNativePending, 10000);
     syncTimer.current = setInterval(doSync, 60_000);
 
     processPendingQueue().then(() => getPendingCount().then(setPendingCount));

@@ -5,7 +5,6 @@ import {
   ActivityIndicator, ScrollView, Platform, BackHandler, Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../lib/api';
 import { saveCallLog, syncCallLogs, flushPendingEnriches } from '../services/callLogService';
 import { saveNote } from '../utils/callNotes';
 import { Colors } from '../theme/colors';
@@ -94,13 +93,20 @@ export default function PostCallScreen({ call, onDone }) {
     onDone();
   };
 
-  const doSave = async () => {
+  // Fast, local-only writes — awaited before the modal closes. Finding/creating the
+  // matching lead now happens server-side in POST /api/calls/sync (it already knows the
+  // employee and the exact contact number, so it doesn't need to guess), which is what
+  // lets Save close the modal immediately instead of waiting on ~8 sequential round trips.
+  const doSaveLocal = async () => {
     const enriched = {
       ...call,
       status:       status || undefined,
       notes:        note.trim() || undefined,
       tags:         status ? [status] : [],
       followUpDate: followUpDate || undefined,
+      // Tells the backend sync this call was actually submitted (Save tapped), not just
+      // picked up by a routine background resync — gates lead creation/status updates.
+      submittedViaPostCall: true,
     };
 
     await saveCallLog(enriched);
@@ -127,90 +133,22 @@ export default function PostCallScreen({ call, onDone }) {
         );
       } catch {}
     }
+  };
 
+  // Network sync — runs in the background after the modal has already closed. Existing
+  // retry infra (syncCallLogs' own pending queue, flushPendingEnriches' per-key retry)
+  // already covers retrying on failure, so this doesn't need its own queue.
+  const doSaveRemote = async () => {
     await syncCallLogs();
     await flushPendingEnriches().catch(() => {});
-
-    // Read current user from AsyncStorage
-    let userId;
-    try {
-      const userStr = await AsyncStorage.getItem('user');
-      userId = userStr ? JSON.parse(userStr)?._id : undefined;
-    } catch {}
-
-    // Find matching lead → update, or create new one
-    try {
-      const callDigits = digitsOnly(call.contactNumber);
-      const findMatch  = (leads) =>
-        leads.find((l) => {
-          const d = digitsOnly(l.phone);
-          return d.endsWith(callDigits) || callDigits.endsWith(d);
-        });
-
-      let res  = await api.get('/api/leads/assigned', { params: { limit: 200 } }).catch(() => null);
-      let all  = res?.data?.data?.leads || [];
-      let lead = findMatch(all);
-
-      if (!lead) {
-        await new Promise((r) => setTimeout(r, 500));
-        res  = await api.get('/api/leads/assigned', { params: { limit: 200 } }).catch(() => null);
-        all  = res?.data?.data?.leads || [];
-        lead = findMatch(all);
-      }
-
-      if (lead) {
-        // Existing lead — update call outcome
-        await api.put(`/api/leads/${lead._id}`, {
-          ...(status       && { status }),
-          ...(note.trim()  && { lastCallNote: note.trim() }),
-          ...(status       && { lastCallSummary: status }),
-          ...(followUpDate && { followUpDate }),
-        });
-      } else {
-        // No lead exists — every submitted call is an attempt, so log/create
-        // one regardless of whether a status/note/follow-up was filled in.
-        const contactName = call.contactName && call.contactName !== 'Unknown'
-          ? call.contactName
-          : call.contactNumber;
-
-        // Find the synced call log id via employee-accessible endpoint
-        let callId;
-        if (userId) {
-          try {
-            const today = new Date(); today.setHours(0, 0, 0, 0);
-            const logsRes = await api.get(`/api/calls/employee/${userId}`, {
-              params: { startDate: today.toISOString(), limit: 50 }
-            }).catch(() => null);
-            const logs = logsRes?.data?.data?.calls || [];
-            const ts   = new Date(call.timestamp).getTime();
-            const matched = logs.find((c) => {
-              const d = digitsOnly(c.contactNumber);
-              const samePhone = d.endsWith(callDigits) || callDigits.endsWith(d);
-              return samePhone && Math.abs(new Date(c.timestamp).getTime() - ts) < 180_000;
-            });
-            callId = matched?._id;
-          } catch {}
-        }
-
-        await api.post('/api/leads/from-call', {
-          name:       contactName,
-          phone:      call.contactNumber,
-          source:     'Call',
-          status:     status || 'contacted',
-          assignedTo: userId,
-          callId,
-          ...(note.trim()  && { lastCallNote: note.trim() }),
-          ...(followUpDate && { followUpDate }),
-        });
-      }
-    } catch {}
   };
 
   const handleSave = async () => {
     if (!call) return;
     setSaving(true);
     Keyboard.dismiss();
-    try { await doSave(); } catch {}
+    try { await doSaveLocal(); } catch {}
+    doSaveRemote().catch(() => {});
     setSaving(false);
     onDone();
   };
@@ -219,7 +157,8 @@ export default function PostCallScreen({ call, onDone }) {
     if (!call) return;
     setSavingWa(true);
     Keyboard.dismiss();
-    try { await doSave(); } catch {}
+    try { await doSaveLocal(); } catch {}
+    doSaveRemote().catch(() => {});
     // Open WhatsApp BEFORE closing the screen — await ensures the intent is dispatched
     await openWhatsApp(call.contactNumber);
     setSavingWa(false);

@@ -4,9 +4,13 @@ import api from '../lib/api';
 const PREFIX = 'callnote_';
 
 function makeKey(call) {
+  // clientCallId is generated once natively (deterministic hash of number+timestamp) and the
+  // backend echoes it back on every synced CallLog doc, so it's stable before AND after sync —
+  // preferring it means the note key never has to migrate when a call gets a server _id.
+  if (call.clientCallId) return `${PREFIX}cid_${call.clientCallId}`;
   if (call._id) return `${PREFIX}id_${call._id}`;
-  // Fallback for calls without a server id — collides across repeat calls to
-  // the same number/day/type, so only used when _id is unavailable.
+  // Legacy fallback for calls captured before clientCallId existed — collides across repeat
+  // calls to the same number/day/type, so only used when neither id above is available.
   const date = new Date(call.timestamp).toISOString().split('T')[0];
   const num  = (call.contactNumber || '').replace(/\D/g, '');
   return `${PREFIX}${num}_${date}_${call.callType}`;

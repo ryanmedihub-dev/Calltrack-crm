@@ -98,9 +98,6 @@ app.use(async (_req, res, next) => {
 
 app.use('/api/auth',       authRoutes);
 app.use('/api/calls',      callLogRoutes);
-// leadFunnelRoutes MUST be mounted before leadRoutes — leads.js has a
-// GET /:id route that would otherwise swallow /api/leads/funnel-data,
-// treating "funnel-data" as a Lead _id and throwing a Mongoose cast error.
 app.use('/api/leads',      leadFunnelRoutes);
 app.use('/api/leads',      leadRoutes);
 app.use('/api/reports',    reportRoutes);

@@ -10,6 +10,16 @@ const normalizePhone = require('../lib/normalizePhone');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
+const { createLeadFromCall } = require('../lib/leadFromCall');
+
+// Stable per-call key used for both in-payload collapsing and the "already synced"
+// lead-linking lookup — prefers the device-generated clientCallId (stable across resyncs)
+// and only falls back to the timestamp triplet for calls synced before it existed.
+function callKey(d) {
+  return d.clientCallId
+    ? `cid_${d.clientCallId}`
+    : `${d.employeeId}_${d.contactNumber}_${new Date(d.timestamp).toISOString()}`;
+}
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
 function getISTDateBounds(offsetDays = 0) {
@@ -241,10 +251,21 @@ router.post('/sync', protect, async (req, res) => {
         timestamp:     c.timestamp,
         notes:         c.notes,
         callStatus:    c.callStatus,
+        clientCallId:  c.clientCallId || null,
+        submittedViaPostCall: !!c.submittedViaPostCall,
         employeeId:    req.user._id,
         synced:        true
       }))
       .filter((d) => d.contactNumber && d.timestamp && d.callType);
+
+    // Whether any copy of this call in the batch was actually submitted through the
+    // post-call form (Save tapped) rather than just picked up by a routine background
+    // sync — gates whether an unmatched call is allowed to auto-create a new lead below.
+    const submittedMap = new Map();
+    for (const d of docs) {
+      const key = callKey(d);
+      submittedMap.set(key, submittedMap.get(key) || d.submittedViaPostCall);
+    }
 
     // The mobile app resyncs the whole day's calls on every sync (e.g. once the
     // post-call popup is filled in, the same call is resent with notes/callStatus
@@ -260,7 +281,7 @@ router.post('/sync', protect, async (req, res) => {
     // stop two upserts for the same not-yet-existing key racing each other.
     const byKey = new Map();
     for (const d of docs) {
-      const key = `${d.employeeId}_${d.contactNumber}_${new Date(d.timestamp).toISOString()}`;
+      const key = callKey(d);
       const prev = byKey.get(key);
       byKey.set(key, prev ? {
         ...prev,
@@ -271,13 +292,23 @@ router.post('/sync', protect, async (req, res) => {
     }
 
     const ops = [...byKey.values()].map((d) => {
-      const setOnInsert = { callType: d.callType, contactName: d.contactName, synced: true };
+      const setOnInsert = {
+        callType: d.callType, contactName: d.contactName, synced: true,
+        contactNumber: d.contactNumber, timestamp: d.timestamp,
+        ...(d.clientCallId ? { clientCallId: d.clientCallId } : {}),
+      };
       const set = {};
       if (d.notes)      set.notes      = d.notes;
       if (d.callStatus) set.callStatus = d.callStatus;
+      // clientCallId is the primary dedup key going forward (stable across resyncs, unlike
+      // an exact timestamp match) — only fall back to the timestamp triplet for calls
+      // synced by an app version that predates it.
+      const filter = d.clientCallId
+        ? { employeeId: d.employeeId, clientCallId: d.clientCallId }
+        : { employeeId: d.employeeId, contactNumber: d.contactNumber, timestamp: d.timestamp };
       return {
         updateOne: {
-          filter: { employeeId: d.employeeId, contactNumber: d.contactNumber, timestamp: d.timestamp },
+          filter,
           update: {
             $setOnInsert: setOnInsert,
             // Android's CallLog.Calls.DURATION isn't always finalized the instant a call
@@ -308,8 +339,10 @@ router.post('/sync', protect, async (req, res) => {
     // means every call still gets counted toward Lead.attempts exactly once, even
     // if the lead didn't exist yet on an earlier sync and only appeared later.
     const batchKeys = docs
-      .map((d) => ({ employeeId: req.user._id, contactNumber: d.contactNumber, timestamp: d.timestamp }))
-      .filter((k) => k.contactNumber && k.timestamp);
+      .map((d) => d.clientCallId
+        ? { employeeId: req.user._id, clientCallId: d.clientCallId }
+        : { employeeId: req.user._id, contactNumber: d.contactNumber, timestamp: d.timestamp })
+      .filter((k) => k.clientCallId || (k.contactNumber && k.timestamp));
     const batchDocs = batchKeys.length ? await CallLog.find({ $or: batchKeys }) : [];
 
     const phoneToLead = {};
@@ -323,12 +356,16 @@ router.post('/sync', protect, async (req, res) => {
       if (log.leadId) continue; // already linked + counted on a previous sync
 
       const lead = phoneToLead[log.contactNumber];
+      const fuDate = followUpMap[log.contactNumber];
+      // Only a call actually submitted through the post-call form (Save tapped) should be
+      // able to update a lead's pipeline status or create a brand-new lead — a routine
+      // background resync of the day's raw call log must not do either on its own.
+      const wasSubmitted = submittedMap.get(callKey(log)) || false;
 
       if (lead) {
         // Existing lead: update call stats + add callLog reference
         await CallLog.findByIdAndUpdate(log._id, { leadId: lead._id });
 
-        const fuDate = followUpMap[log.contactNumber];
         const updateData = {
           $inc: { attempts: 1 },
           $set: {
@@ -359,11 +396,37 @@ router.post('/sync', protect, async (req, res) => {
         if (fuDate) updateData.$set.followUpDate = new Date(fuDate);
         if (log.callStatus) updateData.$set.lastCallSummary = log.callStatus;
         if (log.notes && log.notes.trim()) updateData.$set.lastCallNote = log.notes.trim();
+        // Mirrors the old client-side PUT /api/leads/:id, which only ever ran from inside
+        // the post-call Save flow — the lead's actual pipeline status only moves here too.
+        if (wasSubmitted && log.callStatus) updateData.$set.status = log.callStatus;
 
         await Lead.findByIdAndUpdate(lead._id, updateData);
 
+      } else if (wasSubmitted) {
+        // No lead exists yet, but the employee explicitly submitted this call — create
+        // one, mirroring the old client-side POST /api/leads/from-call fallback.
+        try {
+          const contactName = log.contactName && log.contactName !== 'Unknown'
+            ? log.contactName
+            : log.contactNumber;
+          const newLead = await createLeadFromCall({
+            actor:  req.user,
+            call:   log,
+            name:   contactName,
+            phone:  log.contactNumber,
+            source: 'Call',
+            status: log.callStatus || 'contacted',
+            note:   log.notes,
+            followUpDate: fuDate,
+          });
+          await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
+          phoneToLead[log.contactNumber] = newLead; // so later logs in this batch link to it too
+        } catch (_err) {
+          // Rare race (two calls to the same brand-new number synced concurrently) — the
+          // lead created by the other request will be picked up by phoneToLead next sync.
+        }
       }
-      // No number in system — call log saved, lead is created only when employee explicitly submits via the app
+      // No number in system and never submitted via the app — call log saved, nothing else to do.
     }
 
     const pusher = getPusher();

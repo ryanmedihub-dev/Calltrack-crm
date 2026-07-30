@@ -10,6 +10,7 @@ const { logAction } = require('../lib/audit');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
+const { createLeadFromCall } = require('../lib/leadFromCall');
 
 // Human-readable description for a single changelog entry, used by GET /logs
 function describeChangelogEntry(action, details) {
@@ -426,33 +427,9 @@ router.post('/from-call', protect, async (req, res) => {
       return res.json({ success: true, data: updated, message: 'Lead already exists, linked to call' });
     }
 
-    const lead = await Lead.create({
-      name: name || phone,
-      phone: normalizePhone(phone) || phone,
-      email,
-      source: source || 'Call',
-      assignedTo: assignedTo || req.user._id,
-      status,
-      capturedBy: req.user.name,
-      callLogs: callId ? [callId] : [],
-      // Every call to /from-call represents an actual attempted call — count it,
-      // even though there's no prior Lead to increment.
-      attempts:             1,
-      connectedCallCount:   call && call.duration > 0 ? 1 : 0,
-      lastCallAt:            call ? call.timestamp : new Date(),
-      lastCallType:          call ? call.callType : undefined,
-      lastCallDuration:      call ? (call.duration || 0) : 0,
-      lastCallEmployee:      req.user.name,
-      lastCallEmployeePhone: req.user.phone || '',
-      lastCallNote:          lastCallNote ? lastCallNote.trim() : undefined,
-      lastCallSummary:       status,
-      followUpDate:          followUpDate ? new Date(followUpDate) : undefined,
-      changelog: [{
-        changedBy:     req.user._id,
-        changedByName: req.user.name,
-        action:        'created',
-        details:       { source: 'from_call', callId }
-      }]
+    const lead = await createLeadFromCall({
+      actor: req.user, call, name, phone, email, source, assignedTo, status,
+      note: lastCallNote, followUpDate,
     });
     if (callId) await CallLog.findByIdAndUpdate(callId, { leadId: lead._id });
     return res.status(201).json({ success: true, data: lead, message: 'Lead created from call' });

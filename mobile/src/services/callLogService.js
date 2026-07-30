@@ -135,16 +135,24 @@ async function doSyncCallLogs() {
   const mergedLogs = nativeLogs.map((log) => {
     const logPhone = (log.contactNumber || '').replace(/\D/g, '');
     const logTs    = new Date(log.timestamp).getTime();
-    const enriched = localLogs.find((local) => {
-      const localPhone = (local.contactNumber || '').replace(/\D/g, '');
-      const samePhone  = localPhone.endsWith(logPhone) || logPhone.endsWith(localPhone);
-      return samePhone && Math.abs(new Date(local.timestamp).getTime() - logTs) < 180_000;
-    });
+    // Prefer an exact clientCallId match (stable id, no drift) over the fuzzy phone+time
+    // window — only fall back to fuzzy matching when either side lacks a clientCallId
+    // (e.g. an entry saved before this id existed).
+    const enriched = (log.clientCallId && localLogs.find((local) => local.clientCallId === log.clientCallId))
+      || localLogs.find((local) => {
+        const localPhone = (local.contactNumber || '').replace(/\D/g, '');
+        const samePhone  = localPhone.endsWith(logPhone) || logPhone.endsWith(localPhone);
+        return samePhone && Math.abs(new Date(local.timestamp).getTime() - logTs) < 180_000;
+      });
     if (!enriched) return log;
     return {
       ...log,
       notes:      enriched.notes      || log.notes,
       callStatus: enriched.status     || enriched.callStatus || log.callStatus,
+      // Marks that this call was actually submitted through the post-call form (Save was
+      // tapped), as opposed to just being picked up by a routine background sync — the
+      // backend uses this to decide whether an unmatched call should create a new lead.
+      submittedViaPostCall: !!(enriched.submittedViaPostCall || log.submittedViaPostCall),
     };
   });
 

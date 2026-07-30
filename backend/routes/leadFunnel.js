@@ -1,8 +1,3 @@
-// backend/routes/leadFunnel.js
-//
-// Dedicated route for the Ryan CRM "Lead Funnel" super-admin page.
-// Separate from leads.js on purpose — it's a read-only aggregation surface
-// consumed by another system (Ryan CRM), not part of the normal lead CRUD flow.
 
 const express = require('express');
 const router = express.Router();

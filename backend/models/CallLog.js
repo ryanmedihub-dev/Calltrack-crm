@@ -13,6 +13,9 @@ const callLogSchema = new mongoose.Schema({
   timestamp:     { type: Date, required: true },
   notes:         { type: String },
   callStatus:    { type: String, default: null },
+  // Stable id generated once on-device (deterministic hash of number+timestamp) — lets sync
+  // dedup on an id that never drifts across resyncs, instead of an exact timestamp match.
+  clientCallId:  { type: String, default: null },
   leadId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
   synced:        { type: Boolean, default: true },
   createdAt:     { type: Date, default: Date.now }
@@ -28,6 +31,12 @@ callLogSchema.index({ contactNumber: 1, timestamp: 1 });
 callLogSchema.index({ leadId: 1 });
 // Prevents duplicate entries when the mobile retries a sync
 callLogSchema.index({ employeeId: 1, contactNumber: 1, timestamp: 1 }, { unique: true });
+// Primary dedup key going forward — partial so legacy rows without a clientCallId never
+// collide with each other on `null`.
+callLogSchema.index(
+  { employeeId: 1, clientCallId: 1 },
+  { unique: true, partialFilterExpression: { clientCallId: { $type: 'string' } } }
+);
 
 const CallLog = mongoose.model('CallLog', callLogSchema);
 
