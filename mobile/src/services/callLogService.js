@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NativeModules } from 'react-native';
+import { NativeModules, DeviceEventEmitter } from 'react-native';
 import api from '../lib/api';
 import { getItem, setItem, removeItem, getAllKeys } from '../lib/storage';
 
@@ -168,6 +168,11 @@ async function doSyncCallLogs() {
         important: false,
       });
     }
+    // Screens that fetch their list once on mount (CallHistoryScreen, etc.) can listen
+    // for this to refresh promptly instead of only showing fresh data on next mount —
+    // `result.synced` only counts brand-new rows, so this fires even when a sync only
+    // updated existing rows (e.g. a note/status attached after the bare call already synced).
+    DeviceEventEmitter.emit('calltrack:synced', result);
     return result;
   } catch (err) {
     await addToPendingQueue(mergedLogs);

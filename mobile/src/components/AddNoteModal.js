@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, Modal, TouchableOpacity, TextInput,
   ScrollView, KeyboardAvoidingView, Platform, Animated
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceEventEmitter } from 'react-native';
 import { Colors } from '../theme/colors';
 import TagChip from './TagChip';
 import { TAGS } from '../utils/tagColors';
@@ -111,6 +111,11 @@ export default function AddNoteModal({ call, visible, onClose }) {
         await queueNoteUpdate(call._id, patch);
       }
     }
+    // This PATCHes the backend directly rather than going through syncCallLogs(), so it
+    // wouldn't otherwise trigger the same refresh signal that flow emits — screens showing
+    // this call's note (e.g. CallHistoryScreen) would keep showing the stale version until
+    // their next unrelated refresh.
+    DeviceEventEmitter.emit('calltrack:synced', {});
     setSaving(false);
     onClose?.();
   };

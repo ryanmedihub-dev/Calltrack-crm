@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect, memo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Animated, PanResponder, Linking, Alert, Dimensions,
+  Animated, PanResponder, Linking, Alert, Dimensions, DeviceEventEmitter,
 } from 'react-native';
 import { formatDuration } from '../utils/formatDuration';
 import { getNote } from '../utils/callNotes';
@@ -122,6 +122,16 @@ function CallCard({ call, onNote, onDelete, onFollowUp, onAddToLeads, onHistory,
   const slideX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => { getNote(call).then(setNoteData); }, [call]);
+
+  // A note edited elsewhere (AddNoteModal) or a background sync landing this call's
+  // enriched data won't change this card's `call` prop identity on its own, so the
+  // effect above wouldn't re-run — this catches both and refreshes the local copy.
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('calltrack:synced', () => {
+      getNote(call).then(setNoteData);
+    });
+    return () => sub.remove();
+  }, [call]);
 
   // ── Press animations ──
   const pressIn  = () => Animated.spring(scale, { toValue: 0.982, useNativeDriver: true, speed: 50, bounciness: 0 }).start();

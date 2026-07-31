@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, RefreshControl, StatusBar, Modal, ScrollView,
-  Animated, Platform, ActivityIndicator, Alert,
+  Animated, Platform, ActivityIndicator, Alert, DeviceEventEmitter,
 } from 'react-native';
 import api from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -338,6 +338,31 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
       try { if (s) setPendingCount(JSON.parse(s).length); } catch {}
     });
   }, []);
+
+  // Any background sync (post-call save, periodic timer, another screen) can land data
+  // for this list well after the mount-time fetch above already ran. Without this, the
+  // screen only shows it once you leave and come back — this refetches as soon as a sync
+  // actually completes, so a just-saved remark/status shows up promptly instead of stale.
+  useEffect(() => {
+    if (!userId) return;
+    const sub = DeviceEventEmitter.addListener('calltrack:synced', () => {
+      fetchCalls(1, userId);
+    });
+    return () => sub.remove();
+  }, [userId]);
+
+  // Quiet background refresh while this screen is actually open — the event listener
+  // above only fires on a sync this device triggered; this also picks up calls synced
+  // from elsewhere (another device, a manager action) without needing a manual refresh.
+  // Skipped once the user has scrolled into page 2+ — refetching page 1 there would
+  // replace their loaded list and silently truncate it back to 50 items.
+  useEffect(() => {
+    if (!userId) return;
+    const interval = setInterval(() => {
+      if (page === 1) fetchCalls(1, userId);
+    }, 7000);
+    return () => clearInterval(interval);
+  }, [userId, page]);
 
   const fetchCalls = async (p, uid) => {
     if (loading) return;
