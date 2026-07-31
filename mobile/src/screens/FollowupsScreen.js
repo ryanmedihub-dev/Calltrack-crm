@@ -8,6 +8,7 @@ import api from '../lib/api';
 import ContactAvatar from '../components/ContactAvatar';
 import TagChip from '../components/TagChip';
 import MiniCalendar from '../components/MiniCalendar';
+import CallHistoryModal from '../components/CallHistoryModal';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import { getPendingFollowUps, saveNote, getNote } from '../utils/callNotes';
@@ -164,7 +165,7 @@ function BucketBadge({ bucket }) {
   );
 }
 
-const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule }) {
+const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule, onHistory }) {
   const bucket = dateBucket(item.followUp?.date);
   const borderColor = bucket === 'overdue' ? Colors.danger : bucket === 'today' ? Colors.primary : '#E2E8F0';
 
@@ -207,6 +208,9 @@ const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule }) 
         <TouchableOpacity style={s.actionBtn} onPress={() => onReschedule?.(item)}>
           <Text style={s.actionBtnText}>Reschedule</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={s.actionBtn} onPress={() => onHistory?.(item)}>
+          <Text style={s.actionBtnText}>🕘 History</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={[s.actionBtn, { backgroundColor: Colors.successBg, borderColor: Colors.success }]} onPress={() => onDone?.(item)}>
           <Text style={[s.actionBtnText, { color: Colors.success }]}>Done ✓</Text>
         </TouchableOpacity>
@@ -223,6 +227,7 @@ export default function FollowupsScreen({ onAddNote }) {
   const [showSort, setShowSort]   = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [rescheduleItem, setRescheduleItem] = useState(null);
+  const [historyTarget, setHistoryTarget] = useState(null);
 
   // Date range filter
   const [dateFrom, setDateFrom]           = useState(null);
@@ -346,7 +351,12 @@ export default function FollowupsScreen({ onAddNote }) {
   }, []);
 
   const renderFollowUp = useCallback(({ item }) => (
-    <FollowUpCard item={item} onDone={handleDone} onReschedule={(i) => setRescheduleItem(i)} />
+    <FollowUpCard
+      item={item}
+      onDone={handleDone}
+      onReschedule={(i) => setRescheduleItem(i)}
+      onHistory={(i) => setHistoryTarget({ contactNumber: i.contactNumber, contactName: i.contactName })}
+    />
   ), [handleDone]);
 
   return (
@@ -449,6 +459,13 @@ export default function FollowupsScreen({ onAddNote }) {
         item={rescheduleItem}
         onSave={(newDate) => handleReschedule(rescheduleItem, newDate)}
         onClose={() => setRescheduleItem(null)}
+      />
+
+      <CallHistoryModal
+        visible={!!historyTarget}
+        contactNumber={historyTarget?.contactNumber}
+        contactName={historyTarget?.contactName}
+        onClose={() => setHistoryTarget(null)}
       />
 
       {/* Date Range Sheet */}

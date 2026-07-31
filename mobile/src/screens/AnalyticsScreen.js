@@ -441,6 +441,12 @@ export default function AnalyticsScreen() {
                   value={formatDuration(stats?.avgDuration || 0)}
                   color={Colors.warning}
                 />
+                <StatPill
+                  icon="💼"
+                  label="Working Time"
+                  value={stats?.workingTimeFmt || formatDuration(stats?.workingTimeSec || 0)}
+                  color={Colors.teal}
+                />
               </View>
             </FadeCard>
 

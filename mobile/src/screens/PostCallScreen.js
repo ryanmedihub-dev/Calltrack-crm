@@ -4,7 +4,7 @@ import {
   StyleSheet, Keyboard, StatusBar, Linking,
   ActivityIndicator, ScrollView, Platform, BackHandler, Modal,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setItem } from '../lib/storage';
 import { saveCallLog, syncCallLogs, flushPendingEnriches } from '../services/callLogService';
 import { saveNote } from '../utils/callNotes';
 import { Colors } from '../theme/colors';
@@ -121,7 +121,7 @@ export default function PostCallScreen({ call, onDone }) {
 
     if (note.trim() || status) {
       try {
-        await AsyncStorage.setItem(
+        setItem(
           `calltrack_pending_enrich_${Date.now()}`,
           JSON.stringify({
             contactNumber:   call.contactNumber,

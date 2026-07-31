@@ -116,7 +116,7 @@ const ab = StyleSheet.create({
 
 // ── CallCard ──────────────────────────────────────────────────────────────────
 
-function CallCard({ call, onNote, onDelete, onFollowUp, onAddToLeads, selected, onLongPress, onSelect }) {
+function CallCard({ call, onNote, onDelete, onFollowUp, onAddToLeads, onHistory, selected, onLongPress, onSelect }) {
   const [noteData, setNoteData] = useState({ note: '', tags: [] });
   const scale  = useRef(new Animated.Value(1)).current;
   const slideX = useRef(new Animated.Value(0)).current;
@@ -279,6 +279,8 @@ function CallCard({ call, onNote, onDelete, onFollowUp, onAddToLeads, selected, 
             <ActionBtn icon="📝" label="Note"    onPress={() => onNote?.(call)} />
             <View style={s.sep} />
             <ActionBtn icon="📅" label="Follow"  onPress={() => onFollowUp?.(call)} />
+            <View style={s.sep} />
+            <ActionBtn icon="🕘" label="History" onPress={() => onHistory?.(call)} />
             <View style={s.sep} />
             <ActionBtn icon="✚"  label="Lead"    onPress={() => onAddToLeads?.(call)} highlight />
           </View>

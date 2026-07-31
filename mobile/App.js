@@ -26,10 +26,41 @@ import { applyTrackedSim } from './src/services/simService';
 import { getPendingFollowUps } from './src/utils/callNotes';
 import { syncCallLogs, processPendingQueue, getPendingCount, flushPendingNoteUpdates } from './src/services/callLogService';
 import { setLogoutCallback } from './src/lib/api';
+import { setItem as mmkvSetItem } from './src/lib/storage';
 
 const { CallLogModule } = NativeModules;
 
 const PENDING_CALL_KEY = 'calltrack_pending_post_call';
+
+// One-time migration of the hot-path keys that used to live in AsyncStorage (notes, pending
+// queues, sync timestamp) into MMKV, so upgrading users don't lose in-flight data on the version
+// bump. Guarded by its own flag (kept in AsyncStorage since it only needs to be read once ever)
+// so it never re-runs and never re-imports already-migrated data.
+const MMKV_MIGRATION_DONE_KEY = 'mmkv_migration_done';
+const MMKV_MIGRATION_PREFIXES = ['callnote_', 'calltrack_pending_enrich_'];
+const MMKV_MIGRATION_EXACT_KEYS = [
+  'local_call_logs', 'calltrack_pending_queue', 'calltrack_pending_note_updates', 'last_sync_timestamp',
+];
+
+async function migrateAsyncStorageToMMKV() {
+  try {
+    const done = await AsyncStorage.getItem(MMKV_MIGRATION_DONE_KEY);
+    if (done) return;
+
+    const allKeys = await AsyncStorage.getAllKeys();
+    const keysToMigrate = allKeys.filter((k) =>
+      MMKV_MIGRATION_EXACT_KEYS.includes(k) || MMKV_MIGRATION_PREFIXES.some((p) => k.startsWith(p))
+    );
+
+    if (keysToMigrate.length) {
+      const pairs = await AsyncStorage.multiGet(keysToMigrate);
+      pairs.forEach(([key, value]) => { if (value != null) mmkvSetItem(key, value); });
+      await AsyncStorage.multiRemove(keysToMigrate);
+    }
+
+    await AsyncStorage.setItem(MMKV_MIGRATION_DONE_KEY, '1');
+  } catch {}
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -231,11 +262,13 @@ function App() {
     pollTimer.current = setInterval(pollNativePending, 10000);
     syncTimer.current = setInterval(doSync, 60_000);
 
-    processPendingQueue().then(() => getPendingCount().then(setPendingCount));
-    flushPendingNoteUpdates();
-    refreshFollowUpBadge();
-    pollNativePending();
-    setTimeout(() => pollNativePending(), 1500);
+    migrateAsyncStorageToMMKV().then(() => {
+      processPendingQueue().then(() => getPendingCount().then(setPendingCount));
+      flushPendingNoteUpdates();
+      refreshFollowUpBadge();
+      pollNativePending();
+      setTimeout(() => pollNativePending(), 1500);
+    });
 
     return () => {
       callEndedSub.remove();

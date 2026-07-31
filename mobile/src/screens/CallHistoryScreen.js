@@ -7,6 +7,7 @@ import {
 import api from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CallCard from '../components/CallCard';
+import CallHistoryModal from '../components/CallHistoryModal';
 import MiniCalendar from '../components/MiniCalendar';
 import { CallCardSkeleton } from '../components/SkeletonLoader';
 import { Colors, CALL_TYPE } from '../theme/colors';
@@ -305,6 +306,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [showFilter,     setShowFilter]     = useState(false);
   const [showCustomDate, setShowCustomDate] = useState(false);
+  const [historyTarget,  setHistoryTarget]  = useState(null);
 
   const searchRef = useRef(null);
 
@@ -365,7 +367,12 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     }
     if (search.trim()) {
       const q = search.toLowerCase();
-      r = r.filter((c) => (c.contactName||'').toLowerCase().includes(q) || (c.contactNumber||'').includes(q));
+      const qDigits = search.replace(/\D/g, '');
+      r = r.filter((c) => {
+        const nameMatch = (c.contactName || '').toLowerCase().includes(q);
+        const numberMatch = qDigits.length > 0 && (c.contactNumber || '').replace(/\D/g, '').includes(qDigits);
+        return nameMatch || numberMatch;
+      });
     }
     return r;
   }, [calls, datePreset, customFrom, customTo, search]);
@@ -411,6 +418,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
         onNote={onAddNote}
         onFollowUp={onFollowUp}
         onAddToLeads={handleAddToLeads}
+        onHistory={(call) => setHistoryTarget({ contactNumber: call.contactNumber, contactName: call.contactName })}
       />
     );
   }, [onAddNote, onFollowUp, handleAddToLeads]);
@@ -575,6 +583,12 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
         to={customTo}
         onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); }}
         onClose={() => setShowCustomDate(false)}
+      />
+      <CallHistoryModal
+        visible={!!historyTarget}
+        contactNumber={historyTarget?.contactNumber}
+        contactName={historyTarget?.contactName}
+        onClose={() => setHistoryTarget(null)}
       />
     </View>
   );

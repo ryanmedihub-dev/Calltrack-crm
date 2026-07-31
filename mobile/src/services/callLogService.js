@@ -1,13 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
 import api from '../lib/api';
+import { getItem, setItem, removeItem, getAllKeys } from '../lib/storage';
 
 const LAST_SYNC_KEY   = 'last_sync_timestamp';
 const PENDING_QUEUE_KEY = 'calltrack_pending_queue';
 
 // ------------------------------------------------------------------
 // Native Android call log reading via ContentResolver bridge.
-// Falls back to local AsyncStorage logs if the native module is
+// Falls back to local MMKV-backed logs if the native module is
 // unavailable (e.g. iOS or older builds without the native module).
 // ------------------------------------------------------------------
 
@@ -29,9 +30,9 @@ async function readNativeCallLogs(sinceTimestamp) {
   }
 }
 
-async function readLocalCallLogs_fallback(sinceTimestamp) {
+function readLocalCallLogs_fallback(sinceTimestamp) {
   try {
-    const raw = await AsyncStorage.getItem('local_call_logs');
+    const raw = getItem('local_call_logs');
     const all = raw ? JSON.parse(raw) : [];
     return all.filter((c) => new Date(c.timestamp).getTime() > sinceTimestamp);
   } catch {
@@ -40,35 +41,35 @@ async function readLocalCallLogs_fallback(sinceTimestamp) {
 }
 
 // Called from the app when a call ends — saves to local storage
-export async function saveCallLog(entry) {
+export function saveCallLog(entry) {
   try {
-    const raw  = await AsyncStorage.getItem('local_call_logs');
+    const raw  = getItem('local_call_logs');
     const logs = raw ? JSON.parse(raw) : [];
     logs.unshift({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
-    await AsyncStorage.setItem('local_call_logs', JSON.stringify(logs.slice(0, 500)));
+    setItem('local_call_logs', JSON.stringify(logs.slice(0, 500)));
   } catch {}
 }
 
 // ── Offline pending queue ──────────────────────────────────────────
 
-async function addToPendingQueue(calls) {
+function addToPendingQueue(calls) {
   try {
-    const raw     = await AsyncStorage.getItem(PENDING_QUEUE_KEY);
+    const raw     = getItem(PENDING_QUEUE_KEY);
     const pending = raw ? JSON.parse(raw) : [];
     const merged  = [...pending, ...calls];
-    await AsyncStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(merged.slice(0, 500)));
+    setItem(PENDING_QUEUE_KEY, JSON.stringify(merged.slice(0, 500)));
   } catch {}
 }
 
 export async function processPendingQueue() {
   try {
-    const raw = await AsyncStorage.getItem(PENDING_QUEUE_KEY);
+    const raw = getItem(PENDING_QUEUE_KEY);
     if (!raw) return { synced: 0 };
     const pending = JSON.parse(raw);
     if (!pending.length) return { synced: 0 };
 
     const res = await api.post('/api/calls/sync', { calls: pending });
-    await AsyncStorage.removeItem(PENDING_QUEUE_KEY);
+    removeItem(PENDING_QUEUE_KEY);
     return { synced: res.data.data?.synced || 0 };
   } catch {
     return { synced: 0 };
@@ -77,7 +78,7 @@ export async function processPendingQueue() {
 
 export async function getPendingCount() {
   try {
-    const raw = await AsyncStorage.getItem(PENDING_QUEUE_KEY);
+    const raw = getItem(PENDING_QUEUE_KEY);
     if (!raw) return 0;
     return JSON.parse(raw).length;
   } catch {
@@ -128,7 +129,7 @@ async function doSyncCallLogs() {
   // native call log timestamp drift (Android ContentResolver can be 30s–2min off).
   let localLogs = [];
   try {
-    const raw = await AsyncStorage.getItem('local_call_logs');
+    const raw = getItem('local_call_logs');
     localLogs = raw ? JSON.parse(raw) : [];
   } catch {}
 
@@ -158,7 +159,7 @@ async function doSyncCallLogs() {
 
   try {
     const res = await api.post('/api/calls/sync', { calls: mergedLogs });
-    await AsyncStorage.setItem(LAST_SYNC_KEY, Date.now().toString());
+    setItem(LAST_SYNC_KEY, Date.now().toString());
     const result = { synced: res.data.data?.synced || 0, message: res.data.message };
     if (__DEV__ && console.tron) {
       console.tron.display({
@@ -184,19 +185,19 @@ async function doSyncCallLogs() {
 // from the same triggers that already drive syncCallLogs().
 const NOTE_QUEUE_KEY = 'calltrack_pending_note_updates';
 
-export async function queueNoteUpdate(callId, patch) {
+export function queueNoteUpdate(callId, patch) {
   try {
-    const raw   = await AsyncStorage.getItem(NOTE_QUEUE_KEY);
+    const raw   = getItem(NOTE_QUEUE_KEY);
     const queue = raw ? JSON.parse(raw) : [];
     const next  = queue.filter((q) => q.callId !== callId); // latest edit wins
     next.push({ callId, patch, queuedAt: Date.now() });
-    await AsyncStorage.setItem(NOTE_QUEUE_KEY, JSON.stringify(next.slice(-200)));
+    setItem(NOTE_QUEUE_KEY, JSON.stringify(next.slice(-200)));
   } catch {}
 }
 
 export async function flushPendingNoteUpdates() {
   try {
-    const raw = await AsyncStorage.getItem(NOTE_QUEUE_KEY);
+    const raw = getItem(NOTE_QUEUE_KEY);
     if (!raw) return;
     const queue = JSON.parse(raw);
     if (!queue.length) return;
@@ -209,12 +210,12 @@ export async function flushPendingNoteUpdates() {
         remaining.push(item);
       }
     }
-    await AsyncStorage.setItem(NOTE_QUEUE_KEY, JSON.stringify(remaining));
+    setItem(NOTE_QUEUE_KEY, JSON.stringify(remaining));
   } catch {}
 }
 
 export async function getLastSyncTime() {
-  const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
+  const raw = getItem(LAST_SYNC_KEY);
   return raw ? new Date(parseInt(raw, 10)) : null;
 }
 
@@ -223,8 +224,7 @@ export async function getLastSyncTime() {
 // On successful PATCH the key is deleted; on failure it stays for the next flush attempt.
 export async function flushPendingEnriches() {
   try {
-    const allKeys    = await AsyncStorage.getAllKeys();
-    const enrichKeys = allKeys.filter((k) => k.startsWith('calltrack_pending_enrich_'));
+    const enrichKeys = getAllKeys().filter((k) => k.startsWith('calltrack_pending_enrich_'));
     if (!enrichKeys.length) return;
 
     const userRaw = await AsyncStorage.getItem('user');
@@ -236,8 +236,8 @@ export async function flushPendingEnriches() {
 
     for (const key of enrichKeys) {
       try {
-        const raw = await AsyncStorage.getItem(key);
-        if (!raw) { await AsyncStorage.removeItem(key); continue; }
+        const raw = getItem(key);
+        if (!raw) { removeItem(key); continue; }
         const enrich = JSON.parse(raw);
 
         const callDigits = (enrich.contactNumber || '').replace(/\D/g, '');
@@ -254,7 +254,7 @@ export async function flushPendingEnriches() {
             notes:      enrich.notes   || undefined,
             callStatus: enrich.status  || undefined,
           });
-          await AsyncStorage.removeItem(key);
+          removeItem(key);
         }
       } catch {}
     }

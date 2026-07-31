@@ -8,6 +8,7 @@ import api from '../lib/api';
 import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 import MiniCalendar from '../components/MiniCalendar';
+import CallHistoryModal from '../components/CallHistoryModal';
 import { getCached, setCached } from '../utils/cache';
 
 const LEADS_CACHE_KEY = 'leads_assigned';
@@ -81,7 +82,7 @@ const fmtDur = (sec) => {
 
 // ── Lead Card ─────────────────────────────────────────────────────────────────
 
-const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) {
+const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp, onHistory }) {
   const st      = STATUS[item.status] || { fg: '#64748B', bg: '#F1F5F9', label: item.status || 'Unknown', icon: '❓' };
   const lastAgo = timeAgo(item.lastCallAt);
   const dur     = fmtDur(item.lastCallDuration);
@@ -147,6 +148,9 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp }) 
           </TouchableOpacity>
           <TouchableOpacity style={[lc.btn, lc.btnGhost]} onPress={() => onStatus(item)} activeOpacity={0.8}>
             <Text style={lc.btnGhostTxt}>✏️ Status</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[lc.btn, lc.btnGhost]} onPress={() => onHistory(item)} activeOpacity={0.8}>
+            <Text style={lc.btnGhostTxt}>🕘 History</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -404,6 +408,7 @@ export default function LeadsScreen() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showFilter,     setShowFilter]     = useState(false);
   const [showCustomDate, setShowCustomDate] = useState(false);
+  const [historyTarget,  setHistoryTarget]  = useState(null);
   const searchRef = useRef(null);
 
   const fetchLeads = async () => {
@@ -434,8 +439,11 @@ export default function LeadsScreen() {
   const { displayLeads, statusCounts } = useMemo(() => {
     // Single pass: base filter (no status) → counts, then filter by status → sorted display
     const q = search.trim().toLowerCase();
+    const qDigits = search.replace(/\D/g, '');
     const base = leads.filter(l => {
-      if (q && !(l.name||'').toLowerCase().includes(q) && !(l.phone||'').includes(search.trim())) return false;
+      const nameMatch = q && (l.name||'').toLowerCase().includes(q);
+      const numberMatch = qDigits.length > 0 && (l.phone||'').replace(/\D/g, '').includes(qDigits);
+      if (q && !nameMatch && !numberMatch) return false;
       if (datePreset === 'custom') {
         const created = new Date(l.createdAt);
         if (customFrom && created < customFrom) return false;
@@ -513,6 +521,7 @@ export default function LeadsScreen() {
       onNote={item => setNoteTarget(item)}
       onStatus={item => setStatusTarget(item)}
       onWhatsApp={handleWhatsApp}
+      onHistory={item => setHistoryTarget({ contactNumber: item.phone, contactName: item.name })}
     />
   ), [handleWhatsApp]);
 
@@ -652,6 +661,12 @@ export default function LeadsScreen() {
       <CustomDateSheet visible={showCustomDate} from={customFrom} to={customTo}
         onApply={(f, t) => { setCustomFrom(f); setCustomTo(t); }}
         onClose={() => setShowCustomDate(false)} />
+      <CallHistoryModal
+        visible={!!historyTarget}
+        contactNumber={historyTarget?.contactNumber}
+        contactName={historyTarget?.contactName}
+        onClose={() => setHistoryTarget(null)}
+      />
     </View>
   );
 }

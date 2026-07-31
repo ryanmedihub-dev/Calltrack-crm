@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../lib/api';
+import { getItem, setItem, getAllKeys } from '../lib/storage';
 
 const PREFIX = 'callnote_';
 
@@ -18,7 +18,7 @@ function makeKey(call) {
 
 export async function getNote(call) {
   try {
-    const raw = await AsyncStorage.getItem(makeKey(call));
+    const raw = getItem(makeKey(call));
     return raw ? JSON.parse(raw) : { note: '', tags: [], followUp: null };
   } catch {
     return { note: '', tags: [], followUp: null };
@@ -31,15 +31,14 @@ export async function saveNote(call, data) {
     contactName:   call.contactName   || data.contactName   || '',
     contactNumber: call.contactNumber || data.contactNumber || '',
   };
-  await AsyncStorage.setItem(makeKey(call), JSON.stringify(enriched));
+  setItem(makeKey(call), JSON.stringify(enriched));
 }
 
 export async function getAllNotes() {
   try {
-    const keys = await AsyncStorage.getAllKeys();
-    const noteKeys = keys.filter((k) => k.startsWith(PREFIX));
-    const pairs = await AsyncStorage.multiGet(noteKeys);
-    return pairs.reduce((acc, [key, val]) => {
+    const noteKeys = getAllKeys().filter((k) => k.startsWith(PREFIX));
+    return noteKeys.reduce((acc, key) => {
+      const val = getItem(key);
       if (val) acc[key] = JSON.parse(val);
       return acc;
     }, {});
@@ -49,7 +48,7 @@ export async function getAllNotes() {
 }
 
 // Returns all notes that have a followUp date set and not marked done.
-// Tries backend first so data survives reinstall; falls back to AsyncStorage.
+// Tries backend first so data survives reinstall; falls back to local MMKV storage.
 export async function getPendingFollowUps() {
   try {
     const res = await api.get('/api/calls/pending-followups');
@@ -65,7 +64,7 @@ export async function getPendingFollowUps() {
     }
   } catch {}
 
-  // Offline fallback — local AsyncStorage
+  // Offline fallback — local MMKV storage
   const all = await getAllNotes();
   return Object.entries(all)
     .filter(([, v]) => v.followUp && !v.followUp.done)

@@ -624,6 +624,9 @@ router.get('/my-stats', protect, async (req, res) => {
     const bestHour = callsPerHour.reduce((best, h) => h.count > best.count ? h : best, { hour: -1, count: 0 });
     const connectedRate = s.total > 0 ? Math.round((s.connectedCalls / s.total) * 100) : 0;
     const avgDuration   = s.total > 0 ? Math.round(s.totalDuration / s.total) : 0;
+    // Working Time = talk time (every call attempt's duration, not just connected ones) +
+    // a flat 5 minutes of overhead per call (dialing, wrap-up, etc.)
+    const workingTimeSec = s.totalDuration + (s.total * 5 * 60);
 
     return res.json({
       success: true,
@@ -631,6 +634,8 @@ router.get('/my-stats', protect, async (req, res) => {
         period, ...s,
         avgDuration, connectedRate,
         totalDurationFmt: fmtDuration(s.totalDuration),
+        workingTimeSec,
+        workingTimeFmt: fmtDuration(workingTimeSec),
         callsPerHour,
         bestHour: bestHour.hour >= 0 ? bestHour.hour : null
       }
@@ -803,6 +808,24 @@ router.delete('/:id', protect, async (req, res) => {
     }
     await call.deleteOne();
     return res.json({ success: true, message: 'Call deleted' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/calls/history/:phoneNumber — every synced call to a given number, each with its
+// own notes/callStatus (not just the latest lastCallNote on the Lead), for the mobile app's
+// tap-a-call-to-see-history feature.
+router.get('/history/:phoneNumber', protect, async (req, res) => {
+  try {
+    const number = normalizePhone(req.params.phoneNumber) || req.params.phoneNumber;
+    const filter = { contactNumber: number };
+    if (req.user.role !== 'manager') filter.employeeId = req.user._id;
+    const calls = await CallLog.find(filter)
+      .populate('employeeId', 'name phone tlName')
+      .sort({ timestamp: -1 })
+      .lean();
+    return res.json({ success: true, data: calls.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
