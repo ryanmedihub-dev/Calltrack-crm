@@ -326,9 +326,26 @@ router.post('/sync', protect, async (req, res) => {
 
     let inserted = [];
     if (ops.length) {
-      const result = await CallLog.bulkWrite(ops, { ordered: false });
-      const newIds = Object.values(result.upsertedIds || {});
-      if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
+      try {
+        const result = await CallLog.bulkWrite(ops, { ordered: false });
+        const newIds = Object.values(result.upsertedIds || {});
+        if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
+      } catch (bulkErr) {
+        // An unordered bulkWrite THROWS if even one op fails (e.g. a duplicate-key
+        // collision), even though every other op in the batch still committed — letting
+        // that propagate to the outer catch would 500 the whole sync request and skip the
+        // lead-linking loop below for every other call in this batch too. Surface the
+        // failed ops loudly instead of silently losing whichever call collided, and keep
+        // going with whatever did succeed (the lead-linking loop below re-queries by the
+        // batch's own keys, not by `inserted`, so it isn't affected by this).
+        const writeErrors = bulkErr.writeErrors || bulkErr.result?.writeErrors || [];
+        console.error(
+          `[calls/sync] bulkWrite: ${writeErrors.length || 'unknown count of'} op(s) failed out of ${ops.length}:`,
+          writeErrors.map((e) => ({ index: e.index, code: e.code, message: e.errmsg || e.message }))
+        );
+        const newIds = Object.values(bulkErr.result?.upsertedIds || {});
+        if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
+      }
     }
 
     // Auto-link to lead and update lead call stats / callLogs array.

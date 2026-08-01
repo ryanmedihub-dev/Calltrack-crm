@@ -9,6 +9,7 @@ import TagChip from './TagChip';
 import { TAGS } from '../utils/tagColors';
 import { getNote, saveNote } from '../utils/callNotes';
 import { queueNoteUpdate } from '../services/callLogService';
+import { setItem } from '../lib/storage';
 import api from '../lib/api';
 
 function DatePicker({ value, onChange }) {
@@ -110,6 +111,23 @@ export default function AddNoteModal({ call, visible, onClose }) {
       } catch {
         await queueNoteUpdate(call._id, patch);
       }
+    } else if (call.contactNumber && call.timestamp) {
+      // Call hasn't synced to the backend yet, so there's no _id to PATCH against — queue
+      // the same pending-enrich entry PostCallScreen uses instead of dropping the note.
+      // flushPendingEnriches() (driven by the same sync triggers) fuzzy-matches this to the
+      // call by phone+time once it lands and PATCHes it then.
+      try {
+        setItem(
+          `calltrack_pending_enrich_${Date.now()}`,
+          JSON.stringify({
+            contactNumber:   call.contactNumber,
+            timestampApprox: call.timestamp,
+            notes:           note || undefined,
+            status:          undefined,
+            tags:            [],
+          })
+        );
+      } catch {}
     }
     // This PATCHes the backend directly rather than going through syncCallLogs(), so it
     // wouldn't otherwise trigger the same refresh signal that flow emits — screens showing

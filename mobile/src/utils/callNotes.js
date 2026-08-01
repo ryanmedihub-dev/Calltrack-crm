@@ -9,11 +9,17 @@ function makeKey(call) {
   // preferring it means the note key never has to migrate when a call gets a server _id.
   if (call.clientCallId) return `${PREFIX}cid_${call.clientCallId}`;
   if (call._id) return `${PREFIX}id_${call._id}`;
+  // Follow-up items (getPendingFollowUps()) are Lead-shaped, not CallLog-shaped — no
+  // clientCallId/_id/timestamp/callType, just a stable `key` (the Lead's _id, or the
+  // original note storage key offline). Use it directly rather than falling through to the
+  // date-based fallback below, which would throw on a missing timestamp.
+  if (call.key) return `${PREFIX}key_${call.key}`;
   // Legacy fallback for calls captured before clientCallId existed — collides across repeat
-  // calls to the same number/day/type, so only used when neither id above is available.
-  const date = new Date(call.timestamp).toISOString().split('T')[0];
+  // calls to the same number/day/type, so only used when no id above is available.
+  const validDate = call.timestamp && !isNaN(new Date(call.timestamp).getTime());
+  const date = validDate ? new Date(call.timestamp).toISOString().split('T')[0] : 'unknown-date';
   const num  = (call.contactNumber || '').replace(/\D/g, '');
-  return `${PREFIX}${num}_${date}_${call.callType}`;
+  return `${PREFIX}${num}_${date}_${call.callType || 'unknown'}`;
 }
 
 export async function getNote(call) {

@@ -165,7 +165,7 @@ function BucketBadge({ bucket }) {
   );
 }
 
-const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule, onHistory }) {
+const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule, onHistory, onNote }) {
   const bucket = dateBucket(item.followUp?.date);
   const borderColor = bucket === 'overdue' ? Colors.danger : bucket === 'today' ? Colors.primary : '#E2E8F0';
 
@@ -207,6 +207,9 @@ const FollowUpCard = memo(function FollowUpCard({ item, onDone, onReschedule, on
         </TouchableOpacity>
         <TouchableOpacity style={s.actionBtn} onPress={() => onReschedule?.(item)}>
           <Text style={s.actionBtnText}>Reschedule</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.actionBtn} onPress={() => onNote?.(item)}>
+          <Text style={s.actionBtnText}>📝 Note</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.actionBtn} onPress={() => onHistory?.(item)}>
           <Text style={s.actionBtnText}>🕘 History</Text>
@@ -356,8 +359,9 @@ export default function FollowupsScreen({ onAddNote }) {
       onDone={handleDone}
       onReschedule={(i) => setRescheduleItem(i)}
       onHistory={(i) => setHistoryTarget({ contactNumber: i.contactNumber, contactName: i.contactName })}
+      onNote={(i) => onAddNote?.(i)}
     />
-  ), [handleDone]);
+  ), [handleDone, onAddNote]);
 
   return (
     <View style={s.root}>

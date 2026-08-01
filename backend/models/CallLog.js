@@ -29,8 +29,18 @@ callLogSchema.index({ contactNumber: 1 });
 // the same index instead of scanning every historical call for that number.
 callLogSchema.index({ contactNumber: 1, timestamp: 1 });
 callLogSchema.index({ leadId: 1 });
-// Prevents duplicate entries when the mobile retries a sync
-callLogSchema.index({ employeeId: 1, contactNumber: 1, timestamp: 1 }, { unique: true });
+// Legacy dedup key, now partial — scoped to only the rows that predate clientCallId
+// (still null). Left unconditional, this collided with fresh inserts of a pre-existing
+// call once it started carrying a clientCallId: the new upsert filter (below) no longer
+// matches the old null-clientCallId row, so it's treated as an insert, and that insert's
+// (employeeId, contactNumber, timestamp) exactly matches the old row — silently rejected
+// by this index with every note/status update on that call lost. See migration script
+// backend/scripts/migrateClientCallId.js, which must run once against the live DB (a
+// schema change alone does not retroactively alter an already-built index).
+callLogSchema.index(
+  { employeeId: 1, contactNumber: 1, timestamp: 1 },
+  { unique: true, partialFilterExpression: { clientCallId: null } }
+);
 // Primary dedup key going forward — partial so legacy rows without a clientCallId never
 // collide with each other on `null`.
 callLogSchema.index(
