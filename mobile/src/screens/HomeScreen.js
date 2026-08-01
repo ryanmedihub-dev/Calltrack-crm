@@ -86,7 +86,10 @@ export default function HomeScreen({ onLogout }) {
   const handleSync = async (silent = false) => {
     setSyncing(true);
     try {
-      const result = await syncCallLogs();
+      // silent=false only happens from the user tapping "Sync" — bypass the cooldown there,
+      // same reasoning as CallHistoryScreen's pull-to-refresh. The passive 5-min interval
+      // calls this with silent=true and stays subject to the cooldown as before.
+      const result = await syncCallLogs(!silent);
       setLastSync(await getLastSyncTime());
       if (!silent) Alert.alert('Sync Complete', `${result.synced} call log(s) synced`);
       loadData();

@@ -309,6 +309,7 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
   const [historyTarget,  setHistoryTarget]  = useState(null);
 
   const searchRef = useRef(null);
+  const fetchInFlight = useRef(null);
 
   useEffect(() => {
     // Paint instantly from whatever was cached last time instead of showing a
@@ -364,17 +365,29 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
     return () => clearInterval(interval);
   }, [userId, page]);
 
-  const fetchCalls = async (p, uid) => {
-    if (loading) return;
+  // A plain `if (loading) return` guard meant an overlapping caller (e.g. pull-to-refresh
+  // landing mid-way through the 7s background poll) would silently no-op instead of getting
+  // the fresh data it asked for — callers that `await fetchCalls(...)` had no way to tell the
+  // difference from a real, completed fetch. Sharing the in-flight promise instead means every
+  // overlapping caller awaits the same real result. `useRef` (not a module-level variable)
+  // scopes this to one instance of the screen.
+  const fetchCalls = (p, uid) => {
+    if (fetchInFlight.current) return fetchInFlight.current;
     setLoading(true);
-    try {
-      const res  = await api.get(`/api/calls/employee/${uid || userId}`, { params: { page: p, limit: 50 } });
-      const data = res.data.data.calls || [];
-      setCalls((prev) => (p === 1 ? data : [...prev, ...data]));
-      setHasMore(p < res.data.data.pages);
-      setPage(p);
-      if (p === 1) setCached(CALLS_CACHE_KEY, data);
-    } catch {} finally { setLoading(false); }
+    fetchInFlight.current = (async () => {
+      try {
+        const res  = await api.get(`/api/calls/employee/${uid || userId}`, { params: { page: p, limit: 50 } });
+        const data = res.data.data.calls || [];
+        setCalls((prev) => (p === 1 ? data : [...prev, ...data]));
+        setHasMore(p < res.data.data.pages);
+        setPage(p);
+        if (p === 1) setCached(CALLS_CACHE_KEY, data);
+      } catch {} finally {
+        setLoading(false);
+        fetchInFlight.current = null;
+      }
+    })();
+    return fetchInFlight.current;
   };
 
   // ── Filtering (all synchronous, no setState needed) ─────────────────────────
@@ -414,7 +427,9 @@ export default function CallHistoryScreen({ onAddNote, onFollowUp }) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true); setSyncing(true);
-    try { await syncCallLogs(); } catch {}
+    // Deliberate user action — bypass the cooldown so a pull right after a background sync
+    // just ran doesn't silently no-op and leave a just-ended call missing from the list.
+    try { await syncCallLogs(true); } catch {}
     if (userId) await fetchCalls(1, userId);
     AsyncStorage.getItem('pendingCalls').then((s) => {
       try { if (s) setPendingCount(JSON.parse(s).length); else setPendingCount(0); } catch {}

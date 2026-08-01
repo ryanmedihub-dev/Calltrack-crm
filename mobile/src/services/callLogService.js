@@ -100,9 +100,13 @@ const MIN_SYNC_INTERVAL_MS = 15000;
 let syncInFlight = null;
 let lastSyncAt = 0;
 
-export function syncCallLogs() {
+// `force` bypasses the cooldown (never the in-flight dedup above it) — for a deliberate user
+// action like pull-to-refresh, where "a sync happened to run 5s ago" is no reason to silently
+// no-op a request the user is actively watching for. Passive triggers (timers, foreground
+// handler, mount effects) should never pass this — that's what the cooldown protects.
+export function syncCallLogs(force = false) {
   if (syncInFlight) return syncInFlight;
-  if (Date.now() - lastSyncAt < MIN_SYNC_INTERVAL_MS) {
+  if (!force && Date.now() - lastSyncAt < MIN_SYNC_INTERVAL_MS) {
     return Promise.resolve({ synced: 0, message: 'Synced recently' });
   }
   syncInFlight = doSyncCallLogs().finally(() => { syncInFlight = null; });
