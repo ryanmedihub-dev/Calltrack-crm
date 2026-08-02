@@ -10,6 +10,7 @@ import { saveNote } from '../utils/callNotes';
 import { Colors } from '../theme/colors';
 import ContactAvatar from '../components/ContactAvatar';
 import MiniCalendar from '../components/MiniCalendar';
+import { AUTO_SKIP_MS } from '../constants';
 
 // Status keys match backend enum exactly
 const STATUSES = [
@@ -92,6 +93,17 @@ export default function PostCallScreen({ call, onDone }) {
     syncCallLogs().catch(() => {}); // fire-and-forget so a skipped call still syncs promptly
     onDone();
   };
+
+  // Bounded popup lifetime: if the user hasn't tapped Save within 2 minutes (ignored it,
+  // locked the phone, moved on), auto-skip rather than leave it open/persisted indefinitely —
+  // the call is already reachable in Call History either way, remark or not. Doesn't reset on
+  // typing, so behavior stays predictable regardless of partial input.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!saving && !savingWa) handleSkip();
+    }, AUTO_SKIP_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Fast, local-only writes — awaited before the modal closes. Finding/creating the
   // matching lead now happens server-side in POST /api/calls/sync (it already knows the

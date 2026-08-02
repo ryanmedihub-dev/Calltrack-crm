@@ -27,6 +27,7 @@ import { getPendingFollowUps } from './src/utils/callNotes';
 import { syncCallLogs, processPendingQueue, getPendingCount, flushPendingNoteUpdates } from './src/services/callLogService';
 import { setLogoutCallback } from './src/lib/api';
 import { setItem as mmkvSetItem } from './src/lib/storage';
+import { AUTO_SKIP_MS } from './src/constants';
 
 const { CallLogModule } = NativeModules;
 
@@ -188,10 +189,23 @@ function App() {
       if (pendingCallRef.current) return; // modal already open
       if (isHandlingRef.current) return;
 
-      const existing = await AsyncStorage.getItem(PENDING_CALL_KEY).catch(() => null);
-      if (existing) return; // already stored for this call
+      const existingRaw = await AsyncStorage.getItem(PENDING_CALL_KEY).catch(() => null);
+      if (existingRaw) {
+        try {
+          const existing = JSON.parse(existingRaw);
+          // A stuck/old entry (app was killed before it got shown or handled) — discard it
+          // instead of blocking this new call's popup.
+          if (Date.now() - (existing._storedAt || 0) > AUTO_SKIP_MS) {
+            await AsyncStorage.removeItem(PENDING_CALL_KEY);
+          } else {
+            return; // a genuinely fresh pending call is still active — don't stomp it
+          }
+        } catch {
+          await AsyncStorage.removeItem(PENDING_CALL_KEY);
+        }
+      }
 
-      try { await AsyncStorage.setItem(PENDING_CALL_KEY, JSON.stringify(data)); } catch {}
+      try { await AsyncStorage.setItem(PENDING_CALL_KEY, JSON.stringify({ ...data, _storedAt: Date.now() })); } catch {}
       await firePostCallNotification(data);
     };
 
@@ -203,6 +217,11 @@ function App() {
         const stored = await AsyncStorage.getItem(PENDING_CALL_KEY);
         if (!stored) return;
         const parsed = JSON.parse(stored);
+        if (Date.now() - (parsed._storedAt || 0) > AUTO_SKIP_MS) {
+          await AsyncStorage.removeItem(PENDING_CALL_KEY);
+          CallLogModule?.clearPendingCall?.();
+          return; // too old — don't resurrect it, the call is already in Call Logs
+        }
         isHandlingRef.current = true;
         setPendingCall(parsed);
       } catch {}
