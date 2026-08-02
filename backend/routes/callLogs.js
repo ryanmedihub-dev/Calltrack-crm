@@ -642,8 +642,8 @@ router.get('/my-stats', protect, async (req, res) => {
     const connectedRate = s.total > 0 ? Math.round((s.connectedCalls / s.total) * 100) : 0;
     const avgDuration   = s.total > 0 ? Math.round(s.totalDuration / s.total) : 0;
     // Working Time = talk time (every call attempt's duration, not just connected ones) +
-    // a flat 5 minutes of overhead per call (dialing, wrap-up, etc.)
-    const workingTimeSec = s.totalDuration + (s.total * 5 * 60);
+    // a flat 1 minute of overhead per call (dialing, wrap-up, etc.)
+    const workingTimeSec = s.totalDuration + (s.total * 2 * 60);
 
     return res.json({
       success: true,
