@@ -701,7 +701,7 @@ router.get('/export', protect, isManager, async (req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Type,Call Status,Duration,Notes,Lead Linked,Synced\n';
+    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Type,Call Status,Duration,Notes,Remarks Updated At,Remarks Updated By,Lead Linked,Synced\n';
     res.write(header);
 
     let jobBuf = [header];
@@ -729,6 +729,10 @@ router.get('/export', protect, isManager, async (req, res) => {
         csvEsc(doc.callStatus),
         fmtDuration(doc.duration),
         csvEsc(doc.notes),
+        doc.notesUpdatedAt
+          ? csvEsc(new Date(doc.notesUpdatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))
+          : '',
+        csvEsc(doc.notesUpdatedByName),
         doc.leadId ? 'Yes' : 'No',
         doc.synced ? 'Yes' : 'No',
       ].join(',') + '\n';
@@ -792,8 +796,20 @@ router.patch('/:id/notes', protect, async (req, res) => {
     if (req.user.role !== 'manager' && !isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
+    // Only stamp the audit fields when the remark/status text actually changes — a no-op
+    // PATCH (e.g. the mobile modal re-saving an untouched note, or a double-submit) would
+    // otherwise keep bumping the "last edited" time and make reports show phantom activity.
+    const notesChanged  = notes      !== undefined && notes      !== (call.notes ?? '');
+    const statusChanged = callStatus !== undefined && callStatus !== (call.callStatus ?? null);
+
     if (notes      !== undefined) call.notes      = notes;
     if (callStatus !== undefined) call.callStatus = callStatus;
+
+    if (notesChanged || statusChanged) {
+      call.notesUpdatedAt     = new Date();
+      call.notesUpdatedBy     = req.user._id;
+      call.notesUpdatedByName = req.user.name;
+    }
     await call.save();
 
     // Propagate callStatus/notes/followUpDate to linked lead's tracking fields

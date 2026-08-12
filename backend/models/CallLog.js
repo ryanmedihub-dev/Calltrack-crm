@@ -13,6 +13,13 @@ const callLogSchema = new mongoose.Schema({
   timestamp:     { type: Date, required: true },
   notes:         { type: String },
   callStatus:    { type: String, default: null },
+  // Audit trail for remark edits — set every time `notes`/`callStatus` are changed through
+  // PATCH /api/calls/:id/notes (dashboard inline edit or the mobile note modal), so reports
+  // can show *when* a remark was last touched and by whom, not just its current text.
+  // Null on calls whose remark was only ever set at sync time and never edited since.
+  notesUpdatedAt:     { type: Date, default: null },
+  notesUpdatedBy:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  notesUpdatedByName: { type: String, default: null },
   // Stable id generated once on-device (deterministic hash of number+timestamp) — lets sync
   // dedup on an id that never drifts across resyncs, instead of an exact timestamp match.
   clientCallId:  { type: String, default: null },

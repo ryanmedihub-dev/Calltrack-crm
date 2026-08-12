@@ -6,7 +6,7 @@ import api from '../../../../lib/api';
 import Pagination from '../../../../components/Pagination';
 import { parseUTC } from '../../../../lib/timezone';
 import {
-  DataTable, EmptyState, Field, ChartTip, CallBadge, Truncate,
+  DataTable, EmptyState, Field, ChartTip, CallBadge, Truncate, EditableRemarks,
   PhoneIco, GridIco, ClipboardIco,
 } from '../../../../components/report-shared';
 
@@ -56,6 +56,18 @@ export default function ClientReportsPage() {
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     if (tab === 'history') fetchHistory(1);
+  };
+
+  // Admin edit of a past call's remark. Rethrows on failure so EditableRemarks can roll its
+  // optimistic text back rather than leaving a value on screen that never reached the server.
+  const saveRemark = async (callId, notes) => {
+    try {
+      await api.patch(`/api/calls/${callId}/notes`, { notes });
+      toast.success('Remark updated');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update remark');
+      throw err;
+    }
   };
 
   return (
@@ -136,7 +148,12 @@ export default function ClientReportsPage() {
 
             {activeTab === 'summary' && <ClientSummaryTab data={data} />}
             {activeTab === 'history' && (
-              <ClientHistoryTab data={historyData} page={page} onPage={(p) => { setPage(p); fetchHistory(p); }} />
+              <ClientHistoryTab
+                data={historyData}
+                page={page}
+                onPage={(p) => { setPage(p); fetchHistory(p); }}
+                onSaveRemark={saveRemark}
+              />
             )}
           </>
         )}
@@ -273,7 +290,7 @@ function ClientSummaryTab({ data }) {
   );
 }
 
-function ClientHistoryTab({ data, page, onPage }) {
+function ClientHistoryTab({ data, page, onPage, onSaveRemark }) {
   const calls = data?.calls || [];
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -298,6 +315,13 @@ function ClientHistoryTab({ data, page, onPage }) {
             ),
           },
           { key: 'contactName', label: 'Contact', width: 140, searchable: false, render: (r) => <Truncate text={r.contactName} /> },
+          {
+            key: 'contactNumber', label: 'Patient Number', width: 130, render: (r) => (
+              r.contactNumber
+                ? <span className="text-gray-700 tabular-nums">{r.contactNumber}</span>
+                : <span className="text-gray-300">—</span>
+            ),
+          },
           { key: 'date', label: 'Date', width: 110, searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) },
           { key: 'time', label: 'Time', width: 80, searchable: false, render: (r) => parseUTC(r.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) },
           { key: 'duration', label: 'Duration', width: 90, align: 'right', searchable: false, render: (r) => (r.duration ? `${Math.floor(r.duration / 60)}m ${r.duration % 60}s` : '—') },
@@ -307,7 +331,17 @@ function ClientHistoryTab({ data, page, onPage }) {
               ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100"><Truncate text={r.callStatus} /></span>
               : <span className="text-gray-300">—</span>,
           },
-          { key: 'notes', label: 'Notes', width: 240, searchable: false, wrap: true, render: (r) => r.notes || <span className="text-gray-300">—</span> },
+          {
+            key: 'notes', label: 'Remarks', width: 260, searchable: false, wrap: true,
+            render: (r) => (
+              <EditableRemarks
+                value={r.notes}
+                updatedAt={r.notesUpdatedAt}
+                updatedByName={r.notesUpdatedByName}
+                onSave={(val) => onSaveRemark(r._id, val)}
+              />
+            ),
+          },
         ]}
       />
       <div className="mt-2"><Pagination page={page} pages={data?.pages || 1} onPage={onPage} /></div>

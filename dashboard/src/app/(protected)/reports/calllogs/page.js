@@ -21,7 +21,7 @@ import api from "../../../../lib/api";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
-import { DataTable, TLFilter, Truncate } from "../../../../components/report-shared";
+import { DataTable, TLFilter, Truncate, EditableRemarks } from "../../../../components/report-shared";
 import {
   ArrowUp,
   ArrowDown,
@@ -201,19 +201,6 @@ const PinIco = ({ filled }) => (
     fill={filled ? "currentColor" : "none"}
   >
     <path d="M12 17v5M9 3h6l-1 6 4 4H8l4-4-1-6z" />
-  </Ico>
-);
-const DotsIco = () => (
-  <Ico size={14}>
-    <circle cx="12" cy="5" r="1" />
-    <circle cx="12" cy="12" r="1" />
-    <circle cx="12" cy="19" r="1" />
-  </Ico>
-);
-const PlusIco = () => (
-  <Ico size={12}>
-    <line x1="12" y1="5" x2="12" y2="19" />
-    <line x1="5" y1="12" x2="19" y2="12" />
   </Ico>
 );
 const TrophyIco = () => (
@@ -412,51 +399,6 @@ function PinnedNumber({ number, pinned, onToggle }) {
   );
 }
 
-/* Generic inline text editor used for the Call History "Notes" column.
-   Saves via PATCH /api/calls/:id/notes. */
-function EditableCell({ initial, onSave, placeholder = "Add note" }) {
-  const [value, setValue] = useState(initial || "");
-  const [editing, setEditing] = useState(false);
-  const commit = () => {
-    setEditing(false);
-    if (value !== (initial || "")) onSave?.(value);
-  };
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => e.key === "Enter" && commit()}
-        className="text-xs border border-blue-300 rounded-md px-2 py-1 outline-none w-full"
-      />
-    );
-  }
-  return value ? (
-    <div className="flex items-center gap-1.5 justify-between">
-      <span className="text-xs text-gray-600 truncate" title={value}>
-        {value}
-      </span>
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className="shrink-0"
-      >
-        <DotsIco />
-      </button>
-    </div>
-  ) : (
-    <button
-      type="button"
-      onClick={() => setEditing(true)}
-      className="text-xs text-blue-600 font-medium flex items-center gap-1 hover:underline"
-    >
-      <PlusIco /> {placeholder}
-    </button>
-  );
-}
-
 /* Highlight card used in Analysis tab */
 function InsightCard({ icon, title, rows }) {
   return (
@@ -560,6 +502,11 @@ function PeriodicReportsPageContent() {
   const [chartMode, setChartMode] = useState("composed");
   const [report, setReport] = useState(null);
   const [pinned, setPinned] = useState({});
+  // Call History is served page-by-page rather than capped at one big client-side slab —
+  // a wide date range runs to tens of thousands of calls, and the old flat `limit: 500`
+  // silently hid everything past the newest 500.
+  const [histPage, setHistPage] = useState(1);
+  const [histLimit, setHistLimit] = useState(50);
 
   const [filters, setFilters] = useState({
     fromDate: fromDateParam || "",
@@ -618,8 +565,17 @@ function PeriodicReportsPageContent() {
     async (silent = false) => {
       silent ? setRefreshing(true) : setLoading(true);
       try {
+        const isHistory = activeTab === "callHistory";
         const res = await api.get("/api/reports/periodic", {
-          params: { ...buildParams(), tab: activeTab, limit: 500 },
+          params: {
+            ...buildParams(),
+            tab: activeTab,
+            // Call History walks real server pages; the other tabs are bounded
+            // aggregates that still come back in one shot.
+            ...(isHistory
+              ? { page: histPage, limit: histLimit }
+              : { limit: 500 }),
+          },
         });
         setReport(res.data?.data || null);
       } catch {
@@ -628,12 +584,19 @@ function PeriodicReportsPageContent() {
       setLoading(false);
       setRefreshing(false);
     },
-    [buildParams, activeTab],
+    [buildParams, activeTab, histPage, histLimit],
   );
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Changing the tab or any filter invalidates the current Call History page number —
+  // without this, jumping to page 40 then narrowing the date range would request a page
+  // that no longer exists and render an empty table.
+  useEffect(() => {
+    setHistPage(1);
+  }, [activeTab, filters]);
   useEffect(() => {
     api
       .get("/api/employees")
@@ -641,10 +604,10 @@ function PeriodicReportsPageContent() {
       .catch(() => {});
   }, []);
 
+  // Rethrow on failure so EditableRemarks rolls back its optimistic text instead of
+  // showing an edit that never actually reached the server.
   const saveNote = async (callId, notes) => {
-    try {
-      await api.patch(`/api/calls/${callId}/notes`, { notes });
-    } catch {}
+    await api.patch(`/api/calls/${callId}/notes`, { notes });
   };
 
   const handleExport = () =>
@@ -1836,11 +1799,13 @@ function PeriodicReportsPageContent() {
                 <DataTable
                   loading={loading}
                   showRowNumber
-                  capNotice={
-                    report?.total > callHistoryRows.length
-                      ? `Showing ${callHistoryRows.length.toLocaleString()} of ${report.total.toLocaleString()} — narrow the date range or filters to see the rest.`
-                      : null
-                  }
+                  serverMode
+                  page={histPage}
+                  totalPages={report?.pages || 1}
+                  totalCount={report?.total ?? 0}
+                  pageSize={histLimit}
+                  onPageChange={setHistPage}
+                  onPageSizeChange={(n) => { setHistLimit(n); setHistPage(1); }}
                   columns={[
                     {
                       key: "employeeName", label: "Employee", width: 150,
@@ -1915,12 +1880,14 @@ function PeriodicReportsPageContent() {
                     },
                     {
                       key: "notes",
-                      label: "Notes",
-                      width: 160,
+                      label: "Remarks",
+                      width: 220,
+                      wrap: true,
                       render: (r) => (
-                        <EditableCell
-                          initial={r.notes}
-                          placeholder="Add note"
+                        <EditableRemarks
+                          value={r.notes}
+                          updatedAt={r.notesUpdatedAt}
+                          updatedByName={r.notesUpdatedByName}
                           onSave={(val) => saveNote(r._id, val)}
                         />
                       ),

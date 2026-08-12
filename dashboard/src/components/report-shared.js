@@ -2,6 +2,7 @@
 import { Fragment, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../lib/api';
+import { fmtDateTime } from '../lib/timezone';
 
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
@@ -228,6 +229,91 @@ export function Field({ label, children }) {
   );
 }
 
+// Inline remark editor for report tables — click to edit, Enter/blur to save, Esc to cancel.
+// Saves through the caller's `onSave` (which PATCHes /api/calls/:id/notes) and renders the
+// "last edited" stamp underneath, so a reader can tell an original sync-time remark apart
+// from one an admin revised later. Optimistic: shows the new text immediately and rolls
+// back if the save rejects, so a failed edit never looks like it stuck.
+export function EditableRemarks({ value, updatedAt, updatedByName, onSave, placeholder = 'Add remark' }) {
+  const [text, setText]       = useState(value || '');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft]     = useState(value || '');
+  const [saving, setSaving]   = useState(false);
+  const [stamp, setStamp]     = useState({ at: updatedAt, by: updatedByName });
+
+  // Re-sync when the row's underlying data changes (refetch, pagination, filter change) —
+  // without this the cell would keep showing a previous row's text after the list reloads.
+  useEffect(() => {
+    setText(value || '');
+    setDraft(value || '');
+    setStamp({ at: updatedAt, by: updatedByName });
+  }, [value, updatedAt, updatedByName]);
+
+  const commit = async () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next === (text || '')) return;
+    const prev = text;
+    const prevStamp = stamp;
+    setText(next);
+    setStamp({ at: new Date().toISOString(), by: null }); // optimistic; server is source of truth
+    setSaving(true);
+    try {
+      await onSave?.(next);
+    } catch {
+      setText(prev);
+      setStamp(prevStamp);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <textarea
+        autoFocus
+        rows={2}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') { setDraft(text || ''); setEditing(false); }
+        }}
+        className="w-full text-xs border border-blue-300 rounded-md px-2 py-1 outline-none resize-y focus:border-blue-500"
+      />
+    );
+  }
+
+  return (
+    <div className={saving ? 'opacity-60' : ''}>
+      {text ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          title="Click to edit remark"
+          className="text-left w-full text-xs text-gray-700 hover:text-blue-600 whitespace-pre-wrap break-words"
+        >
+          {text}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs text-blue-600 font-medium hover:underline"
+        >
+          + {placeholder}
+        </button>
+      )}
+      {stamp.at && (
+        <p className="text-[10px] text-gray-400 mt-1">
+          edited {fmtDateTime(stamp.at)}{stamp.by ? ` · ${stamp.by}` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ActiveFilterChips({ filters, labels = {}, onClear, onClearAll }) {
   const SKIP = new Set(['excludeNumbers']);
   const entries = Object.entries(filters).filter(([k, v]) => !SKIP.has(k) && v && v !== '');
@@ -304,7 +390,12 @@ export function DataTable({
   const [sortDir, setSortDir] = useState('asc');
   const [colSearch, setColSearch] = useState({});
   const [localPage, setLocalPage] = useState(1);
-  const [rpp, setRpp] = useState(pageSize);
+  const [localRpp, setLocalRpp] = useState(pageSize);
+  // In serverMode the caller owns the page size (it drives the API's `limit`), so track the
+  // prop rather than local state — otherwise row numbering and the "showing X–Y of Z" label
+  // keep using the initial size after the user picks a different one.
+  const rpp = serverMode ? pageSize : localRpp;
+  const setRpp = serverMode ? () => {} : setLocalRpp;
 
   const filtered = useMemo(() => {
     if (serverMode) return rows;
