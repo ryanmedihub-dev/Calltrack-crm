@@ -90,7 +90,10 @@ export default function PostCallScreen({ call, onDone }) {
 
   const handleSkip = () => {
     if (saving || savingWa) return;
-    syncCallLogs().catch(() => {}); // fire-and-forget so a skipped call still syncs promptly
+    // Forced: App.js already fired a sync when onCallEnded arrived seconds ago, so an
+    // unforced call here would hit the 15s cooldown and this call would sit unsent until
+    // the next 60s timer tick.
+    syncCallLogs(true).catch(() => {}); // fire-and-forget so a skipped call still syncs promptly
     onDone();
   };
 
@@ -110,12 +113,20 @@ export default function PostCallScreen({ call, onDone }) {
   // employee and the exact contact number, so it doesn't need to guess), which is what
   // lets Save close the modal immediately instead of waiting on ~8 sequential round trips.
   const doSaveLocal = async () => {
+    // One clock for this whole save, shared by the local row and the enrich entry, so the
+    // server sees a single consistent edit time no matter which path reaches it first.
+    const editedAt = new Date().toISOString();
+    const remark = note.trim();
+
     const enriched = {
       ...call,
       status:       status || undefined,
-      notes:        note.trim() || undefined,
+      // Send the string as-is, not `|| undefined` — an emptied remark is a deliberate clear
+      // and has to reach the server as an empty string to actually clear it there.
+      notes:        remark,
       tags:         status ? [status] : [],
       followUpDate: followUpDate || undefined,
+      notesUpdatedAt: editedAt,
       // Tells the backend sync this call was actually submitted (Save tapped), not just
       // picked up by a routine background resync — gates lead creation/status updates.
       submittedViaPostCall: true,
@@ -123,24 +134,27 @@ export default function PostCallScreen({ call, onDone }) {
 
     await saveCallLog(enriched);
 
-    if (note.trim() || status || followUpDate) {
+    if (remark || status || followUpDate) {
       await saveNote(call, {
-        note:     note.trim(),
+        note:     remark,
         tags:     status ? [status] : [],
         followUp: followUpDate ? { date: followUpDate, done: false } : null,
       });
     }
 
-    if (note.trim() || status) {
+    if (remark || status) {
       try {
         setItem(
           `calltrack_pending_enrich_${Date.now()}`,
           JSON.stringify({
             contactNumber:   call.contactNumber,
+            clientCallId:    call.clientCallId,
             timestampApprox: call.timestamp,
-            notes:           note.trim() || undefined,
+            notes:           remark,
             status:          status || undefined,
             tags:            status ? [status] : [],
+            notesUpdatedAt:  editedAt,
+            savedAt:         Date.now(), // drives the 24h TTL in flushPendingEnriches
           })
         );
       } catch {}
@@ -151,7 +165,9 @@ export default function PostCallScreen({ call, onDone }) {
   // retry infra (syncCallLogs' own pending queue, flushPendingEnriches' per-key retry)
   // already covers retrying on failure, so this doesn't need its own queue.
   const doSaveRemote = async () => {
-    await syncCallLogs();
+    // Forced: App.js fired a sync when the call ended seconds ago, so an unforced call here
+    // would hit the 15s cooldown, send nothing, and leave the remark waiting for the 60s timer.
+    await syncCallLogs(true);
     await flushPendingEnriches().catch(() => {});
   };
 

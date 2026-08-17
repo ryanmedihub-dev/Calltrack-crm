@@ -20,6 +20,12 @@ const withCallTrackNative = (config) => {
     addPerm('android.permission.FOREGROUND_SERVICE');
     addPerm('android.permission.FOREGROUND_SERVICE_PHONE_CALL');
     addPerm('android.permission.RECEIVE_BOOT_COMPLETED');
+    // Without this, Android 14+ silently demotes any notification carrying a full-screen
+    // intent into the tray — the post-call prompt stops appearing as a heads-up banner.
+    addPerm('android.permission.USE_FULL_SCREEN_INTENT');
+    // Lets the app ask to be exempted from battery optimization. Aggressive OEM power
+    // managers otherwise freeze the foreground service between calls.
+    addPerm('android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS');
 
     // PhoneStateReceiver
     const app = manifest.application[0];

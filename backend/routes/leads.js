@@ -290,9 +290,11 @@ router.post('/bulk-upload', protect, async (req, res) => {
         const rowTags = Array.isArray(row.tags) ? row.tags.map((t) => String(t).trim()).filter(Boolean) : [];
         const mergedTags = [...new Set([...rowTags, ...globalTags, ...(tagOnly ? [tagOnly] : [])])];
 
+        // 'pool' and tag-only both leave the lead unassigned — which is exactly what puts it
+        // in the open lead pool, since membership there *is* `assignedTo: null`.
         const assignedTo = assignment.mode === 'employee'
           ? (assignment.autoSplit ? employeeIds[cursor++ % employeeIds.length] : employeeIds[0])
-          : null; // tag-only mode leaves the lead unassigned for manual pickup
+          : null;
 
         const existing = await Lead.findOne({ phone });
 
@@ -319,10 +321,14 @@ router.post('/bulk-upload', protect, async (req, res) => {
           name,
           phone,
           email: row.email || undefined,
+          city: row.city || undefined,
           source: row.source || 'bulk_upload',
           tags: mergedTags,
           status,
           assignedTo,
+          // Stamp arrival time only for rows that actually land in the pool, so the pool
+          // sorts by when a lead became available rather than when it was created.
+          pooledAt: assignedTo ? null : new Date(),
           changelog: [{
             changedBy: req.user._id,
             changedByName: req.user.name,

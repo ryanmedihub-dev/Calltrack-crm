@@ -243,20 +243,33 @@ router.post('/sync', protect, async (req, res) => {
     });
 
     const docs = calls
-      .map((c) => ({
-        contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
-        contactName:   c.contactName,
-        callType:      c.callType,
-        duration:      c.duration,
-        timestamp:     c.timestamp,
-        notes:         c.notes,
-        callStatus:    c.callStatus,
-        clientCallId:  c.clientCallId || null,
-        submittedViaPostCall: !!c.submittedViaPostCall,
-        employeeId:    req.user._id,
-        synced:        true
-      }))
-      .filter((d) => d.contactNumber && d.timestamp && d.callType);
+      .map((c) => {
+        const ts = new Date(c.timestamp);
+        // `hasRemark` lets an empty string through as a real edit (the user cleared the
+        // remark) while still distinguishing it from "this sync carries no remark for this
+        // call". Older app builds send neither flag, so fall back to notes being present.
+        const hasRemark = c.hasRemark === true || (c.hasRemark === undefined && c.notes !== undefined && c.notes !== null);
+        // When the client didn't send an edit clock (older build), fall back to the call's own
+        // timestamp so such an entry always loses to any server-side edit made after the call.
+        // That's the safe direction: a stale resync can never clobber a newer dashboard edit.
+        const editedAt = c.notesUpdatedAt ? new Date(c.notesUpdatedAt) : ts;
+        return {
+          contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
+          contactName:   c.contactName,
+          callType:      c.callType,
+          duration:      c.duration,
+          timestamp:     ts,
+          notes:         c.notes,
+          hasRemark,
+          callStatus:    c.callStatus,
+          notesEditedAt: Number.isNaN(editedAt.getTime()) ? ts : editedAt,
+          clientCallId:  c.clientCallId || null,
+          submittedViaPostCall: !!c.submittedViaPostCall,
+          employeeId:    req.user._id,
+          synced:        true
+        };
+      })
+      .filter((d) => d.contactNumber && d.timestamp && !Number.isNaN(d.timestamp.getTime()) && d.callType);
 
     // Whether any copy of this call in the batch was actually submitted through the
     // post-call form (Save tapped) rather than just picked up by a routine background
@@ -283,45 +296,79 @@ router.post('/sync', protect, async (req, res) => {
     for (const d of docs) {
       const key = callKey(d);
       const prev = byKey.get(key);
-      byKey.set(key, prev ? {
-        ...prev,
-        notes:      d.notes      || prev.notes,
-        callStatus: d.callStatus || prev.callStatus,
-        duration:   d.duration   || prev.duration,
-      } : d);
+      if (!prev) { byKey.set(key, d); continue; }
+      // Collapse by edit clock rather than iteration order. The same call can appear twice in
+      // one payload (the raw native row plus a locally enriched copy) in either order, so
+      // "whichever came last wins" would non-deterministically drop the newer remark.
+      const [newer, older] = d.notesEditedAt >= prev.notesEditedAt ? [d, prev] : [prev, d];
+      byKey.set(key, {
+        ...older,
+        ...newer,
+        // Duration heals upward regardless of which copy is newer — see the $max note below.
+        duration: Math.max(older.duration || 0, newer.duration || 0),
+        // Only fall back to the older copy's remark if the newer one isn't asserting any.
+        ...(newer.hasRemark
+          ? { notes: newer.notes, hasRemark: true }
+          : older.hasRemark
+            ? { notes: older.notes, hasRemark: true }
+            : { hasRemark: false }),
+        callStatus: newer.callStatus ?? older.callStatus,
+      });
     }
 
+    const now = new Date();
     const ops = [...byKey.values()].map((d) => {
-      const setOnInsert = {
-        callType: d.callType, contactName: d.contactName, synced: true,
-        contactNumber: d.contactNumber, timestamp: d.timestamp,
-        ...(d.clientCallId ? { clientCallId: d.clientCallId } : {}),
-      };
-      const set = {};
-      if (d.notes)      set.notes      = d.notes;
-      if (d.callStatus) set.callStatus = d.callStatus;
       // clientCallId is the primary dedup key going forward (stable across resyncs, unlike
       // an exact timestamp match) — only fall back to the timestamp triplet for calls
       // synced by an app version that predates it.
       const filter = d.clientCallId
         ? { employeeId: d.employeeId, clientCallId: d.clientCallId }
         : { employeeId: d.employeeId, contactNumber: d.contactNumber, timestamp: d.timestamp };
-      return {
-        updateOne: {
-          filter,
-          update: {
-            $setOnInsert: setOnInsert,
-            // Android's CallLog.Calls.DURATION isn't always finalized the instant a call
-            // ends — the first sync of a call can carry a 0 that only gets corrected on a
-            // later resync once the OS finalizes it. $max (instead of folding duration into
-            // $setOnInsert/$set) means a later correct value can heal an earlier 0, while a
-            // later spurious 0 can never regress an already-correct duration.
-            $max: { duration: d.duration || 0 },
-            ...(Object.keys(set).length ? { $set: set } : {}),
-          },
-          upsert: true,
-        },
+
+      // Last-write-wins guard, evaluated inside the write itself. A read-then-decide in JS
+      // would reintroduce exactly the race this exists to close: between the read and the
+      // write, a dashboard edit could land and then be silently overwritten.
+      const remarkWins = {
+        $or: [
+          { $eq: [{ $ifNull: ['$notesUpdatedAt', null] }, null] },
+          { $gte: [d.notesEditedAt, '$notesUpdatedAt'] },
+        ],
       };
+      const applyNotes  = d.hasRemark;
+      const applyStatus = d.callStatus !== undefined && d.callStatus !== null;
+
+      // Aggregation-pipeline update (Mongo 4.2+, works with upsert). $ifNull is the pipeline
+      // equivalent of $setOnInsert; it's the only form that can make a field's new value
+      // depend on the document's own current value, which is what the guard above needs.
+      // NOTE: Mongoose does not cast pipeline updates — every value here is already a real
+      // Date/ObjectId, never a string.
+      const stage = {
+        employeeId:    { $ifNull: ['$employeeId', d.employeeId] },
+        contactNumber: { $ifNull: ['$contactNumber', d.contactNumber] },
+        timestamp:     { $ifNull: ['$timestamp', d.timestamp] },
+        callType:      { $ifNull: ['$callType', d.callType] },
+        contactName:   { $ifNull: ['$contactName', d.contactName ?? 'Unknown'] },
+        clientCallId:  { $ifNull: ['$clientCallId', d.clientCallId] },
+        leadId:        { $ifNull: ['$leadId', null] },
+        synced:        true,
+        // Schema defaults don't apply to pipeline updates, so seed createdAt explicitly or
+        // upserted rows would have none at all.
+        createdAt:     { $ifNull: ['$createdAt', now] },
+        // Android's CallLog.Calls.DURATION isn't always finalized the instant a call ends —
+        // the first sync can carry a 0 that a later resync corrects. $max means a later
+        // correct value heals an earlier 0, while a later spurious 0 never regresses it.
+        duration:      { $max: ['$duration', d.duration || 0] },
+      };
+
+      if (applyNotes)  stage.notes      = { $cond: [remarkWins, d.notes, '$notes'] };
+      if (applyStatus) stage.callStatus = { $cond: [remarkWins, d.callStatus, '$callStatus'] };
+      if (applyNotes || applyStatus) {
+        stage.notesUpdatedAt     = { $cond: [remarkWins, d.notesEditedAt, '$notesUpdatedAt'] };
+        stage.notesUpdatedBy     = { $cond: [remarkWins, d.employeeId, '$notesUpdatedBy'] };
+        stage.notesUpdatedByName = { $cond: [remarkWins, req.user.name, '$notesUpdatedByName'] };
+      }
+
+      return { updateOne: { filter, update: [{ $set: stage }], upsert: true } };
     });
 
     let inserted = [];
@@ -789,12 +836,22 @@ router.get('/pending-followups', protect, async (req, res) => {
 // PATCH /api/calls/:id/notes — add notes or status to a call log
 router.patch('/:id/notes', protect, async (req, res) => {
   try {
-    const { notes, callStatus, followUpDate } = req.body;
+    const { notes, callStatus, followUpDate, notesUpdatedAt } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
     if (req.user.role !== 'manager' && !isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    // Last-write-wins, same rule as POST /sync. The offline note queue can retry a PATCH
+    // minutes after it was composed, by which point a newer edit may already have landed —
+    // applying it then would silently roll the newer remark back.
+    if (notesUpdatedAt && call.notesUpdatedAt) {
+      const incoming = new Date(notesUpdatedAt);
+      if (!Number.isNaN(incoming.getTime()) && incoming < call.notesUpdatedAt) {
+        return res.json({ success: true, data: call, message: 'Ignored — a newer edit already applied' });
+      }
     }
     // Only stamp the audit fields when the remark/status text actually changes — a no-op
     // PATCH (e.g. the mobile modal re-saving an untouched note, or a double-submit) would
@@ -806,7 +863,11 @@ router.patch('/:id/notes', protect, async (req, res) => {
     if (callStatus !== undefined) call.callStatus = callStatus;
 
     if (notesChanged || statusChanged) {
-      call.notesUpdatedAt     = new Date();
+      // Prefer the client's own edit clock when it sent one. A queued offline PATCH composed
+      // at T1 but delivered at T2 must be stamped T1, or it would look newer than it is and
+      // could out-rank an edit that genuinely happened in between.
+      const stampedAt = notesUpdatedAt ? new Date(notesUpdatedAt) : new Date();
+      call.notesUpdatedAt     = Number.isNaN(stampedAt.getTime()) ? new Date() : stampedAt;
       call.notesUpdatedBy     = req.user._id;
       call.notesUpdatedByName = req.user.name;
     }
@@ -817,7 +878,9 @@ router.patch('/:id/notes', protect, async (req, res) => {
     if (call.leadId) {
       const leadUpdate = {};
       if (callStatus) leadUpdate.lastCallSummary = callStatus;
-      if (notes && notes.trim()) leadUpdate.lastCallNote = notes.trim();
+      // Mirror a cleared remark onto the lead too — `if (notes && ...)` left the lead showing
+      // text the agent had just deleted from the call.
+      if (notes !== undefined) leadUpdate.lastCallNote = notes.trim();
       if (followUpDate !== undefined) leadUpdate.followUpDate = followUpDate ? new Date(followUpDate) : null;
       if (Object.keys(leadUpdate).length) {
         await Lead.findByIdAndUpdate(call.leadId, { $set: leadUpdate }).catch(() => {});

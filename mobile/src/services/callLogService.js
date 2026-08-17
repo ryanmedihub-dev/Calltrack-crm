@@ -6,6 +6,33 @@ import { getItem, setItem, removeItem, getAllKeys } from '../lib/storage';
 const LAST_SYNC_KEY   = 'last_sync_timestamp';
 const PENDING_QUEUE_KEY = 'calltrack_pending_queue';
 
+// Native call-log timestamps drift from what the app recorded at call time (Android's
+// ContentResolver can be 30s–2min off), so "same call" can't be an equality test on timestamp.
+const SAME_CALL_WINDOW_MS = 180_000;
+
+// Single definition of call identity, used everywhere this file needs to decide whether two
+// records describe the same physical call (local upsert, sync merge, pending-queue dedup).
+// Previously each site re-implemented this slightly differently, which is how a call could be
+// deduped in one place and duplicated in another.
+export function isSameCall(a, b) {
+  if (!a || !b) return false;
+  // clientCallId is a deterministic hash of number+timestamp computed natively, so when both
+  // sides carry one it's an exact identity and the fuzzy fallback below is unnecessary.
+  if (a.clientCallId && b.clientCallId) return a.clientCallId === b.clientCallId;
+
+  const da = (a.contactNumber || '').replace(/\D/g, '');
+  const db = (b.contactNumber || '').replace(/\D/g, '');
+  if (!da || !db) return false;
+  // Suffix match: the same number surfaces as 9876543210 / +919876543210 / 09876543210
+  // depending on which code path recorded it.
+  if (!(da.endsWith(db) || db.endsWith(da))) return false;
+
+  const ta = new Date(a.timestamp).getTime();
+  const tb = new Date(b.timestamp).getTime();
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
+  return Math.abs(ta - tb) < SAME_CALL_WINDOW_MS;
+}
+
 // ------------------------------------------------------------------
 // Native Android call log reading via ContentResolver bridge.
 // Falls back to local MMKV-backed logs if the native module is
@@ -40,12 +67,53 @@ function readLocalCallLogs_fallback(sinceTimestamp) {
   }
 }
 
-// Called from the app when a call ends — saves to local storage
+// Called from the app when a call ends — saves to local storage.
+// Upserts rather than unshifts: remarking the same call twice used to append a second entry,
+// and the sync merge's Array.find() would then pick whichever copy came first (usually the
+// older one), silently reverting the newer remark.
 export function saveCallLog(entry) {
   try {
     const raw  = getItem('local_call_logs');
     const logs = raw ? JSON.parse(raw) : [];
-    logs.unshift({ ...entry, timestamp: entry.timestamp || new Date().toISOString() });
+    const record = {
+      ...entry,
+      timestamp: entry.timestamp || new Date().toISOString(),
+      // Client-authored edit clock. The server compares this against its own stored value to
+      // decide whether an incoming sync is newer than an edit made elsewhere (e.g. dashboard).
+      notesUpdatedAt: entry.notesUpdatedAt || new Date().toISOString(),
+    };
+    const idx = logs.findIndex((l) => isSameCall(l, record));
+    if (idx === -1) logs.unshift(record);
+    else logs[idx] = { ...logs[idx], ...record };
+    setItem('local_call_logs', JSON.stringify(logs.slice(0, 500)));
+  } catch {}
+}
+
+// Patch the locally cached copy of a call. AddNoteModal PATCHes the server directly, but if
+// the local cache still holds the remark captured at call time, the very next syncCallLogs()
+// re-sends that stale text and the server overwrites the newer edit — which is why an edit
+// appeared to "sometimes" revert (it depended on whether a sync happened to run afterwards).
+export function updateLocalCallLog(call, patch) {
+  try {
+    const raw  = getItem('local_call_logs');
+    const logs = raw ? JSON.parse(raw) : [];
+    const stamped = { ...patch, notesUpdatedAt: patch.notesUpdatedAt || new Date().toISOString() };
+    const idx = logs.findIndex((l) => isSameCall(l, call));
+    if (idx === -1) {
+      // Remark added to a call that never went through the post-call form (edited straight
+      // from Call History), so there's no local row yet — seed one so the next sync carries it.
+      logs.unshift({
+        clientCallId:  call.clientCallId,
+        contactNumber: call.contactNumber,
+        contactName:   call.contactName,
+        callType:      call.callType,
+        duration:      call.duration,
+        timestamp:     call.timestamp || new Date().toISOString(),
+        ...stamped,
+      });
+    } else {
+      logs[idx] = { ...logs[idx], ...stamped };
+    }
     setItem('local_call_logs', JSON.stringify(logs.slice(0, 500)));
   } catch {}
 }
@@ -56,8 +124,17 @@ function addToPendingQueue(calls) {
   try {
     const raw     = getItem(PENDING_QUEUE_KEY);
     const pending = raw ? JSON.parse(raw) : [];
-    const merged  = [...pending, ...calls];
-    setItem(PENDING_QUEUE_KEY, JSON.stringify(merged.slice(0, 500)));
+    // A repeatedly-failing sync re-queues the same day's calls on every attempt. Concatenating
+    // blindly grew the queue with hundreds of copies of the same calls, blew past the 500 cap,
+    // and started evicting entries that had genuinely never reached the server. Collapsing on
+    // insert keeps the queue bounded by the number of *distinct* unsent calls.
+    const merged = [...pending];
+    for (const call of calls) {
+      const idx = merged.findIndex((p) => isSameCall(p, call));
+      if (idx === -1) merged.push(call);
+      else merged[idx] = call; // the newer attempt carries the fresher remark
+    }
+    setItem(PENDING_QUEUE_KEY, JSON.stringify(merged.slice(-500)));
   } catch {}
 }
 
@@ -99,18 +176,37 @@ export async function getPendingCount() {
 const MIN_SYNC_INTERVAL_MS = 15000;
 let syncInFlight = null;
 let lastSyncAt = 0;
+// Serializes forced syncs so two rapid Saves can't launch overlapping passes.
+let forcedTail = Promise.resolve();
 
-// `force` bypasses the cooldown (never the in-flight dedup above it) — for a deliberate user
-// action like pull-to-refresh, where "a sync happened to run 5s ago" is no reason to silently
-// no-op a request the user is actively watching for. Passive triggers (timers, foreground
-// handler, mount effects) should never pass this — that's what the cooldown protects.
+function startSync() {
+  const p = doSyncCallLogs().finally(() => { if (syncInFlight === p) syncInFlight = null; });
+  syncInFlight = p;
+  return p;
+}
+
+// `force` is for deliberate user actions (Save, Skip, pull-to-refresh) where "a sync ran 5s
+// ago" is no reason to silently no-op something the user is watching for. Passive triggers
+// (60s timer, foreground handler, mount effects) must never pass it — the cooldown is what
+// stops those from overlapping, which is what caused the UI "blinking".
 export function syncCallLogs(force = false) {
-  if (syncInFlight) return syncInFlight;
-  if (!force && Date.now() - lastSyncAt < MIN_SYNC_INTERVAL_MS) {
-    return Promise.resolve({ synced: 0, message: 'Synced recently' });
+  if (!force) {
+    if (syncInFlight) return syncInFlight;
+    if (Date.now() - lastSyncAt < MIN_SYNC_INTERVAL_MS) {
+      return Promise.resolve({ synced: 0, message: 'Synced recently' });
+    }
+    return startSync();
   }
-  syncInFlight = doSyncCallLogs().finally(() => { syncInFlight = null; });
-  return syncInFlight;
+
+  // A forced sync must reflect local storage as of *now*. Returning an already-in-flight sync
+  // would report success for a pass whose payload was snapshotted before the user's edit —
+  // the whole reason the caller forced it. So wait that pass out, then run a fresh one.
+  const next = forcedTail
+    .catch(() => {})
+    .then(() => (syncInFlight ? syncInFlight.catch(() => {}) : null))
+    .then(() => startSync());
+  forcedTail = next.catch(() => {});
+  return next;
 }
 
 async function doSyncCallLogs() {
@@ -138,22 +234,20 @@ async function doSyncCallLogs() {
   } catch {}
 
   const mergedLogs = nativeLogs.map((log) => {
-    const logPhone = (log.contactNumber || '').replace(/\D/g, '');
-    const logTs    = new Date(log.timestamp).getTime();
-    // Prefer an exact clientCallId match (stable id, no drift) over the fuzzy phone+time
-    // window — only fall back to fuzzy matching when either side lacks a clientCallId
-    // (e.g. an entry saved before this id existed).
-    const enriched = (log.clientCallId && localLogs.find((local) => local.clientCallId === log.clientCallId))
-      || localLogs.find((local) => {
-        const localPhone = (local.contactNumber || '').replace(/\D/g, '');
-        const samePhone  = localPhone.endsWith(logPhone) || logPhone.endsWith(localPhone);
-        return samePhone && Math.abs(new Date(local.timestamp).getTime() - logTs) < 180_000;
-      });
+    const enriched = localLogs.find((local) => isSameCall(local, log));
     if (!enriched) return log;
+
+    // `hasRemark` distinguishes "the user cleared this remark" (empty string — a real edit the
+    // server must apply) from "this sync simply carries no remark for this call" (field
+    // absent). Without it an empty string is indistinguishable from no data and gets dropped,
+    // which is why clearing a remark was impossible.
+    const hasRemark = enriched.notes !== undefined && enriched.notes !== null;
+
     return {
       ...log,
-      notes:      enriched.notes      || log.notes,
-      callStatus: enriched.status     || enriched.callStatus || log.callStatus,
+      ...(hasRemark ? { notes: enriched.notes, hasRemark: true } : {}),
+      callStatus: enriched.status ?? enriched.callStatus ?? log.callStatus,
+      notesUpdatedAt: enriched.notesUpdatedAt,
       // Marks that this call was actually submitted through the post-call form (Save was
       // tapped), as opposed to just being picked up by a routine background sync — the
       // backend uses this to decide whether an unmatched call should create a new lead.
@@ -229,8 +323,14 @@ export async function getLastSyncTime() {
 }
 
 // Retry mechanism: flush any pending enrich entries saved by AfterCallModal before sync.
-// Each key holds { contactNumber, timestampApprox, notes, status, tags }.
+// Each key holds { contactNumber, timestampApprox, notes, status, tags, savedAt, clientCallId }.
 // On successful PATCH the key is deleted; on failure it stays for the next flush attempt.
+//
+// Entries expire after 24h. They used to live forever, so a days-old remark could suddenly
+// re-apply itself over a much newer one the moment the fuzzy phone+time window finally
+// matched some unrelated call to the same number.
+const ENRICH_TTL_MS = 24 * 60 * 60 * 1000;
+
 export async function flushPendingEnriches() {
   try {
     const enrichKeys = getAllKeys().filter((k) => k.startsWith('calltrack_pending_enrich_'));
@@ -249,19 +349,25 @@ export async function flushPendingEnriches() {
         if (!raw) { removeItem(key); continue; }
         const enrich = JSON.parse(raw);
 
-        const callDigits = (enrich.contactNumber || '').replace(/\D/g, '');
-        const callTs     = new Date(enrich.timestampApprox).getTime();
+        // Fall back to the key's own embedded timestamp for entries written before `savedAt`
+        // existed, so legacy keys still age out instead of lingering forever.
+        const savedAt = enrich.savedAt || parseInt(key.split('_').pop(), 10) || 0;
+        if (savedAt && Date.now() - savedAt > ENRICH_TTL_MS) { removeItem(key); continue; }
 
-        const matched = feedCalls.find((c) => {
-          const cDigits   = (c.contactNumber || '').replace(/\D/g, '');
-          const samePhone = cDigits.endsWith(callDigits) || callDigits.endsWith(cDigits);
-          return samePhone && Math.abs(new Date(c.timestamp).getTime() - callTs) < 180_000;
-        });
+        const matched =
+          (enrich.clientCallId && feedCalls.find((c) => c.clientCallId === enrich.clientCallId)) ||
+          feedCalls.find((c) => isSameCall(c, {
+            contactNumber: enrich.contactNumber,
+            timestamp:     enrich.timestampApprox,
+          }));
 
         if (matched) {
           await api.patch(`/api/calls/${matched._id}/notes`, {
-            notes:      enrich.notes   || undefined,
-            callStatus: enrich.status  || undefined,
+            // Send the remark even when empty — an empty string here is a deliberate clear,
+            // and `undefined` would make the server skip the field entirely.
+            ...(enrich.notes !== undefined && enrich.notes !== null ? { notes: enrich.notes } : {}),
+            ...(enrich.status ? { callStatus: enrich.status } : {}),
+            notesUpdatedAt: enrich.notesUpdatedAt || (savedAt ? new Date(savedAt).toISOString() : undefined),
           });
           removeItem(key);
         }

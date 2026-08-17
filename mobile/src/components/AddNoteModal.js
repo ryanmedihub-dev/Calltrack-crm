@@ -8,7 +8,7 @@ import { Colors } from '../theme/colors';
 import TagChip from './TagChip';
 import { TAGS } from '../utils/tagColors';
 import { getNote, saveNote } from '../utils/callNotes';
-import { queueNoteUpdate } from '../services/callLogService';
+import { queueNoteUpdate, updateLocalCallLog } from '../services/callLogService';
 import { setItem } from '../lib/storage';
 import api from '../lib/api';
 
@@ -92,19 +92,30 @@ export default function AddNoteModal({ call, visible, onClose }) {
   const handleSave = async () => {
     if (!call) return;
     setSaving(true);
+    const editedAt = new Date().toISOString();
+
     await saveNote(call, {
       note,
       tags,
       followUp: followDate ? { date: followDate, done: false } : null,
     });
+
+    // Keep the locally cached call row in step with what we're about to send. Without this
+    // the row still holds the remark captured at call time, and the next syncCallLogs() —
+    // which runs every 60s, on foreground, and on every screen mount — re-sends that stale
+    // text straight over this edit. That race is why an edit "sometimes" reverted.
+    updateLocalCallLog(call, { notes: note, notesUpdatedAt: editedAt });
+
     // Persist to backend immediately so follow-up survives reinstall / other
     // devices. If offline/failed, queue it — the same triggers that already
     // drive syncCallLogs() (foreground, timer, call-ended) will retry it.
     if (call._id) {
       const patch = {
-        notes:        note       || undefined,
-        callStatus:   undefined,
-        followUpDate: followDate,
+        // Send the string as-is: an emptied remark is a deliberate clear, and `undefined`
+        // would make the server skip the field and leave the old text in place.
+        notes:          note,
+        followUpDate:   followDate,
+        notesUpdatedAt: editedAt,
       };
       try {
         await api.patch(`/api/calls/${call._id}/notes`, patch);
@@ -114,17 +125,20 @@ export default function AddNoteModal({ call, visible, onClose }) {
     } else if (call.contactNumber && call.timestamp) {
       // Call hasn't synced to the backend yet, so there's no _id to PATCH against — queue
       // the same pending-enrich entry PostCallScreen uses instead of dropping the note.
-      // flushPendingEnriches() (driven by the same sync triggers) fuzzy-matches this to the
-      // call by phone+time once it lands and PATCHes it then.
+      // flushPendingEnriches() (driven by the same sync triggers) matches this to the
+      // call once it lands and PATCHes it then.
       try {
         setItem(
           `calltrack_pending_enrich_${Date.now()}`,
           JSON.stringify({
             contactNumber:   call.contactNumber,
+            clientCallId:    call.clientCallId,
             timestampApprox: call.timestamp,
-            notes:           note || undefined,
+            notes:           note,
             status:          undefined,
             tags:            [],
+            notesUpdatedAt:  editedAt,
+            savedAt:         Date.now(),
           })
         );
       } catch {}

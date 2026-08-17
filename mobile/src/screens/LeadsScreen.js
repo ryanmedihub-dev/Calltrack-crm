@@ -135,6 +135,20 @@ const LeadCard = memo(function LeadCard({ item, onNote, onStatus, onWhatsApp, on
           </View>
         )}
 
+        {/* Form answers from the lead's original enquiry. Expanded by default here (unlike the
+            pool card): these leads are already assigned to this agent, so they're past triage
+            and into "what do I say on the call" — which is exactly what these answers are for. */}
+        {item.extraDetails?.length > 0 && (
+          <View style={lc.extraWrap}>
+            {item.extraDetails.map((d, i) => (
+              <View key={`${d.label}-${i}`} style={lc.extraRow}>
+                <Text style={lc.extraLabel}>{d.label}</Text>
+                <Text style={lc.extraValue}>{d.value}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={lc.actions}>
           <TouchableOpacity style={[lc.btn, lc.btnCall]}
             onPress={() => Linking.openURL(`tel:${item.phone}`).catch(()=>{})} activeOpacity={0.8}>
@@ -694,6 +708,11 @@ const lc = StyleSheet.create({
   note:        { fontSize: 11, color: Colors.textMuted, fontStyle: 'italic', marginBottom: 4 },
   fuWrap:      { marginBottom: 4, alignSelf: 'flex-start' },
   fuTxt:       { fontSize: 11, fontWeight: '600', color: '#7C3AED', backgroundColor: '#EDE9FE', borderRadius: 7, paddingHorizontal: 8, paddingVertical: 3 },
+
+  extraWrap:   { marginTop: 6, marginBottom: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors.divider, gap: 7 },
+  extraRow:    {},
+  extraLabel:  { fontSize: 11, color: Colors.textMuted },
+  extraValue:  { fontSize: 12.5, fontWeight: '600', color: Colors.text, marginTop: 1 },
   actions:     { flexDirection: 'row', gap: 6, marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: Colors.divider },
   btn:         { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   btnCall:     { backgroundColor: Colors.primary },

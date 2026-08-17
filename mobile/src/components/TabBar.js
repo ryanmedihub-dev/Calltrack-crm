@@ -2,8 +2,11 @@ import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Colors } from '../theme/colors';
 
+// Six is the practical ceiling for this bar. If a seventh is ever needed, move one under
+// `more` rather than shrinking every tab to fit.
 const TABS = [
   { key: 'calls',     label: 'Calls',      icon: '📞' },
+  { key: 'live',      label: 'Live Data',  icon: '🔴' },
   { key: 'analytics', label: 'Analytics',  icon: '📊' },
   { key: 'followups', label: 'Follow-ups', icon: '📅' },
   { key: 'leads',     label: 'Leads',      icon: '🎯' },

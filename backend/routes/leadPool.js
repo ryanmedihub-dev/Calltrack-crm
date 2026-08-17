@@ -1,0 +1,397 @@
+const express = require('express');
+const router = express.Router();
+const mongoose = require('mongoose');
+const Lead = require('../models/Lead');
+const { protect, isManager } = require('../middleware/auth');
+const normalizePhone = require('../lib/normalizePhone');
+const getPusher = require('../lib/pusher');
+const { logAction } = require('../lib/audit');
+
+// ── Core design note ───────────────────────────────────────────────────────────
+// Pool membership is not a stored flag: "in the pool" *is* `assignedTo: null`. That makes
+// pooled-and-owned mutually exclusive by construction rather than by convention, brings every
+// already-unassigned lead into the pool with zero migration, and leaves no second collection
+// to reconcile. `pooledAt` exists only to order the pool — a lead released back should surface
+// as newly available rather than stay buried under everything imported since it was created.
+const POOL_FILTER = { assignedTo: null };
+
+// Indian mobile numbers: 10 digits starting 6-9, post-normalisation.
+const PHONE_RE = /^[6-9]\d{9}$/;
+
+const CHANNEL = 'lead-pool';
+
+// Pusher is optional infrastructure (getPusher() returns null when unconfigured). A realtime
+// outage must never fail the write that triggered it, so every broadcast is best-effort.
+function broadcast(event, payload) {
+  try {
+    const pusher = getPusher();
+    if (!pusher) return;
+    pusher.trigger(CHANNEL, event, payload).catch(() => {});
+  } catch {}
+}
+
+// Escapes user input before it reaches a $regex, so a search for "a+b" can't be parsed as a
+// quantifier (or, with a pathological pattern, stall the query).
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Bounds on the schema-less form answers. A campaign we don't control decides these labels, so
+// a misconfigured (or hostile) form must not be able to write unbounded data into every lead.
+const MAX_EXTRA_DETAILS = 30;
+const MAX_EXTRA_VALUE_LEN = 200;
+
+// Accepts either an array of {label, value} (preferred — Meta's field order is meaningful and
+// an array is the only shape that preserves it) or a plain object from older senders, which is
+// normalized in key-insertion order.
+function normalizeExtraDetails(raw) {
+  if (!raw) return [];
+  const pairs = Array.isArray(raw)
+    ? raw.map((e) => [e?.label, e?.value])
+    : (typeof raw === 'object' ? Object.entries(raw) : []);
+
+  return pairs
+    .map(([label, value]) => ({
+      label: String(label ?? '').trim(),
+      value: String(value ?? '').trim().slice(0, MAX_EXTRA_VALUE_LEN),
+    }))
+    // An unanswered optional question comes through empty; showing a blank row to an agent is
+    // worse than showing nothing.
+    .filter((e) => e.label && e.value)
+    .slice(0, MAX_EXTRA_DETAILS);
+}
+
+function normalizeMetaRef(meta) {
+  if (!meta || typeof meta !== 'object') return undefined;
+  const created = meta.createdTime || meta.created_time;
+  const parsed = created ? new Date(created) : null;
+  return {
+    leadgenId:   meta.leadgenId   || meta.leadgen_id   || undefined,
+    formId:      meta.formId      || meta.form_id      || undefined,
+    pageId:      meta.pageId      || meta.page_id      || undefined,
+    adId:        meta.adId        || meta.ad_id        || undefined,
+    createdTime: parsed && !Number.isNaN(parsed.getTime()) ? parsed : undefined,
+  };
+}
+
+// GET /api/lead-pool — the pool itself.
+// Deliberately `protect` and not `isManager`: the whole point is that agents browse it.
+router.get('/', protect, async (req, res) => {
+  try {
+    const { search, source, tag, page = 1, limit = 30 } = req.query;
+    const pageNum  = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 30));
+
+    const filter = { ...POOL_FILTER };
+    if (source) filter.source = source;
+    if (tag)    filter.tags = tag;
+    if (search) {
+      const rx = { $regex: escapeRegex(search), $options: 'i' };
+      filter.$or = [{ name: rx }, { phone: rx }];
+    }
+
+    const [leads, total] = await Promise.all([
+      Lead.find(filter)
+        // Sort matches the { assignedTo, pooledAt } index. `createdAt` is the tiebreaker for
+        // rows predating pooledAt (backfilled or legacy unassigned leads).
+        .sort({ pooledAt: -1, createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum)
+        // extraDetails/metaRef.leadgenId ride along so the pool card can show budget and
+        // timeline chips without a second round trip per lead.
+        .select('name phone email source city tags status pooledAt createdAt extraDetails metaRef.leadgenId')
+        .lean(),
+      Lead.countDocuments(filter),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        leads,
+        total,
+        page: pageNum,
+        pages: Math.ceil(total / limitNum) || 1,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/lead-pool/stats
+router.get('/stats', protect, async (req, res) => {
+  try {
+    // IST day boundary — the server runs UTC, so "today" has to be computed against
+    // Asia/Kolkata or the counter rolls over at 5:30am local.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+    nowIST.setUTCHours(0, 0, 0, 0);
+    const todayStart = new Date(nowIST.getTime() - IST_OFFSET_MS);
+
+    const [available, claimedToday, bySource, oldest] = await Promise.all([
+      Lead.countDocuments(POOL_FILTER),
+      Lead.countDocuments({ claimedAt: { $gte: todayStart } }),
+      Lead.aggregate([
+        { $match: POOL_FILTER },
+        { $group: { _id: { $ifNull: ['$source', 'Unknown'] }, count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $project: { _id: 0, source: '$_id', count: 1 } },
+      ]),
+      Lead.find(POOL_FILTER).sort({ pooledAt: 1, createdAt: 1 }).select('pooledAt createdAt').limit(1).lean(),
+    ]);
+
+    return res.json({
+      success: true,
+      data: {
+        available,
+        claimedToday,
+        bySource,
+        oldestWaitingSince: oldest[0] ? (oldest[0].pooledAt || oldest[0].createdAt) : null,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/lead-pool/my-claims — what this agent has taken, newest first.
+router.get('/my-claims', protect, async (req, res) => {
+  try {
+    const limitNum = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const leads = await Lead.find({ claimedBy: req.user._id })
+      .sort({ claimedAt: -1 })
+      .limit(limitNum)
+      .select('name phone source city tags status claimedAt lastCallAt attempts extraDetails')
+      .lean();
+    return res.json({ success: true, data: leads });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/lead-pool/:id/claim — "Attend Lead".
+router.post('/:id/claim', protect, async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    }
+
+    // The entire concurrency story is `assignedTo: null` being part of the *filter*: MongoDB
+    // decides which of two simultaneous taps wins, atomically. Splitting this into a find()
+    // followed by a save() would reintroduce exactly the race this design exists to remove.
+    const lead = await Lead.findOneAndUpdate(
+      { _id: req.params.id, assignedTo: null },
+      {
+        $set: {
+          assignedTo: req.user._id,
+          claimedAt:  new Date(),
+          claimedBy:  req.user._id,
+          pooledAt:   null,
+        },
+        $push: {
+          changelog: {
+            changedBy:     req.user._id,
+            changedByName: req.user.name,
+            action:        'assigned',
+            details:       { source: 'lead_pool_claim' },
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!lead) {
+      // Distinguish the two failure modes so the app can say something true and self-correct,
+      // instead of showing a generic error the agent will just retry into the same wall.
+      const exists = await Lead.exists({ _id: req.params.id });
+      return exists
+        ? res.status(409).json({ success: false, error: 'This lead was just claimed by someone else', code: 'ALREADY_CLAIMED' })
+        : res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    }
+
+    await logAction(req, 'lead.claim', {
+      entity: 'Lead',
+      entityId: lead._id,
+      details: { name: lead.name, phone: lead.phone, source: lead.source },
+    });
+
+    broadcast('lead_claimed', {
+      leadId: lead._id.toString(),
+      claimedBy: req.user._id.toString(),
+      claimedByName: req.user.name,
+    });
+
+    return res.json({ success: true, data: lead, message: 'Lead assigned to you' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/lead-pool/:id/release — put a lead back. Manager, or the current owner.
+router.post('/:id/release', protect, async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    }
+    const lead = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+
+    const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
+    if (req.user.role !== 'manager' && !isOwner) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
+
+    lead.assignedTo = null;
+    lead.claimedAt  = null;
+    lead.claimedBy  = null;
+    // Re-stamped rather than restored, so a released lead surfaces at the top of the pool as
+    // newly available instead of sinking under everything imported since it was created.
+    lead.pooledAt   = new Date();
+    lead.changelog.push({
+      changedBy:     req.user._id,
+      changedByName: req.user.name,
+      action:        'updated',
+      details:       { source: 'lead_pool_release' },
+    });
+    await lead.save();
+
+    await logAction(req, 'lead.release', { entity: 'Lead', entityId: lead._id, details: { name: lead.name } });
+    broadcast('lead_added', { leadId: lead._id.toString(), name: lead.name, source: lead.source });
+
+    return res.json({ success: true, data: lead, message: 'Lead returned to the pool' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/lead-pool/push — manager pushes existing leads back into the pool in bulk.
+router.post('/push', protect, isManager, async (req, res) => {
+  try {
+    const { leadIds } = req.body;
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'leadIds array required' });
+    }
+    const ids = leadIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (!ids.length) return res.status(400).json({ success: false, error: 'No valid lead ids' });
+
+    const result = await Lead.updateMany(
+      { _id: { $in: ids } },
+      {
+        $set: { assignedTo: null, claimedAt: null, claimedBy: null, pooledAt: new Date() },
+        $push: {
+          changelog: {
+            changedBy:     req.user._id,
+            changedByName: req.user.name,
+            action:        'updated',
+            details:       { source: 'lead_pool_push' },
+          },
+        },
+      }
+    );
+
+    await logAction(req, 'lead.pool_push', { entity: 'Lead', details: { count: result.modifiedCount } });
+    broadcast('pool_refreshed', { pushed: result.modifiedCount });
+
+    return res.json({
+      success: true,
+      data: { pushed: result.modifiedCount },
+      message: `${result.modifiedCount} lead(s) pushed to the pool`,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Meta lead-ads webhook ──────────────────────────────────────────────────────
+// Meta can't present a JWT, so these two routes sit outside `protect` and are gated by a
+// shared secret instead. Both default CLOSED: if the env var is unset the endpoint rejects
+// everything rather than silently accepting anonymous writes.
+function verifyWebhookToken(req, res) {
+  const expected = process.env.META_WEBHOOK_TOKEN;
+  if (!expected) {
+    res.status(503).json({ success: false, error: 'Webhook not configured' });
+    return false;
+  }
+  const provided = req.headers['x-webhook-token'] || req.query.token;
+  if (provided !== expected) {
+    res.status(401).json({ success: false, error: 'Invalid webhook token' });
+    return false;
+  }
+  return true;
+}
+
+// GET — Meta's subscription handshake. Echoes hub.challenge back verbatim.
+router.get('/meta-webhook', (req, res) => {
+  const expected = process.env.META_VERIFY_TOKEN;
+  if (!expected) return res.status(503).send('Webhook not configured');
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === expected) return res.status(200).send(challenge);
+  return res.sendStatus(403);
+});
+
+// POST — ingest one lead, or a batch under { leads: [...] }.
+router.post('/meta-webhook', async (req, res) => {
+  if (!verifyWebhookToken(req, res)) return;
+  try {
+    const body = req.body || {};
+    const incoming = Array.isArray(body.leads) ? body.leads : [body];
+
+    let inserted = 0, duplicates = 0, invalid = 0;
+
+    for (const raw of incoming) {
+      const phone = normalizePhone(raw.phone || raw.phone_number || raw.mobile || '');
+      if (!phone || !PHONE_RE.test(phone)) { invalid++; continue; }
+
+      const extraDetails = normalizeExtraDetails(raw.extraDetails || raw.extra_details);
+      const metaRef = normalizeMetaRef(raw.meta);
+
+      try {
+        await Lead.create({
+          name:   raw.name || raw.full_name || phone,
+          phone,
+          email:  raw.email || undefined,
+          city:   raw.city || raw.location || undefined,
+          source: 'Meta',
+          importedBy: 'meta-webhook',
+          // Always unassigned: that's what puts it in the pool.
+          assignedTo: null,
+          pooledAt:   new Date(),
+          extraDetails,
+          ...(metaRef ? { metaRef } : {}),
+        });
+        inserted++;
+      } catch (err) {
+        if (err.code === 11000) {
+          duplicates++;
+          // Enrich only — never re-pool or re-assign. A returning enquiry's fresh answers are
+          // useful context for whoever already owns the lead, and losing them helps nobody;
+          // but touching assignedTo/pooledAt/status would take an actively-worked lead away
+          // from its owner mid-conversation. The $or guard means we only fill a genuine gap,
+          // so a re-delivered webhook can't overwrite answers already on the record.
+          if (extraDetails.length) {
+            await Lead.updateOne(
+              { phone, $or: [{ extraDetails: { $size: 0 } }, { extraDetails: { $exists: false } }] },
+              { $set: { extraDetails, ...(metaRef ? { metaRef } : {}) } }
+            ).catch(() => {});
+          }
+        } else {
+          invalid++;
+        }
+      }
+    }
+
+    if (inserted) broadcast('lead_added', { count: inserted, source: 'Meta' });
+
+    return res.json({
+      success: true,
+      data: { inserted, duplicates, invalid, total: incoming.length },
+      message: `${inserted} lead(s) added to the pool`,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+module.exports = router;

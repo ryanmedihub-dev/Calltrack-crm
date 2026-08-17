@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, StatusBar, Linking,
+  ScrollView, StatusBar, Linking, AppState, NativeModules,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+const { CallLogModule } = NativeModules;
 
 const STEPS = [
   {
@@ -35,6 +37,27 @@ const STEPS = [
 
 export default function MiuiSetupScreen({ onDone }) {
   const [step, setStep] = useState(0);
+  // null = not yet checked; a row only renders once we know it's actually missing, so a
+  // correctly-configured phone never shows a fix-it prompt for something already granted.
+  const [batteryOk, setBatteryOk] = useState(null);
+  const [fsiOk, setFsiOk] = useState(null);
+
+  const refreshPermissionState = useCallback(() => {
+    CallLogModule?.isIgnoringBatteryOptimizations?.()
+      .then(setBatteryOk).catch(() => setBatteryOk(null));
+    CallLogModule?.canUseFullScreenIntent?.()
+      .then(setFsiOk).catch(() => setFsiOk(null));
+  }, []);
+
+  // Both fixes are granted in a system screen outside the app, so re-check on return —
+  // otherwise the row would keep telling the user to do something they just did.
+  useEffect(() => {
+    refreshPermissionState();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') refreshPermissionState();
+    });
+    return () => sub.remove();
+  }, [refreshPermissionState]);
 
   const isLast = step === STEPS.length - 1;
 
@@ -93,6 +116,42 @@ export default function MiuiSetupScreen({ onDone }) {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* One-tap fixes — agents will never find these system screens on their own.
+            Each row appears only while its permission is actually missing. */}
+        {(batteryOk === false || fsiOk === false) && (
+          <View style={styles.fixWrap}>
+            <Text style={styles.fixHeading}>Recommended fixes</Text>
+
+            {batteryOk === false && (
+              <TouchableOpacity
+                style={styles.fixRow}
+                onPress={() => CallLogModule?.requestIgnoreBatteryOptimizations?.()}
+              >
+                <Text style={styles.fixIcon}>🔋</Text>
+                <View style={styles.fixTextWrap}>
+                  <Text style={styles.fixTitle}>Allow background battery usage</Text>
+                  <Text style={styles.fixDesc}>Stops the system freezing call detection between calls.</Text>
+                </View>
+                <Text style={styles.fixChevron}>›</Text>
+              </TouchableOpacity>
+            )}
+
+            {fsiOk === false && (
+              <TouchableOpacity
+                style={styles.fixRow}
+                onPress={() => CallLogModule?.openFullScreenIntentSettings?.()}
+              >
+                <Text style={styles.fixIcon}>🔔</Text>
+                <View style={styles.fixTextWrap}>
+                  <Text style={styles.fixTitle}>Allow full-screen notifications</Text>
+                  <Text style={styles.fixDesc}>Makes the post-call prompt appear instantly instead of only in the tray.</Text>
+                </View>
+                <Text style={styles.fixChevron}>›</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Navigation */}
         <View style={styles.navRow}>
@@ -155,6 +214,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12, alignItems: 'center',
   },
   linkBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+
+  fixWrap: { marginBottom: 24 },
+  fixHeading: {
+    fontSize: 11, fontWeight: '800', color: '#9CA3AF',
+    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10,
+  },
+  fixRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#FFF8E7', borderWidth: 1, borderColor: '#FCD9A0',
+    borderRadius: 12, padding: 14, marginBottom: 10,
+  },
+  fixIcon: { fontSize: 20 },
+  fixTextWrap: { flex: 1 },
+  fixTitle: { fontSize: 14, fontWeight: '700', color: '#111' },
+  fixDesc: { fontSize: 12, color: '#6B7280', marginTop: 2, lineHeight: 17 },
+  fixChevron: { fontSize: 22, color: '#9CA3AF', lineHeight: 24 },
 
   navRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   backBtn: {

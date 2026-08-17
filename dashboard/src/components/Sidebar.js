@@ -277,6 +277,7 @@ const NAV = [
     label: "Leads",
     Ic: ic.Leads,
     children: [
+      { href: "/leads/live-data", label: "Live Data", Ic: ic.Live, live: true },
       { href: "/leads/overview", label: "Overview", Ic: ic.Overview },
       { href: "/leads/pipeline", label: "Pipeline", Ic: ic.Pipeline },
       { href: "/leads/follow-ups", label: "Follow-ups", Ic: ic.Reports },

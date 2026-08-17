@@ -15,6 +15,7 @@ import CallHistoryScreen from './src/screens/CallHistoryScreen';
 import AnalyticsScreen   from './src/screens/AnalyticsScreen';
 import FollowupsScreen   from './src/screens/FollowupsScreen';
 import LeadsScreen       from './src/screens/LeadsScreen';
+import LiveLeadsScreen   from './src/screens/LiveLeadsScreen';
 import MoreScreen        from './src/screens/MoreScreen';
 import TabBar            from './src/components/TabBar';
 import ErrorBoundary     from './src/components/ErrorBoundary';
@@ -25,7 +26,7 @@ import { requestCallPermissions, requestOverlayPermission } from './src/services
 import { applyTrackedSim } from './src/services/simService';
 import { getPendingFollowUps } from './src/utils/callNotes';
 import { syncCallLogs, processPendingQueue, getPendingCount, flushPendingNoteUpdates } from './src/services/callLogService';
-import { setLogoutCallback } from './src/lib/api';
+import api, { setLogoutCallback } from './src/lib/api';
 import { setItem as mmkvSetItem } from './src/lib/storage';
 import { AUTO_SKIP_MS } from './src/constants';
 
@@ -143,6 +144,7 @@ function App() {
   const [pendingCall, setPendingCall]     = useState(null);
   const [noteCall, setNoteCall]           = useState(null);
   const [followUpBadge, setFollowUpBadge] = useState(0);
+  const [liveBadge, setLiveBadge]         = useState(0);
   const [pendingCount, setPendingCount]   = useState(0);
 
   const appState       = useRef(AppState.currentState);
@@ -308,6 +310,12 @@ function App() {
     const list = await getPendingFollowUps();
     setFollowUpBadge(list.length);
     scheduleFollowUpNotifications();
+    // Piggyback the pool count on the same triggers (foreground, mount, post-call) so agents
+    // see leads waiting without having to open the tab to find out.
+    try {
+      const res = await api.get('/api/lead-pool/stats');
+      setLiveBadge(res.data?.data?.available || 0);
+    } catch {}
   };
 
   const dismissPostCall = async () => {
@@ -369,7 +377,7 @@ function App() {
     refreshFollowUpBadge();
   };
 
-  const badges = { followups: followUpBadge || undefined };
+  const badges = { followups: followUpBadge || undefined, live: liveBadge || undefined };
 
   return (
     <SafeAreaProvider>
@@ -383,6 +391,7 @@ function App() {
         )}
         <View style={{ flex: 1 }}>
           {tab === 'calls'     && <CallHistoryScreen onAddNote={setNoteCall} onFollowUp={setNoteCall} />}
+          {tab === 'live'      && <LiveLeadsScreen />}
           {tab === 'analytics' && <AnalyticsScreen />}
           {tab === 'followups' && <FollowupsScreen  onAddNote={setNoteCall} />}
           {tab === 'leads'     && <LeadsScreen />}

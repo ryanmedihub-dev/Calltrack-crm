@@ -1,20 +1,4 @@
-// One-off migration, run manually after deploying the CallLog.js index change:
-//   node backend/scripts/migrateClientCallId.js
-//
-// Two things need doing together:
-// 1. The old unique index on (employeeId, contactNumber, timestamp) was unconditional.
-//    Resyncing a pre-existing call (clientCallId: null) now upserts on
-//    {employeeId, clientCallId}, which doesn't match that null row, so it's treated as an
-//    insert — and that insert's (contactNumber, timestamp) collides with the old row under
-//    the old index, silently dropping the update. A schema-level index change alone does not
-//    retroactively alter an index MongoDB already built, so it has to be dropped and
-//    recreated here as partial (scoped to clientCallId: null only).
-// 2. Backfill clientCallId onto every existing null row, using the same deterministic
-//    algorithm the native Android side uses (UUID v3 / MD5, RFC 4122), so a backfilled id
-//    matches whatever the app computes when it resyncs that same call. This is what actually
-//    stops the collision from recurring — without it, every legacy row stays null and every
-//    resync of it keeps hitting the same insert-vs-existing-row conflict (now on the *new*
-//    partial index instead of the old one, but still a silent loss).
+
 require('dotenv').config();
 const mongoose = require('mongoose');
 const crypto = require('crypto');
