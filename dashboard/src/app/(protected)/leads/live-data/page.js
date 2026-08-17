@@ -6,6 +6,7 @@ import { fmtDateTime } from '../../../../lib/timezone';
 import { DataTable, StatCard, Field, Truncate, Ico } from '../../../../components/report-shared';
 
 const POLL_MS = 10_000;
+const POLL_BACKOFF_CEILING_MS = 2 * 60_000;
 const MAX_ROWS = 5000; // mirrors MAX_BULK_UPLOAD on the server
 
 const UploadIco   = () => <Ico size={14}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></Ico>;
@@ -97,8 +98,13 @@ export default function LiveDataPage() {
   // Per-campaign questions differ, so a column per question isn't viable — the answers live in
   // an expandable row instead, leaving the collapsed table exactly as it was.
   const [expandedId, setExpandedId] = useState(null);
+  // Set on a 429 so the banner can render; cleared on the next clean poll.
+  const [rateLimited, setRateLimited] = useState(false);
   const fileRef = useRef(null);
   const searchRef = useRef('');
+  // Current poll interval. Doubles on each consecutive 429 (capped) so a fixed-interval poll
+  // can't keep hammering a bucket it's already exhausted; resets to POLL_MS on success.
+  const pollDelayRef = useRef(POLL_MS);
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -110,9 +116,15 @@ export default function LiveDataPage() {
       ]);
       setLeads(poolRes.data?.data?.leads || []);
       if (statsRes) setStats(statsRes.data?.data || null);
-    } catch {
+      pollDelayRef.current = POLL_MS;
+      setRateLimited(false);
+    } catch (err) {
       // Keep the previous rows. This page is polled continuously and may be left up on a wall
       // display — one failed request must not blank the board.
+      if (err?.response?.status === 429) {
+        setRateLimited(true);
+        pollDelayRef.current = Math.min(pollDelayRef.current * 2, POLL_BACKOFF_CEILING_MS);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -121,9 +133,17 @@ export default function LiveDataPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Self-rescheduling rather than setInterval, so the delay picked up by pollDelayRef inside
+  // load() (post-429 backoff, or the reset back to POLL_MS on success) takes effect on the
+  // very next tick instead of waiting for a fixed interval to be torn down and rebuilt.
   useEffect(() => {
-    const iv = setInterval(() => load(true), POLL_MS);
-    return () => clearInterval(iv);
+    let timer;
+    const tick = async () => {
+      await load(true);
+      timer = setTimeout(tick, pollDelayRef.current);
+    };
+    timer = setTimeout(tick, pollDelayRef.current);
+    return () => clearTimeout(timer);
   }, [load]);
 
   // Debounced so typing doesn't fire a request per keystroke on top of the 10s poll.
@@ -247,6 +267,12 @@ export default function LiveDataPage() {
             </button>
           </div>
         </div>
+
+        {rateLimited && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs font-medium rounded-lg px-4 py-2.5 text-center">
+            Updates paused — retrying shortly
+          </div>
+        )}
 
         {/* ── Stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

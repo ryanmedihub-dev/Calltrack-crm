@@ -9,6 +9,7 @@ import { Colors } from '../theme/colors';
 import { Shadows } from '../theme/shadows';
 
 const POLL_MS = 12_000;
+const POLL_BACKOFF_CEILING_MS = 2 * 60_000;
 const SEARCH_DEBOUNCE_MS = 350;
 
 // "waiting since" — the pool's whole value is showing how stale a lead is, so this stays
@@ -136,11 +137,16 @@ export default function LiveLeadsScreen() {
   // pool into a wall of text and pushes Attend — the one button this screen exists for —
   // below the fold.
   const [expandedId, setExpandedId] = useState(null);
+  // Set on a 429 so the banner can render; cleared on the next clean poll.
+  const [rateLimited, setRateLimited] = useState(false);
 
   // Every state write below happens after an await, so it has to be guarded — otherwise a
   // poll landing after the tab is switched away warns and leaks.
   const mountedRef = useRef(true);
   const searchRef  = useRef('');
+  // Current poll interval. Doubles on each consecutive 429 (capped) so a fixed-interval poll
+  // can't keep hammering a bucket it's already exhausted; resets to POLL_MS on success.
+  const pollDelayRef = useRef(POLL_MS);
 
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -155,9 +161,15 @@ export default function LiveLeadsScreen() {
       if (searchRef.current !== (q || '')) return;
       setLeads(poolRes.data?.data?.leads || []);
       if (statsRes) setStats(statsRes.data?.data || null);
-    } catch {
+      pollDelayRef.current = POLL_MS;
+      setRateLimited(false);
+    } catch (err) {
       // Deliberately keep whatever is already on screen. An agent mid-scroll on a flaky
       // connection must not have the list yanked out from under them by one failed poll.
+      if (err?.response?.status === 429) {
+        if (mountedRef.current) setRateLimited(true);
+        pollDelayRef.current = Math.min(pollDelayRef.current * 2, POLL_BACKOFF_CEILING_MS);
+      }
     } finally {
       if (mountedRef.current) { setLoading(false); setRefreshing(false); }
     }
@@ -171,9 +183,17 @@ export default function LiveLeadsScreen() {
     return () => clearTimeout(t);
   }, [search, load]);
 
+  // Self-rescheduling rather than setInterval, so the delay picked up by pollDelayRef inside
+  // load() (post-429 backoff, or the reset back to POLL_MS on success) takes effect on the
+  // very next tick instead of waiting for a fixed interval to be torn down and rebuilt.
   useEffect(() => {
-    const iv = setInterval(() => load(searchRef.current), POLL_MS);
-    return () => clearInterval(iv);
+    let timer;
+    const tick = async () => {
+      await load(searchRef.current);
+      if (mountedRef.current) timer = setTimeout(tick, pollDelayRef.current);
+    };
+    timer = setTimeout(tick, pollDelayRef.current);
+    return () => clearTimeout(timer);
   }, [load]);
 
   const onRefresh = () => { setRefreshing(true); load(searchRef.current); };
@@ -252,6 +272,12 @@ export default function LiveLeadsScreen() {
         )}
       </View>
 
+      {rateLimited && (
+        <View style={s.rateLimitBanner}>
+          <Text style={s.rateLimitText}>Updates paused — retrying shortly</Text>
+        </View>
+      )}
+
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={Colors.primary} />
       ) : (
@@ -308,6 +334,12 @@ const s = StyleSheet.create({
   searchIcon:  { fontSize: 14, marginRight: 8 },
   searchInput: { flex: 1, fontSize: 14, color: Colors.text },
   searchClear: { fontSize: 14, color: Colors.textMuted, padding: 4 },
+
+  rateLimitBanner: {
+    marginHorizontal: 14, marginBottom: 10, backgroundColor: Colors.warningBg,
+    borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12,
+  },
+  rateLimitText: { fontSize: 12, fontWeight: '600', color: Colors.warning, textAlign: 'center' },
 
   list: { paddingHorizontal: 14, paddingBottom: 100 },
 
