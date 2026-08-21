@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { fmtDateTime } from '../../../../lib/timezone';
-import { DataTable, StatCard, Field, Truncate, Ico } from '../../../../components/report-shared';
+import { DataTable, StatCard, Field, Truncate, Ico, UsersIco } from '../../../../components/report-shared';
 
 const POLL_MS = 10_000;
 const POLL_BACKOFF_CEILING_MS = 2 * 60_000;
@@ -145,6 +145,37 @@ export default function LiveDataPage() {
     timer = setTimeout(tick, pollDelayRef.current);
     return () => clearTimeout(timer);
   }, [load]);
+
+  // ── Who's attempting pool leads ──────────────────────────────────────────────
+  // A pool lead stays unassigned until someone taps "Attend", but the call sync auto-links any
+  // call to a matching lead by phone regardless of assignment — so an employee can dial a pool
+  // number straight from their own phone and rack up attempts on a lead that never shows as
+  // theirs. Manager-only (matches /api/lead-pool/attempts-by-employee), and fetched once rather
+  // than on the 10s poll — it's an oversight aggregate, not something that needs to be live.
+  const [isManager, setIsManager] = useState(false);
+  const [employeeAttempts, setEmployeeAttempts] = useState([]);
+  const [employeeAttemptsLoading, setEmployeeAttemptsLoading] = useState(true);
+
+  const loadEmployeeAttempts = useCallback(async () => {
+    setEmployeeAttemptsLoading(true);
+    try {
+      const res = await api.get('/api/lead-pool/attempts-by-employee');
+      setEmployeeAttempts(res.data?.data || []);
+    } catch {
+      // Non-manager (403) or a transient failure — the section below just stays empty.
+    } finally {
+      setEmployeeAttemptsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    api.get('/api/auth/me').then((res) => {
+      const manager = res.data?.data?.role === 'manager';
+      setIsManager(manager);
+      if (manager) loadEmployeeAttempts();
+      else setEmployeeAttemptsLoading(false);
+    }).catch(() => setEmployeeAttemptsLoading(false));
+  }, [loadEmployeeAttempts]);
 
   // Debounced so typing doesn't fire a request per keystroke on top of the 10s poll.
   useEffect(() => {
@@ -371,6 +402,44 @@ export default function LiveDataPage() {
             ]}
           />
         </div>
+
+        {/* ── Employee attempts on pool leads ──
+            Only relevant to managers: shows who's been calling unclaimed pool numbers directly
+            (without tapping Attend), since call sync links by phone regardless of assignment. */}
+        {isManager && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <UsersIco s={16} />
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Employee attempts on pool leads</h3>
+                  <p className="text-xs text-gray-400">Calls made to still-unclaimed numbers, by employee</p>
+                </div>
+              </div>
+              <button
+                onClick={loadEmployeeAttempts}
+                className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 text-xs font-medium"
+              >
+                <RefreshIco spinning={employeeAttemptsLoading} /> Refresh
+              </button>
+            </div>
+
+            <DataTable
+              loading={employeeAttemptsLoading}
+              rows={employeeAttempts}
+              pageSize={10}
+              getRowId={(row) => row.employeeId || row.employeeName}
+              emptyTitle="No pool attempts yet"
+              emptyHint="This fills in once an employee calls a number that's still sitting unclaimed in the pool."
+              columns={[
+                { key: 'employeeName',  label: 'Employee',     width: 220, render: (r) => r.employeeName || 'Unknown' },
+                { key: 'attempts',      label: 'Attempts',     width: 110, align: 'right', render: (r) => r.attempts.toLocaleString() },
+                { key: 'leadsTouched',  label: 'Leads touched',width: 130, align: 'right', render: (r) => r.leadsTouched.toLocaleString() },
+                { key: 'lastAttemptAt', label: 'Last attempt', width: 170, searchable: false, render: (r) => fmtDateTime(r.lastAttemptAt) },
+              ]}
+            />
+          </div>
+        )}
 
         {/* ── Meta webhook help ── */}
         <div className="bg-white rounded-xl border border-gray-200">

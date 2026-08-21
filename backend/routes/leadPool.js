@@ -154,6 +154,45 @@ router.get('/stats', protect, async (req, res) => {
   }
 });
 
+// GET /api/lead-pool/attempts-by-employee — who has been calling pool leads without claiming
+// them. A lead stays in the pool (assignedTo: null) until someone taps "Attend", but the call
+// sync auto-links any call to a matching lead by phone number regardless of assignment — so an
+// employee can dial a pool number straight from their phone and rack up attempts on a lead that
+// never shows as theirs. Managers use this to see who's actually working the pool.
+router.get('/attempts-by-employee', protect, isManager, async (req, res) => {
+  try {
+    const rows = await Lead.aggregate([
+      { $match: { ...POOL_FILTER, attempts: { $gt: 0 } } },
+      { $unwind: '$changelog' },
+      { $match: { 'changelog.action': 'call_linked' } },
+      {
+        $group: {
+          _id:           '$changelog.changedBy',
+          employeeName:  { $first: '$changelog.changedByName' },
+          attempts:      { $sum: 1 },
+          leadIds:       { $addToSet: '$_id' },
+          lastAttemptAt: { $max: '$changelog.changedAt' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          employeeId:   '$_id',
+          employeeName: 1,
+          attempts:     1,
+          leadsTouched: { $size: '$leadIds' },
+          lastAttemptAt: 1,
+        },
+      },
+      { $sort: { attempts: -1 } },
+    ]);
+
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/lead-pool/my-claims — what this agent has taken, newest first.
 router.get('/my-claims', protect, async (req, res) => {
   try {
