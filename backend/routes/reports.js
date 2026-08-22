@@ -75,7 +75,7 @@ function applyCallTimeFilter(filter, callTime) {
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
     const {
-      startDate, endDate, employeeId, callType, duration, callTime, tlName,
+      startDate, endDate, employeeId, callType, duration, callTime, tlName, source,
       tab = 'summary', page = 1, limit = 100
     } = req.query;
 
@@ -86,6 +86,13 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     if (employeeId) filter.employeeId = employeeId;
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
+    // Source lives on the linked Lead, not the call itself — resolve to the matching lead ids
+    // first so every tab below (they all read off the same `filter`) narrows consistently. A
+    // call with no leadId (never linked to a lead) has no source and is excluded by this filter.
+    if (source) {
+      const matchingLeadIds = await Lead.find({ source: { $regex: source, $options: 'i' } }).distinct('_id');
+      filter.leadId = { $in: matchingLeadIds };
+    }
     applyDurationFilter(filter, duration);
     applyCallTimeFilter(filter, callTime);
 
@@ -383,6 +390,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       const total = await CallLog.countDocuments(filter);
       const historyCalls = await CallLog.find(filter)
         .populate('employeeId', 'name phone tlName')
+        .populate('leadId', 'source')
         .sort({ timestamp: -1, _id: -1 })
         .skip((pageNum - 1) * pageSize)
         .limit(pageSize)
@@ -408,6 +416,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
             employeeName: empName(c),
             employeePhone: empPhone(c),
             employeeTL: empTL(c),
+            source: c.leadId?.source || null,
             contactType: firstSeenMap.get(c.contactNumber) === new Date(c.timestamp).getTime() ? 'New' : 'Repeat'
           })),
           pages: Math.ceil(total / pageSize),

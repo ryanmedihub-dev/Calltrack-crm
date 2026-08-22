@@ -719,7 +719,7 @@ function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
 router.get('/export', protect, isManager, async (req, res) => {
   let job = null;
   try {
-    const { employeeId, callType, startDate, endDate, tlName } = req.query;
+    const { employeeId, callType, startDate, endDate, tlName, source } = req.query;
     const filter = {};
     if (employeeId) filter.employeeId = employeeId;
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
@@ -732,23 +732,34 @@ router.get('/export', protect, isManager, async (req, res) => {
         filter.timestamp.$lte = ed;
       }
     }
+    // Source lives on the linked Lead, not the call itself — same approach as the periodic
+    // report (see routes/reports.js): resolve to matching lead ids first. A call never linked
+    // to a lead has no source and is excluded once this filter is applied.
+    if (source) {
+      const matchingLeadIds = await Lead.find({ source: { $regex: source, $options: 'i' } }).distinct('_id');
+      filter.leadId = { $in: matchingLeadIds };
+    }
     const filename = `calls_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
 
     try {
       job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Call Logs Export', filename });
     } catch {}
 
-    // Resolve employee names/TLs via one lookup instead of populate() on the
-    // cursor — populate() re-queries User per row as the cursor iterates,
-    // which turns a 10k-row export into 10k extra round-trips.
+    // Resolve employee names/TLs and lead sources via one lookup each instead of populate() on
+    // the cursor — populate() re-queries per row as the cursor iterates, which turns a 10k-row
+    // export into 10k extra round-trips.
     const employeeIds = await CallLog.distinct('employeeId', filter);
     const employees = await User.find({ _id: { $in: employeeIds } }, 'name tlName').lean();
     const employeeMap = new Map(employees.map((e) => [String(e._id), e]));
 
+    const leadIds = (await CallLog.distinct('leadId', filter)).filter(Boolean);
+    const leadsForSource = await Lead.find({ _id: { $in: leadIds } }, 'source').lean();
+    const leadSourceMap = new Map(leadsForSource.map((l) => [String(l._id), l.source || '']));
+
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Type,Call Status,Duration,Notes,Remarks Updated At,Remarks Updated By,Lead Linked,Synced\n';
+    const header = 'Date,Time,Employee,Employee TL,Contact Name,Contact Number,Type,Call Status,Duration,Notes,Remarks Updated At,Remarks Updated By,Source,Lead Linked,Synced\n';
     res.write(header);
 
     let jobBuf = [header];
@@ -780,6 +791,7 @@ router.get('/export', protect, isManager, async (req, res) => {
           ? csvEsc(new Date(doc.notesUpdatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))
           : '',
         csvEsc(doc.notesUpdatedByName),
+        csvEsc(doc.leadId ? leadSourceMap.get(String(doc.leadId)) : ''),
         doc.leadId ? 'Yes' : 'No',
         doc.synced ? 'Yes' : 'No',
       ].join(',') + '\n';

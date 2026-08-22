@@ -433,6 +433,7 @@ const FILTER_LABELS = {
   duration: "Duration",
   callTime: "Call Time",
   tl: "Team Lead",
+  source: "Source",
 };
 function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
   const entries = Object.entries(filters).filter(([, v]) => !!v);
@@ -516,6 +517,7 @@ function PeriodicReportsPageContent() {
     duration: "",
     callTime: "",
     tl: "",
+    source: "",
   });
 
   // Re-sync when deep-linked ?callType=/?employeeId=/?fromDate=/?toDate= change
@@ -557,6 +559,7 @@ function PeriodicReportsPageContent() {
       ...(filters.duration && { duration: filters.duration }),
       ...(filters.callTime && { callTime: filters.callTime }),
       ...(filters.tl && { tlName: filters.tl }),
+      ...(filters.source && { source: filters.source }),
     }),
     [filters],
   );
@@ -628,6 +631,7 @@ function PeriodicReportsPageContent() {
       duration: "",
       callTime: "",
       tl: "",
+      source: "",
     });
 
   const pieData = (report?.pieData || []).map((d) => ({
@@ -841,6 +845,17 @@ function PeriodicReportsPageContent() {
                         value={filters.tl}
                         onChange={(v) => setFilters({ ...filters, tl: v })}
                         className="w-full"
+                      />
+                    </Field>
+                    <Field label="Source">
+                      <input
+                        type="text"
+                        placeholder="e.g. Meta, Call, Upload"
+                        className="input"
+                        value={filters.source}
+                        onChange={(e) =>
+                          setFilters({ ...filters, source: e.target.value })
+                        }
                       />
                     </Field>
                   </div>
@@ -1829,6 +1844,15 @@ function PeriodicReportsPageContent() {
                       ),
                     },
                     { key: "contactName", label: "Contact Name", width: 150, render: (r) => <Truncate text={r.contactName} /> },
+                    {
+                      key: "source",
+                      label: "Source",
+                      width: 120,
+                      searchable: false,
+                      render: (r) => r.source
+                        ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">{r.source}</span>
+                        : <span className="text-gray-300">—</span>,
+                    },
                     {
                       key: "contactType",
                       label: "Contact Type",
