@@ -32,6 +32,17 @@ function SourcePill({ source }) {
   );
 }
 
+// An agent picking this lead deserves to know N people already tried and got nowhere — that
+// changes how they open the call. Only shown once it's actually been recycled at least once.
+function RecycleChip({ count }) {
+  if (!count) return null;
+  return (
+    <View style={s.recycleChip}>
+      <Text style={s.recycleChipText}>Retry {count}/3</Text>
+    </View>
+  );
+}
+
 // An agent choosing which lead to grab first is choosing on budget and urgency. Surfacing just
 // those two inline means they don't have to expand every card to triage the pool — which is the
 // whole reason the pool screen exists. Matched on label substring because the exact question
@@ -98,6 +109,8 @@ function LeadCard({ item, onAttend, claiming, expanded, onToggleDetails }) {
           <Text style={s.waitText}>{waitingSince(item.pooledAt || item.createdAt)}</Text>
         </View>
       </View>
+
+      <RecycleChip count={item.recycleCount} />
 
       {(item.city || (item.tags && item.tags.length > 0)) && (
         <View style={s.chipRow}>
@@ -356,6 +369,9 @@ const s = StyleSheet.create({
 
   sourcePill:     { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   sourcePillText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
+
+  recycleChip:     { alignSelf: 'flex-start', backgroundColor: Colors.warningBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 8 },
+  recycleChipText: { fontSize: 10, fontWeight: '700', color: Colors.warning },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   chip:    { backgroundColor: Colors.bgAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },

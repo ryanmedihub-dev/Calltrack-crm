@@ -9,6 +9,9 @@ const jwt = require('jsonwebtoken');
 const authRoutes      = require('./routes/auth');
 const callLogRoutes   = require('./routes/callLogs');
 const leadFunnelRoutes = require('./routes/leadFunnel');
+const workforceSummaryRoutes = require('./routes/workforceSummary');
+const agentDetailRoutes      = require('./routes/agentDetail');
+const retryQueueRoutes       = require('./routes/retryQueue');
 const leadRoutes      = require('./routes/leads');
 const leadPoolRoutes  = require('./routes/leadPool');
 const reportRoutes    = require('./routes/reports');
@@ -143,6 +146,9 @@ app.use(async (_req, res, next) => {
 app.use('/api/auth',       authRoutes);
 app.use('/api/calls',      callLogRoutes);
 app.use('/api/leads',      leadFunnelRoutes);
+app.use('/api/leads',      workforceSummaryRoutes);
+app.use('/api/leads',      agentDetailRoutes);
+app.use('/api/leads',      retryQueueRoutes);
 app.use('/api/leads',      leadRoutes);
 app.use('/api/lead-pool',  leadPoolRoutes);
 app.use('/api/reports',    reportRoutes);
@@ -158,6 +164,33 @@ app.use((err, _req, res, _next) => {
   console.error(err.stack);
   res.status(500).json({ success: false, error: 'Internal server error' });
 });
+
+// ── Auto-recycle sweep ─────────────────────────────────────────────────────────
+// PM2 runs this API in cluster mode, so every worker would otherwise run its own timer and the
+// same lead would get recycled N times per sweep. NODE_APP_INSTANCE is set by PM2 in cluster
+// mode (undefined under a plain `node server.js`), so this also does the right thing locally.
+const isSweepWorker = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
+const RECYCLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+const RECYCLE_SWEEP_STARTUP_DELAY_MS = 60 * 1000;
+
+async function runRecycleSweepSafely() {
+  try {
+    await connectDB();
+    const result = await leadPoolRoutes.runRecycleSweep();
+    if (result.recycled) console.log(`[recycle-sweep] recycled ${result.recycled} of ${result.candidates} candidate(s)`);
+  } catch (err) {
+    // An unhandled rejection inside a setInterval callback would take down the process — this
+    // sweep runs forever, so a bad tick must just get logged and retried next interval.
+    console.error('[recycle-sweep] failed:', err.message);
+  }
+}
+
+if (isSweepWorker) {
+  setTimeout(() => {
+    runRecycleSweepSafely();
+    setInterval(runRecycleSweepSafely, RECYCLE_SWEEP_INTERVAL_MS);
+  }, RECYCLE_SWEEP_STARTUP_DELAY_MS);
+}
 
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;

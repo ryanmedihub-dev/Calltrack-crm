@@ -32,6 +32,15 @@ const leadSchema = new mongoose.Schema({
   claimedAt: { type: Date, default: null },
   claimedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
+  // How many times this lead has been returned to the pool by the recycler. Capped by
+  // MAX_RECYCLES, after which the lead stays with whoever holds it.
+  recycleCount:  { type: Number, default: 0 },
+  lastRecycledAt:{ type: Date,   default: null },
+  // Set once recycleCount hits the cap, or manually by a manager who wants a lead to stop
+  // circulating. Checked as its own flag rather than re-deriving from recycleCount every sweep,
+  // so a manager can pin a lead without inflating its recycle history.
+  recycleLocked: { type: Boolean, default: false },
+
   // Form answers that have no first-class column — Meta lead forms carry different questions
   // per campaign, so this is deliberately schema-less. Stored as an ordered ARRAY of
   // {label, value}, not an object: Meta returns fields in the order they were asked, and that
@@ -80,5 +89,11 @@ leadSchema.index({ createdAt: -1 });
 leadSchema.index({ assignedTo: 1, pooledAt: -1 });
 // Backs the "attended today" counter on the pool stats endpoint.
 leadSchema.index({ claimedAt: -1 });
+// Backs the recycle sweep, which runs every few minutes for the life of the process against
+// every claimed lead — this must stay an index range scan, never a collection scan.
+leadSchema.index({ recycleLocked: 1, claimedAt: 1 });
+// Backs GET /api/leads/retry-queue's `{assignedTo: {$ne: null}, status: {$in: [...]}}` filter —
+// an owner-panel query expected to run against the whole leads collection as it grows.
+leadSchema.index({ assignedTo: 1, status: 1 });
 
 module.exports = mongoose.model('Lead', leadSchema);

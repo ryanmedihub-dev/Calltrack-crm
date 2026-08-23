@@ -11,6 +11,25 @@ const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONT
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
+const { normalizeExtraDetails } = require('../lib/normalizeExtraDetails');
+const getPusher = require('../lib/pusher');
+
+// Best-effort — a realtime outage must never fail the upload that triggered it.
+function broadcastPoolRefresh(payload) {
+  try {
+    const pusher = getPusher();
+    if (!pusher) return;
+    pusher.trigger('lead-pool', 'pool_refreshed', payload).catch(() => {});
+  } catch {}
+}
+
+// A lead actively being closed must never be silently re-pooled out from under whoever booked
+// it — taking it away here would be data loss, not duplicate-handling.
+function isProtectedFromRepool(lead) {
+  return lead.status === 'booking_done'
+    || lead.status === 'converted'
+    || (lead.followUpDate && lead.followUpDate > new Date());
+}
 
 // Human-readable description for a single changelog entry, used by GET /logs
 function describeChangelogEntry(action, details) {
@@ -23,14 +42,22 @@ function describeChangelogEntry(action, details) {
         ? `Status changed from "${details.from || 'unknown'}" to "${details.to || 'unknown'}"`
         : 'Status changed';
     case 'assigned':
-      return details.source === 'bulk_upload_replace'
-        ? 'Assigned during bulk upload'
-        : 'Lead assigned to a team member';
+      if (details.source === 'bulk_upload_replace') return 'Assigned during bulk upload';
+      if (details.source === 'auto_recycle') {
+        const why = details.reason === 'short_call' ? 'short call' : 'no call made';
+        return details.locked
+          ? `Reached the recycle limit (${why}) — stays with current owner`
+          : `Auto-recycled to the pool (${why}, attempt ${details.recycleCount}/3)`;
+      }
+      if (details.source === 'reupload_repool') return 'Moved back to the pool by a re-upload';
+      return 'Lead assigned to a team member';
     case 'call_linked':
       return details.callType ? `Call linked (${details.callType})` : 'Call linked to lead';
     case 'note_added':
       return details.text ? `Note added: "${details.text}"` : 'Note added';
     case 'updated':
+      if (details.source === 'recycle_lock')   return 'Manager stopped this lead from auto-recycling';
+      if (details.source === 'recycle_unlock') return 'Manager allowed this lead to auto-recycle again';
       return 'Lead details updated';
     default:
       return 'Lead activity';
@@ -252,7 +279,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
     const {
       leads: rows,
       assignment = { mode: 'employee', employeeIds: [], autoSplit: false },
-      duplicateStrategy = 'skip', // 'skip' | 'replace'
+      duplicateStrategy = 'skip', // 'skip' | 'replace' | 'repool'
       defaultStatus = 'new',
       tags: globalTags = []
     } = req.body;
@@ -278,7 +305,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
     }
     const tagOnly = assignment.mode === 'tag' ? String(assignment.tag || '').trim() : '';
 
-    let inserted = 0, updated = 0, skipped = 0, errors = 0;
+    let inserted = 0, updated = 0, repooled = 0, protectedCount = 0, skipped = 0, errors = 0;
     let cursor = 0; // round-robin pointer across employeeIds
 
     for (const row of rows) {
@@ -299,7 +326,42 @@ router.post('/bulk-upload', protect, async (req, res) => {
         const existing = await Lead.findOne({ phone });
 
         if (existing) {
-          if (duplicateStrategy === 'replace') {
+          if (duplicateStrategy === 'repool') {
+            // Opt-in only (default stays 'skip') — re-pooling on every duplicate would let a
+            // re-uploaded file, or a redelivered webhook, silently strip an agent's leads
+            // mid-shift. A manager choosing this strategy has already accepted that trade for
+            // the whole file, but a booked/converted/in-follow-up lead is never fair game.
+            if (isProtectedFromRepool(existing)) {
+              protectedCount++;
+            } else {
+              const previousAssignee = existing.assignedTo;
+              existing.assignedTo    = null;
+              existing.claimedAt     = null;
+              existing.claimedBy     = null;
+              existing.pooledAt      = new Date();
+              // A real re-enquiry is a fresh start, not a continuation of the last one.
+              existing.recycleCount  = 0;
+              existing.recycleLocked = false;
+              existing.tags = [...new Set([...(existing.tags || []), ...mergedTags])];
+              // The point of a re-upload is usually that the newer row has better data — but a
+              // sparse re-upload row must not blank out what's already on record.
+              if (name) existing.name = name;
+              if (row.email) existing.email = row.email;
+              if (row.city) existing.city = row.city;
+              if (row.extraDetails) {
+                const extraDetails = normalizeExtraDetails(row.extraDetails);
+                if (extraDetails.length) existing.extraDetails = extraDetails;
+              }
+              existing.changelog.push({
+                changedBy: req.user._id,
+                changedByName: req.user.name,
+                action: 'assigned',
+                details: { source: 'reupload_repool', previousAssignee }
+              });
+              await existing.save();
+              repooled++;
+            }
+          } else if (duplicateStrategy === 'replace') {
             existing.assignedTo = assignedTo || existing.assignedTo;
             existing.tags = [...new Set([...(existing.tags || []), ...mergedTags])];
             existing.changelog.push({
@@ -343,7 +405,18 @@ router.post('/bulk-upload', protect, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, data: { inserted, updated, skipped, errors, total: rows.length } });
+    if (repooled) {
+      // An agent whose lead vanishes mid-shift with no explanation will assume the app is
+      // broken — the same realtime signal the pool claim/release flow already broadcasts tells
+      // the Live Data screen to refresh; the changelog entry above is what explains *why* if
+      // the agent digs into that lead's history.
+      broadcastPoolRefresh({ repooled });
+    }
+
+    return res.json({
+      success: true,
+      data: { inserted, updated, repooled, protected: protectedCount, skipped, errors, total: rows.length },
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

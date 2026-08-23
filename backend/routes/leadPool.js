@@ -6,6 +6,17 @@ const { protect, isManager } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const getPusher = require('../lib/pusher');
 const { logAction } = require('../lib/audit');
+const { normalizeExtraDetails } = require('../lib/normalizeExtraDetails');
+
+// Tunable because the right values depend on how the floor actually works, and these will be
+// adjusted after watching real recycle volume for a week.
+const RECYCLE_AFTER_MS      = 30 * 60 * 1000;  // grace period after claim / after a short call
+const SHORT_CALL_MAX_SEC    = 60;              // a call at or under this didn't amount to a conversation
+const MAX_RECYCLES          = 3;               // after this many, the lead sticks with its holder
+
+// Statuses that mean a claimed lead is being worked successfully — the recycle sweep must
+// never pull these back into the pool out from under the agent closing them.
+const RECYCLE_PROTECTED_STATUSES = ['booking_done', 'converted', 'interested', 'follow_up'];
 
 // ── Core design note ───────────────────────────────────────────────────────────
 // Pool membership is not a stored flag: "in the pool" *is* `assignedTo: null`. That makes
@@ -34,31 +45,6 @@ function broadcast(event, payload) {
 // quantifier (or, with a pathological pattern, stall the query).
 function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Bounds on the schema-less form answers. A campaign we don't control decides these labels, so
-// a misconfigured (or hostile) form must not be able to write unbounded data into every lead.
-const MAX_EXTRA_DETAILS = 30;
-const MAX_EXTRA_VALUE_LEN = 200;
-
-// Accepts either an array of {label, value} (preferred — Meta's field order is meaningful and
-// an array is the only shape that preserves it) or a plain object from older senders, which is
-// normalized in key-insertion order.
-function normalizeExtraDetails(raw) {
-  if (!raw) return [];
-  const pairs = Array.isArray(raw)
-    ? raw.map((e) => [e?.label, e?.value])
-    : (typeof raw === 'object' ? Object.entries(raw) : []);
-
-  return pairs
-    .map(([label, value]) => ({
-      label: String(label ?? '').trim(),
-      value: String(value ?? '').trim().slice(0, MAX_EXTRA_VALUE_LEN),
-    }))
-    // An unanswered optional question comes through empty; showing a blank row to an agent is
-    // worse than showing nothing.
-    .filter((e) => e.label && e.value)
-    .slice(0, MAX_EXTRA_DETAILS);
 }
 
 function normalizeMetaRef(meta) {
@@ -98,8 +84,9 @@ router.get('/', protect, async (req, res) => {
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum)
         // extraDetails/metaRef.leadgenId ride along so the pool card can show budget and
-        // timeline chips without a second round trip per lead.
-        .select('name phone email source city tags status pooledAt createdAt extraDetails metaRef.leadgenId')
+        // timeline chips without a second round trip per lead. recycleCount/lastRecycledAt let
+        // the card warn an agent that someone already tried this number and got nowhere.
+        .select('name phone email source city tags status pooledAt createdAt extraDetails metaRef.leadgenId recycleCount lastRecycledAt')
         .lean(),
       Lead.countDocuments(filter),
     ]);
@@ -128,9 +115,10 @@ router.get('/stats', protect, async (req, res) => {
     nowIST.setUTCHours(0, 0, 0, 0);
     const todayStart = new Date(nowIST.getTime() - IST_OFFSET_MS);
 
-    const [available, claimedToday, bySource, oldest] = await Promise.all([
+    const [available, claimedToday, recycledToday, bySource, oldest] = await Promise.all([
       Lead.countDocuments(POOL_FILTER),
       Lead.countDocuments({ claimedAt: { $gte: todayStart } }),
+      Lead.countDocuments({ lastRecycledAt: { $gte: todayStart } }),
       Lead.aggregate([
         { $match: POOL_FILTER },
         { $group: { _id: { $ifNull: ['$source', 'Unknown'] }, count: { $sum: 1 } } },
@@ -145,6 +133,7 @@ router.get('/stats', protect, async (req, res) => {
       data: {
         available,
         claimedToday,
+        recycledToday,
         bySource,
         oldestWaitingSince: oldest[0] ? (oldest[0].pooledAt || oldest[0].createdAt) : null,
       },
@@ -200,7 +189,7 @@ router.get('/my-claims', protect, async (req, res) => {
     const leads = await Lead.find({ claimedBy: req.user._id })
       .sort({ claimedAt: -1 })
       .limit(limitNum)
-      .select('name phone source city tags status claimedAt lastCallAt attempts extraDetails')
+      .select('name phone source city tags status claimedAt lastCallAt attempts extraDetails recycleCount lastRecycledAt recycleLocked')
       .lean();
     return res.json({ success: true, data: leads });
   } catch (err) {
@@ -341,6 +330,158 @@ router.post('/push', protect, isManager, async (req, res) => {
   }
 });
 
+// POST /api/lead-pool/:id/lock — manager stops a lead from ever auto-recycling again, without
+// waiting for it to hit MAX_RECYCLES.
+router.post('/:id/lock', protect, isManager, async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    }
+    const lead = await Lead.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: { recycleLocked: true },
+        $push: {
+          changelog: {
+            changedBy:     req.user._id,
+            changedByName: req.user.name,
+            action:        'updated',
+            details:       { source: 'recycle_lock' },
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    return res.json({ success: true, data: lead, message: 'Lead will no longer auto-recycle' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/lead-pool/:id/unlock — manager lets a capped-out or manually-pinned lead recycle again.
+router.post('/:id/unlock', protect, isManager, async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    }
+    const lead = await Lead.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: { recycleLocked: false },
+        $push: {
+          changelog: {
+            changedBy:     req.user._id,
+            changedByName: req.user.name,
+            action:        'updated',
+            details:       { source: 'recycle_unlock' },
+          },
+        },
+      },
+      { new: true }
+    );
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+    return res.json({ success: true, data: lead, message: 'Lead can recycle again' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Auto-recycle sweep ─────────────────────────────────────────────────────────
+// Exported and run on a timer from server.js (not mounted as a route) — see the scheduling
+// comment there for why it's a plain setInterval guarded to a single PM2 worker.
+//
+// A lead qualifies when it is claimed, unlocked, not being worked successfully, and either:
+//   1. no call has happened since it was claimed, and the grace period has elapsed since claim, or
+//   2. the most recent call came AFTER the claim, was short, and the grace period has elapsed
+//      since that call.
+//
+// The `claimedAt <= cutoff` pre-filter below is a sound superset for both branches: branch 2
+// requires `lastCallAt > claimedAt` AND `now - lastCallAt > RECYCLE_AFTER_MS`, which together
+// imply `now - claimedAt > RECYCLE_AFTER_MS` too. So narrowing on claimedAt alone via the
+// {recycleLocked, claimedAt} index never drops a real candidate, while keeping the sweep an
+// index range scan instead of a collection scan.
+async function runRecycleSweep() {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - RECYCLE_AFTER_MS);
+
+  const candidates = await Lead.find({
+    recycleLocked: false,
+    claimedAt: { $ne: null, $lte: cutoff },
+    assignedTo: { $ne: null },
+    status: { $nin: RECYCLE_PROTECTED_STATUSES },
+    $and: [
+      // No future follow-up — a lead with a scheduled callback is being worked, not stalled.
+      { $or: [{ followUpDate: null }, { followUpDate: { $exists: false } }, { followUpDate: { $lte: now } }] },
+      // Never recycle off the back of a genuine connected conversation — only a lead whose most
+      // recently recorded call was short (or that has never connected at all) is a candidate.
+      { $or: [{ connectedCallCount: { $lte: 0 } }, { lastCallDuration: { $lte: SHORT_CALL_MAX_SEC } }] },
+    ],
+  })
+    .select('_id assignedTo claimedAt lastCallAt lastCallDuration recycleCount')
+    .lean();
+
+  const ops = [];
+  for (const lead of candidates) {
+    const { claimedAt, lastCallAt, lastCallDuration } = lead;
+    // Critical: a lead recycled once already carries the PREVIOUS holder's call in lastCallAt/
+    // lastCallDuration. Comparing lastCallAt to claimedAt is what stops the new holder from
+    // being punished for a call they didn't make — without it, every re-claimed lead would look
+    // like an instant short-call recycle and blow through MAX_RECYCLES in one sweep.
+    const callSinceClaim = lastCallAt && claimedAt && lastCallAt.getTime() > claimedAt.getTime();
+
+    let reason = null;
+    if (!callSinceClaim) {
+      if (now.getTime() - claimedAt.getTime() > RECYCLE_AFTER_MS) reason = 'no_call';
+    } else if ((lastCallDuration || 0) <= SHORT_CALL_MAX_SEC) {
+      if (now.getTime() - lastCallAt.getTime() > RECYCLE_AFTER_MS) reason = 'short_call';
+    }
+    if (!reason) continue;
+
+    const nextCount = (lead.recycleCount || 0) + 1;
+    const willLock = nextCount >= MAX_RECYCLES;
+    const setFields = { lastRecycledAt: now, recycleLocked: willLock };
+    // Capped out: stays with whoever holds it rather than pooling a 4th time.
+    if (!willLock) {
+      setFields.assignedTo = null;
+      setFields.claimedAt  = null;
+      setFields.claimedBy  = null;
+      setFields.pooledAt   = now;
+    }
+
+    ops.push({
+      updateOne: {
+        // recycleLocked: false re-checked at write time so a manager's lock/unlock click
+        // racing with this sweep can't be clobbered by a stale read.
+        filter: { _id: lead._id, recycleLocked: false },
+        update: {
+          $set: setFields,
+          $inc: { recycleCount: 1 },
+          $push: {
+            changelog: {
+              changedByName: 'Auto-recycle',
+              action:        'assigned',
+              details: {
+                source:           'auto_recycle',
+                reason,
+                previousAssignee: lead.assignedTo,
+                recycleCount:     nextCount,
+                locked:           willLock,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  if (!ops.length) return { candidates: candidates.length, recycled: 0 };
+
+  const result = await Lead.bulkWrite(ops, { ordered: false });
+  broadcast('pool_refreshed', { recycled: result.modifiedCount });
+  return { candidates: candidates.length, recycled: result.modifiedCount };
+}
+
 // ── Meta lead-ads webhook ──────────────────────────────────────────────────────
 // Meta can't present a JWT, so these two routes sit outside `protect` and are gated by a
 // shared secret instead. Both default CLOSED: if the env var is unset the endpoint rejects
@@ -432,5 +573,9 @@ router.post('/meta-webhook', async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// router is a function (express.Router()), so it can carry the sweep alongside the routes
+// without changing the `app.use('/api/lead-pool', leadPoolRoutes)` mount in server.js.
+router.runRecycleSweep = runRecycleSweep;
 
 module.exports = router;

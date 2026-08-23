@@ -15,6 +15,7 @@ const InboxIco    = () => <Ico size={16}><path d="M22 12h-6l-2 3h-4l-2-3H2" /><p
 const CheckIco    = () => <Ico size={16}><polyline points="20 6 9 17 4 12" /></Ico>;
 const LayersIco   = () => <Ico size={16}><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></Ico>;
 const ClockIco    = () => <Ico size={16}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Ico>;
+const RecycleIco  = () => <Ico size={16}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Ico>;
 
 /* ── CSV parsing ───────────────────────────────────────────────────────────────
    Hand-rolled to match the existing import wizard (leads-uploads) rather than pulling in a
@@ -94,6 +95,9 @@ export default function LiveDataPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch]     = useState('');
   const [uploading, setUploading] = useState(false);
+  // Opt-in, unchecked by default — the same file uploaded twice by mistake must not silently
+  // strip every agent's leads mid-shift. See the "repool" duplicate strategy on the server.
+  const [repoolDuplicates, setRepoolDuplicates] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   // Per-campaign questions differ, so a column per question isn't viable — the answers live in
   // an expandable row instead, leaving the collapsed table exactly as it was.
@@ -235,13 +239,19 @@ export default function LiveDataPage() {
         const res = await api.post('/api/leads/bulk-upload', {
           leads: payload,
           assignment: { mode: 'pool' },   // leaves every row unassigned → straight into the pool
-          duplicateStrategy: 'skip',
+          duplicateStrategy: repoolDuplicates ? 'repool' : 'skip',
           defaultStatus: 'new',
         });
         const d = res.data?.data || {};
-        toast.success(
-          `Added ${d.inserted ?? 0} · skipped ${d.skipped ?? 0} duplicate(s) · ${(d.errors ?? 0) + invalid} invalid`
-        );
+        const parts = [`Added ${d.inserted ?? 0}`];
+        if (repoolDuplicates) {
+          parts.push(`${d.repooled ?? 0} moved back to the pool`);
+          if (d.protected) parts.push(`${d.protected} protected (booked/converted/follow-up)`);
+        } else {
+          parts.push(`skipped ${d.skipped ?? 0} duplicate(s)`);
+        }
+        parts.push(`${(d.errors ?? 0) + invalid} invalid`);
+        toast.success(parts.join(' · '));
         load(true);
       } catch (err) {
         toast.error(err?.response?.data?.error || 'Upload failed');
@@ -275,7 +285,16 @@ export default function LiveDataPage() {
               </span>
             </h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 select-none cursor-pointer" title="If a phone number in the file already belongs to an agent, move that lead back to the open pool instead of leaving it with them.">
+              <input
+                type="checkbox"
+                checked={repoolDuplicates}
+                onChange={(e) => setRepoolDuplicates(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Move already-assigned leads back to the open pool
+            </label>
             <button
               onClick={() => load(true)}
               className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium"
@@ -306,9 +325,10 @@ export default function LiveDataPage() {
         )}
 
         {/* ── Stats ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard label="Available now"  value={(stats?.available ?? 0).toLocaleString()} color="#2563EB" icon={<InboxIco />} loading={loading} />
           <StatCard label="Attended today" value={(stats?.claimedToday ?? 0).toLocaleString()} color="#16A34A" icon={<CheckIco />} loading={loading} />
+          <StatCard label="Recycled today" value={(stats?.recycledToday ?? 0).toLocaleString()} color="#D97706" icon={<RecycleIco />} loading={loading} />
           <StatCard label="Sources"        value={(stats?.bySource?.length ?? 0).toLocaleString()} color="#7C3AED" icon={<LayersIco />} loading={loading} />
           <StatCard label="Oldest waiting" value={waitingSince(stats?.oldestWaitingSince)} color="#D97706" icon={<ClockIco />} loading={loading} />
         </div>
@@ -361,7 +381,23 @@ export default function LiveDataPage() {
               )
             )}
             columns={[
-              { key: 'name',   label: 'Name',   width: 170, render: (r) => <Truncate text={r.name} max={22} /> },
+              {
+                key: 'name', label: 'Name', width: 170,
+                render: (r) => (
+                  <div className="flex items-center gap-1.5">
+                    <Truncate text={r.name} max={22} />
+                    {r.recycleCount > 0 && (
+                      <span
+                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                        style={{ background: '#FEF3C7', color: '#D97706' }}
+                        title={`Recycled ${r.recycleCount} time(s) — the last agent(s) didn't reach them`}
+                      >
+                        Retry {r.recycleCount}/3
+                      </span>
+                    )}
+                  </div>
+                ),
+              },
               { key: 'phone',  label: 'Phone',  width: 130, render: (r) => <span className="tabular-nums">{r.phone}</span> },
               {
                 key: 'source', label: 'Source', width: 120,
