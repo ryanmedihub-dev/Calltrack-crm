@@ -29,6 +29,8 @@ const POOL_FILTER = { assignedTo: null };
 // Indian mobile numbers: 10 digits starting 6-9, post-normalisation.
 const PHONE_RE = /^[6-9]\d{9}$/;
 
+const ALLOWED_SOURCES = ['Meta', 'WhatsApp', 'Instagram', 'Web Chat', 'Website', 'Referral', 'Excel Upload'];
+
 const CHANNEL = 'lead-pool';
 
 // Pusher is optional infrastructure (getPusher() returns null when unconfigured). A realtime
@@ -533,7 +535,11 @@ router.post('/meta-webhook', async (req, res) => {
           phone,
           email:  raw.email || undefined,
           city:   raw.city || raw.location || undefined,
-          source: 'Meta',
+          // Source comes from the caller now that more than one relay posts here (Meta webhook,
+          // the CXWizard sheet script, and future intakes). Whitelisted rather than passed
+          // through: source drives the pool's filter dropdown and its bySource stats, so one
+          // typo in a caller would permanently add a junk facet that nobody can remove from the UI.
+          source: ALLOWED_SOURCES.includes(raw.source) ? raw.source : 'Meta',
           importedBy: 'meta-webhook',
           // Always unassigned: that's what puts it in the pool.
           assignedTo: null,
