@@ -107,6 +107,72 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
+
+// GET /api/lead-pool/export — CSV download of the whole open pool (not just the current page).
+// Same filters as GET / (search/source/tag) so "export what I'm looking at" does what the Live
+// Data page's export button implies. Streamed row-by-row rather than buffered, matching the
+// existing GET /api/leads/export — the pool can run into the thousands and this must not hold
+// the whole result set in memory to build one response.
+router.get('/export', protect, async (req, res) => {
+  try {
+    const { search, source, tag } = req.query;
+    const filter = { ...POOL_FILTER };
+    if (source) filter.source = source;
+    if (tag)    filter.tags = tag;
+    if (search) {
+      const rx = { $regex: escapeRegex(search), $options: 'i' };
+      filter.$or = [{ name: rx }, { phone: rx }];
+    }
+
+    const filename = `open-lead-pool_${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const header = [
+      'Name', 'Phone', 'Email', 'Source', 'City', 'Tags', 'Status',
+      'Recycle Count', 'Waiting Since', 'Form Answers',
+    ].join(',') + '\n';
+    res.write(header);
+
+    // Batched into ~64KB chunks before flushing — matches GET /api/leads/export's rationale:
+    // cuts the res.write() call count drastically versus one write per row.
+    const FLUSH_BYTES = 64 * 1024;
+    let outBuf = '';
+
+    const cursor = Lead.find(filter)
+      .sort({ pooledAt: -1, createdAt: -1 })
+      .select('name phone email source city tags status recycleCount pooledAt createdAt extraDetails')
+      .lean()
+      .cursor();
+
+    for await (const doc of cursor) {
+      const formAnswers = (doc.extraDetails || []).map((d) => `${d.label}: ${d.value}`).join(' | ');
+      const waitingSince = doc.pooledAt || doc.createdAt;
+      const line = [
+        csvEsc(doc.name),
+        doc.phone || '',
+        csvEsc(doc.email),
+        csvEsc(doc.source),
+        csvEsc(doc.city),
+        csvEsc((doc.tags || []).join('; ')),
+        csvEsc(doc.status),
+        doc.recycleCount || 0,
+        waitingSince ? new Date(waitingSince).toLocaleString('en-IN') : '',
+        csvEsc(formAnswers),
+      ].join(',') + '\n';
+
+      outBuf += line;
+      if (outBuf.length >= FLUSH_BYTES) { res.write(outBuf); outBuf = ''; }
+    }
+    if (outBuf) res.write(outBuf);
+    res.end();
+  } catch (err) {
+    if (!res.headersSent) return res.status(500).json({ success: false, error: err.message });
+    res.end();
+  }
+});
+
 // GET /api/lead-pool/stats
 router.get('/stats', protect, async (req, res) => {
   try {

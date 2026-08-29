@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { DataTable, StatCard, Field, Truncate, Ico, UsersIco } from '../../../../components/report-shared';
+import { triggerServerExport } from '../../../../lib/downloads';
 
 const POLL_MS = 10_000;
 const POLL_BACKOFF_CEILING_MS = 2 * 60_000;
@@ -16,6 +17,7 @@ const CheckIco    = () => <Ico size={16}><polyline points="20 6 9 17 4 12" /></I
 const LayersIco   = () => <Ico size={16}><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></Ico>;
 const ClockIco    = () => <Ico size={16}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></Ico>;
 const RecycleIco  = () => <Ico size={16}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Ico>;
+const DownloadIco = () => <Ico size={14}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></Ico>;
 
 /* ── CSV parsing ───────────────────────────────────────────────────────────────
    Hand-rolled to match the existing import wizard (leads-uploads) rather than pulling in a
@@ -88,6 +90,8 @@ function waitingSince(ts) {
   return `${Math.floor(hrs / 24)}d`;
 }
 
+const DEFAULT_PAGE_SIZE = 25;
+
 export default function LiveDataPage() {
   const [leads, setLeads]       = useState([]);
   const [stats, setStats]       = useState(null);
@@ -95,6 +99,7 @@ export default function LiveDataPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch]     = useState('');
   const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   // Opt-in, unchecked by default — the same file uploaded twice by mistake must not silently
   // strip every agent's leads mid-shift. See the "repool" duplicate strategy on the server.
   const [repoolDuplicates, setRepoolDuplicates] = useState(false);
@@ -104,8 +109,17 @@ export default function LiveDataPage() {
   const [expandedId, setExpandedId] = useState(null);
   // Set on a 429 so the banner can render; cleared on the next clean poll.
   const [rateLimited, setRateLimited] = useState(false);
+  // Server-side pagination — the pool can run into the thousands, and GET /api/lead-pool caps
+  // `limit` at 100 server-side, so fetching "everything" in one call was never an option.
+  // `total`/`pages` come straight from the API response the table is currently showing.
+  const [page, setPage]         = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [total, setTotal]       = useState(0);
+  const [pages, setPages]       = useState(1);
   const fileRef = useRef(null);
   const searchRef = useRef('');
+  const pageRef = useRef(1);
+  const pageSizeRef = useRef(DEFAULT_PAGE_SIZE);
   // Current poll interval. Doubles on each consecutive 429 (capped) so a fixed-interval poll
   // can't keep hammering a bucket it's already exhausted; resets to POLL_MS on success.
   const pollDelayRef = useRef(POLL_MS);
@@ -115,10 +129,15 @@ export default function LiveDataPage() {
     try {
       const q = searchRef.current;
       const [poolRes, statsRes] = await Promise.all([
-        api.get('/api/lead-pool', { params: { limit: 100, ...(q ? { search: q } : {}) } }),
+        api.get('/api/lead-pool', {
+          params: { limit: pageSizeRef.current, page: pageRef.current, ...(q ? { search: q } : {}) },
+        }),
         api.get('/api/lead-pool/stats').catch(() => null),
       ]);
-      setLeads(poolRes.data?.data?.leads || []);
+      const data = poolRes.data?.data || {};
+      setLeads(data.leads || []);
+      setTotal(data.total ?? 0);
+      setPages(data.pages ?? 1);
       if (statsRes) setStats(statsRes.data?.data || null);
       pollDelayRef.current = POLL_MS;
       setRateLimited(false);
@@ -136,6 +155,20 @@ export default function LiveDataPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const goToPage = (p) => {
+    const clamped = Math.max(1, Math.min(p, pages));
+    pageRef.current = clamped;
+    setPage(clamped);
+    load(true);
+  };
+  const changePageSize = (n) => {
+    pageSizeRef.current = n;
+    pageRef.current = 1; // a different page size shifts every page boundary — start over
+    setPageSize(n);
+    setPage(1);
+    load(true);
+  };
 
   // Self-rescheduling rather than setInterval, so the delay picked up by pollDelayRef inside
   // load() (post-429 backoff, or the reset back to POLL_MS on success) takes effect on the
@@ -181,9 +214,13 @@ export default function LiveDataPage() {
     }).catch(() => setEmployeeAttemptsLoading(false));
   }, [loadEmployeeAttempts]);
 
-  // Debounced so typing doesn't fire a request per keystroke on top of the 10s poll.
+  // Debounced so typing doesn't fire a request per keystroke on top of the 10s poll. A new
+  // search term shifts which page 1 even means, so it resets pagination rather than keeping
+  // whatever page number the previous, unrelated result set had scrolled to.
   useEffect(() => {
     searchRef.current = search;
+    pageRef.current = 1;
+    setPage(1);
     const t = setTimeout(() => load(true), 350);
     return () => clearTimeout(t);
   }, [search, load]);
@@ -264,6 +301,21 @@ export default function LiveDataPage() {
     reader.readAsText(file);
   };
 
+  // Downloads the WHOLE open pool as CSV (not just the current page) — the server streams it
+  // straight from the DB rather than us stitching pages together client-side.
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await triggerServerExport({
+        endpoint: '/api/lead-pool/export',
+        params: { ...(searchRef.current ? { search: searchRef.current } : {}) },
+        filename: `open-lead-pool_${new Date().toISOString().slice(0, 10)}.csv`,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   const webhookUrl = `${process.env.NEXT_PUBLIC_API_URL || 'https://api.learcrm.com'}/api/lead-pool/meta-webhook`;
 
   return (
@@ -300,6 +352,13 @@ export default function LiveDataPage() {
               className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium"
             >
               <RefreshIco spinning={refreshing} /> Refresh
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium disabled:opacity-50"
+            >
+              <DownloadIco /> {downloading ? 'Preparing…' : 'Download Excel'}
             </button>
             <input
               ref={fileRef}
@@ -356,7 +415,13 @@ export default function LiveDataPage() {
             loading={loading}
             showRowNumber
             rows={leads}
-            pageSize={25}
+            serverMode
+            page={page}
+            totalPages={pages}
+            totalCount={total}
+            pageSize={pageSize}
+            onPageChange={goToPage}
+            onPageSizeChange={changePageSize}
             emptyTitle="Pool is empty"
             emptyHint="Upload a CSV or wait for Meta leads to arrive."
             expandedId={expandedId}
