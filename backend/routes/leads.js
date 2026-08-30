@@ -468,7 +468,16 @@ router.post('/from-call', protect, async (req, res) => {
     // reflected in the lead's call stats, not just future syncs.
     let call = null;
     if (callId) call = await CallLog.findById(callId).catch(() => null);
-    const alreadyCounted = call && call.leadId; // this call was already linked/counted elsewhere
+    // Count this call toward the lead's stats only when there is a REAL, not-yet-linked call
+    // behind it. Two ways this used to over-count:
+    //   - no callId at all (the post-call form can submit before the call has synced): there was
+    //     no CallLog to guard against, so it incremented, and then /calls/sync incremented again
+    //     when the same call arrived moments later.
+    //   - a call already carrying leadId: counted once here and once wherever it was first linked.
+    // /calls/sync is the authoritative counter — every real call passes through it — so this
+    // route only counts a call sync has not reached yet.
+    const alreadyLinked   = !!(call && call.leadId);
+    const shouldCountCall = !!call && !call.leadId;
 
     const existing = await Lead.findOne({ phone });
     if (existing) {
@@ -489,16 +498,19 @@ router.post('/from-call', protect, async (req, res) => {
       };
       if (callId) update.$addToSet = { callLogs: callId };
 
-      // Count the attempt here only if this call hasn't already been counted
-      // (e.g. via /api/calls/sync auto-linking) — avoids double counting.
-      if (!alreadyCounted) {
-        update.$inc = { attempts: 1, ...(call && call.duration > 0 ? { connectedCallCount: 1 } : {}) };
+      // Last-call metadata is safe to refresh whenever this call isn't one already linked
+      // elsewhere — it describes the most recent contact, and re-stating it is idempotent.
+      if (!alreadyLinked) {
         update.$set.lastCallAt            = call ? call.timestamp : new Date();
         update.$set.lastCallType          = call ? call.callType   : undefined;
         update.$set.lastCallDuration      = call ? (call.duration || 0) : 0;
         update.$set.lastCallEmployee      = req.user.name;
         update.$set.lastCallEmployeePhone = req.user.phone || '';
         Object.keys(update.$set).forEach((k) => update.$set[k] === undefined && delete update.$set[k]);
+      }
+      // The counters are NOT idempotent, so they get the stricter guard — see shouldCountCall.
+      if (shouldCountCall) {
+        update.$inc = { attempts: 1, ...(call.duration > 0 ? { connectedCallCount: 1 } : {}) };
       }
 
       const updated = await Lead.findByIdAndUpdate(existing._id, update, { new: true });
@@ -764,9 +776,13 @@ router.patch('/:id/link-call', protect, isManager, async (req, res) => {
     if (!callId) return res.status(400).json({ success: false, error: 'callId required' });
     const call = await CallLog.findById(callId).populate('employeeId', 'name phone');
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+    // A call already carrying a leadId was counted toward some lead when it was first linked.
+    // Re-linking it (or re-running this route on the same call) must move it, not mint a second
+    // attempt out of one real phone call — this used to inflate `attempts` on every re-link.
+    const alreadyCounted = !!call.leadId;
     await CallLog.findByIdAndUpdate(callId, { leadId: req.params.id });
     await Lead.findByIdAndUpdate(req.params.id, {
-      $inc: { attempts: 1 },
+      ...(alreadyCounted ? {} : { $inc: { attempts: 1, ...(call.duration > 0 ? { connectedCallCount: 1 } : {}) } }),
       $set: {
         lastCallAt:            call.timestamp,
         lastCallType:          call.callType,

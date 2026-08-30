@@ -19,12 +19,24 @@ const MAX_RECYCLES          = 3;               // after this many, the lead stic
 const RECYCLE_PROTECTED_STATUSES = ['booking_done', 'converted', 'interested', 'follow_up'];
 
 // ── Core design note ───────────────────────────────────────────────────────────
-// Pool membership is not a stored flag: "in the pool" *is* `assignedTo: null`. That makes
-// pooled-and-owned mutually exclusive by construction rather than by convention, brings every
-// already-unassigned lead into the pool with zero migration, and leaves no second collection
-// to reconcile. `pooledAt` exists only to order the pool — a lead released back should surface
-// as newly available rather than stay buried under everything imported since it was created.
-const POOL_FILTER = { assignedTo: null };
+// Pool membership is not a stored flag: "in the pool" is `assignedTo: null` AND a status that
+// still means "nobody has settled this lead yet". Ownership alone was the original definition,
+// but it leaks: the call sync auto-links any call to a matching lead BY PHONE regardless of
+// assignment (see /attempts-by-employee), so an agent who dials a pool number straight from
+// their phone can drive an unclaimed lead to 'interested' or 'follow_up' while it is still
+// sitting in the pool for everyone else to grab. Whitelisting the eligible statuses is what
+// keeps a lead somebody is already converting from being offered to the whole floor.
+//
+// Whitelist rather than a $nin of the decided ones, for two reasons: Mongo can use an index for
+// $in but not $nin, and a status added to the enum later stays OUT of the pool until somebody
+// deliberately opts it in — the safe direction for a screen every agent works from.
+const POOL_ELIGIBLE_STATUSES = ['new', 'contacted', 'not_connected'];
+const POOL_FILTER = { assignedTo: null, status: { $in: POOL_ELIGIBLE_STATUSES } };
+
+// Just "unassigned", without the status narrowing above. Only for the manager oversight report,
+// which exists precisely to surface leads that were worked while still unclaimed — narrowing it
+// to POOL_FILTER would hide the strongest evidence of the behaviour it is meant to catch.
+const UNASSIGNED_FILTER = { assignedTo: null };
 
 // Indian mobile numbers: 10 digits starting 6-9, post-normalisation.
 const PHONE_RE = /^[6-9]\d{9}$/;
@@ -219,7 +231,7 @@ router.get('/stats', protect, async (req, res) => {
 router.get('/attempts-by-employee', protect, isManager, async (req, res) => {
   try {
     const rows = await Lead.aggregate([
-      { $match: { ...POOL_FILTER, attempts: { $gt: 0 } } },
+      { $match: { ...UNASSIGNED_FILTER, attempts: { $gt: 0 } } },
       { $unwind: '$changelog' },
       { $match: { 'changelog.action': 'call_linked' } },
       {
@@ -272,11 +284,13 @@ router.post('/:id/claim', protect, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
     }
 
-    // The entire concurrency story is `assignedTo: null` being part of the *filter*: MongoDB
-    // decides which of two simultaneous taps wins, atomically. Splitting this into a find()
-    // followed by a save() would reintroduce exactly the race this design exists to remove.
+    // The entire concurrency story is POOL_FILTER being part of the *filter*: MongoDB decides
+    // which of two simultaneous taps wins, atomically. Splitting this into a find() followed by
+    // a save() would reintroduce exactly the race this design exists to remove. The status half
+    // of POOL_FILTER matters here too — a phone still showing a stale pool card must not be able
+    // to claim a lead that has since been driven to 'interested' by whoever actually called it.
     const lead = await Lead.findOneAndUpdate(
-      { _id: req.params.id, assignedTo: null },
+      { _id: req.params.id, ...POOL_FILTER },
       {
         $set: {
           assignedTo: req.user._id,
@@ -297,12 +311,15 @@ router.post('/:id/claim', protect, async (req, res) => {
     );
 
     if (!lead) {
-      // Distinguish the two failure modes so the app can say something true and self-correct,
+      // Distinguish the failure modes so the app can say something true and self-correct,
       // instead of showing a generic error the agent will just retry into the same wall.
-      const exists = await Lead.exists({ _id: req.params.id });
-      return exists
+      const current = await Lead.findById(req.params.id).select('assignedTo status').lean();
+      if (!current) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+      return current.assignedTo
         ? res.status(409).json({ success: false, error: 'This lead was just claimed by someone else', code: 'ALREADY_CLAIMED' })
-        : res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
+        // Unassigned but no longer pool-eligible: somebody already worked this number without
+        // claiming it. Same 409/self-correct handling on the client, different explanation.
+        : res.status(409).json({ success: false, error: 'This lead has already been worked and is no longer open', code: 'ALREADY_CLAIMED' });
     }
 
     await logAction(req, 'lead.claim', {
