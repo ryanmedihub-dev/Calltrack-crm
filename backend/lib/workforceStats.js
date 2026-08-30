@@ -23,17 +23,48 @@ function emptyLeadStats() {
   return { assigned: 0, byStatus };
 }
 
+// How far back `calls` figures reach when the caller names no range at all. An unbounded
+// default meant every no-param request re-aggregated the entire call history, which only ever
+// gets slower — the cost of the default grew with the archive rather than with the question.
+const DEFAULT_CALL_STATS_DAYS = 30;
+
+// Resolves the effective window for call stats. Exported so the routes can report the range
+// they ACTUALLY used rather than echoing back the (possibly absent) query params — a dashboard
+// showing "last 30 days" numbers under a blank date range is how people misread a chart.
+//
+// A caller that supplies only one bound gets exactly that bound and no default on the other
+// side: asking for "since March 1" means since March 1, not "the 30 days after March 1".
+function resolveCallStatsRange(dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) {
+    const to = new Date();
+    const from = new Date(to.getTime() - DEFAULT_CALL_STATS_DAYS * 24 * 60 * 60 * 1000);
+    return { from, to, defaulted: true };
+  }
+  return {
+    from: dateFrom ? new Date(dateFrom) : null,
+    to:   dateTo   ? new Date(dateTo)   : null,
+    defaulted: false,
+  };
+}
+
 // Returns a Map (plain object keyed by employeeId string) of call-activity stats, scoped to
 // `dateFrom`/`dateTo` on `timestamp` — this is the activity-in-period half of the picture.
+//
+// With NEITHER bound supplied this defaults to the last DEFAULT_CALL_STATS_DAYS days rather
+// than all of history — see resolveCallStatsRange. Note this is the opposite choice from
+// getLeadStatsByEmployee below, deliberately: call activity is a rate ("how much dialling
+// happened"), which is meaningless without a window, while lead ownership is a standing
+// balance that a window would distort.
 //
 // employeeIds: array of ObjectId|string to scope to. Required — callers always know which
 // employees they're summarizing (the caller's own User query already picked the roster).
 async function getCallStatsByEmployee({ employeeIds, dateFrom, dateTo }) {
   const match = { employeeId: { $in: employeeIds.map((id) => new mongoose.Types.ObjectId(id)) } };
-  if (dateFrom || dateTo) {
+  const range = resolveCallStatsRange(dateFrom, dateTo);
+  if (range.from || range.to) {
     match.timestamp = {};
-    if (dateFrom) match.timestamp.$gte = new Date(dateFrom);
-    if (dateTo) match.timestamp.$lte = new Date(dateTo);
+    if (range.from) match.timestamp.$gte = range.from;
+    if (range.to)   match.timestamp.$lte = range.to;
   }
 
   const rows = await CallLog.aggregate([
@@ -105,4 +136,7 @@ async function getLeadStatsByEmployee({ employeeIds }) {
   return map;
 }
 
-module.exports = { LEAD_STATUSES, emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee };
+module.exports = {
+  LEAD_STATUSES, DEFAULT_CALL_STATS_DAYS, resolveCallStatsRange,
+  emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee,
+};

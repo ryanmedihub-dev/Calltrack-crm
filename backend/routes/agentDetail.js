@@ -8,8 +8,13 @@
 //
 // Query params (all optional):
 //   dateFrom, dateTo — ISO date bounds on CallLog.timestamp (for `calls`/`recentCalls`) and on
-//                       Lead.changelog.changedAt (for `recentLeadChangelog`). `leads` is a
-//                       present-moment snapshot and ignores these — see lib/workforceStats.js.
+//                       Lead.changelog.changedAt (for `recentLeadChangelog`). With NEITHER
+//                       supplied these default to the LAST 30 DAYS, not all of history (see
+//                       DEFAULT_CALL_STATS_DAYS in lib/workforceStats.js), matching
+//                       workforce-summary so the same agent reads the same on both screens.
+//                       The window actually used is echoed back in `data.range`.
+//                       `leads` is a present-moment snapshot and ignores all of this — see
+//                       lib/workforceStats.js.
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -17,7 +22,9 @@ const User = require('../models/User');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
 const { protect, isManager } = require('../middleware/auth');
-const { emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee } = require('../lib/workforceStats');
+const {
+  emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
+} = require('../lib/workforceStats');
 
 router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => {
   try {
@@ -39,11 +46,15 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
       getLeadStatsByEmployee({ employeeIds: [employeeId] }),
     ]);
 
+    // Same resolved window as the `calls` totals above — a 30-day headline figure sitting next
+    // to a "recent call" from four months ago would read as a bug in the dashboard.
+    const range = resolveCallStatsRange(dateFrom, dateTo);
+
     const callFilter = { employeeId };
-    if (dateFrom || dateTo) {
+    if (range.from || range.to) {
       callFilter.timestamp = {};
-      if (dateFrom) callFilter.timestamp.$gte = new Date(dateFrom);
-      if (dateTo) callFilter.timestamp.$lte = new Date(dateTo);
+      if (range.from) callFilter.timestamp.$gte = range.from;
+      if (range.to)   callFilter.timestamp.$lte = range.to;
     }
     const recentCallDocs = await CallLog.find(callFilter)
       .sort({ timestamp: -1 })
@@ -52,10 +63,10 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
       .lean();
 
     const changelogDateMatch = {};
-    if (dateFrom || dateTo) {
+    if (range.from || range.to) {
       changelogDateMatch['changelog.changedAt'] = {};
-      if (dateFrom) changelogDateMatch['changelog.changedAt'].$gte = new Date(dateFrom);
-      if (dateTo) changelogDateMatch['changelog.changedAt'].$lte = new Date(dateTo);
+      if (range.from) changelogDateMatch['changelog.changedAt'].$gte = range.from;
+      if (range.to)   changelogDateMatch['changelog.changedAt'].$lte = range.to;
     }
     // $unwind + sort + limit in the pipeline — never load every assigned lead's full changelog
     // into Node just to keep the last 20 entries.
@@ -83,6 +94,7 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
           id: employee._id, name: employee.name, tlName: employee.tlName || null,
           isActive: employee.isActive, dailyTarget: employee.dailyTarget,
         },
+        range: { from: range.from, to: range.to, defaulted: range.defaulted },
         calls: callMap[employeeId] || emptyCallStats(),
         leads: leadMap[employeeId] || emptyLeadStats(),
         recentCalls: recentCallDocs.map((c) => ({

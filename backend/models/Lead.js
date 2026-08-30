@@ -95,5 +95,15 @@ leadSchema.index({ recycleLocked: 1, claimedAt: 1 });
 // Backs GET /api/leads/retry-queue's `{assignedTo: {$ne: null}, status: {$in: [...]}}` filter —
 // an owner-panel query expected to run against the whole leads collection as it grows.
 leadSchema.index({ assignedTo: 1, status: 1 });
+// The retry-queue priority tiers each pair `status` with one date field, so these two let each
+// $or branch resolve as an index range instead of scanning every lead of that status:
+//   P0 — status 'interested' + followUpDate in the past
+//   P1/P3 — status 'contacted'/'not_connected' + a lastCallAt cutoff
+// NOTE: no { createdAt: 1 } here, and no { employeeId: 1, timestamp: 1 } on CallLog — the
+// existing { createdAt: -1 } / { employeeId: 1, timestamp: -1 } already serve those. Index key
+// direction only matters for sort order; a range filter walks an index equally well either way,
+// so the ascending twins would be pure write-amplification on a collection this size.
+leadSchema.index({ status: 1, followUpDate: 1 });
+leadSchema.index({ status: 1, lastCallAt: 1 });
 
 module.exports = mongoose.model('Lead', leadSchema);

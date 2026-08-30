@@ -6,17 +6,24 @@
 // pattern GET /api/leads/funnel-data already uses.
 //
 // Query params (all optional):
-//   dateFrom, dateTo — ISO date bounds on CallLog.timestamp for the `calls` figures.
+//   dateFrom, dateTo — ISO date bounds on CallLog.timestamp for the `calls` figures. With
+//                       NEITHER supplied this defaults to the LAST 30 DAYS, not all of history
+//                       (see DEFAULT_CALL_STATS_DAYS in lib/workforceStats.js). The window
+//                       actually used is always echoed back in `data.range`, with
+//                       `range.defaulted: true` when it came from that default.
 //   teams            — comma-separated User.tlName values; only employees under one of these
 //                       team leads are included (same resolution leadFunnel.js uses for `teams`).
 //
-// `leads` figures are a present-moment ownership snapshot, not scoped by dateFrom/dateTo — see
-// the comment on getLeadStatsByEmployee in lib/workforceStats.js for why.
+// `leads` figures are a present-moment ownership snapshot, not scoped by dateFrom/dateTo and NOT
+// subject to the 30-day default — see the comment on getLeadStatsByEmployee in
+// lib/workforceStats.js for why.
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
-const { emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee } = require('../lib/workforceStats');
+const {
+  emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
+} = require('../lib/workforceStats');
 
 router.get('/workforce-summary', protect, isManager, async (req, res) => {
   try {
@@ -79,11 +86,15 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
       },
     }));
 
+    // Report the window actually applied to `calls`, not the raw query params — otherwise a
+    // no-param request would render as an unbounded "all time" range beside 30-day numbers.
+    const range = resolveCallStatsRange(dateFrom, dateTo);
+
     return res.json({
       success: true,
       data: {
         generatedAt: new Date(),
-        range: { from: dateFrom || null, to: dateTo || null },
+        range: { from: range.from, to: range.to, defaulted: range.defaulted },
         agents,
         teamTotals,
       },
