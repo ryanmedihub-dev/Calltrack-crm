@@ -20,18 +20,11 @@ const RECYCLE_PROTECTED_STATUSES = ['booking_done', 'converted', 'interested', '
 
 // ── Core design note ───────────────────────────────────────────────────────────
 // Pool membership is not a stored flag: "in the pool" is `assignedTo: null` AND a status that
-// still means "nobody has settled this lead yet". Ownership alone was the original definition,
-// but it leaks: the call sync auto-links any call to a matching lead BY PHONE regardless of
-// assignment (see /attempts-by-employee), so an agent who dials a pool number straight from
-// their phone can drive an unclaimed lead to 'interested' or 'follow_up' while it is still
-// sitting in the pool for everyone else to grab. Whitelisting the eligible statuses is what
-// keeps a lead somebody is already converting from being offered to the whole floor.
-//
-// Whitelist rather than a $nin of the decided ones, for two reasons: Mongo can use an index for
-// $in but not $nin, and a status added to the enum later stays OUT of the pool until somebody
-// deliberately opts it in — the safe direction for a screen every agent works from.
-const POOL_ELIGIBLE_STATUSES = ['new', 'contacted', 'not_connected'];
-const POOL_FILTER = { assignedTo: null, status: { $in: POOL_ELIGIBLE_STATUSES } };
+// still means "nobody has settled this lead yet". The full reasoning, and the definition itself,
+// live in lib/poolFilter.js so the maintenance scripts that act on these leads share one source
+// of truth with the screens that display them.
+const { POOL_FILTER, MAX_POOL_ATTEMPTS } = require('../lib/poolFilter');
+const { assignOverAttemptedLeadsToLastCaller } = require('../lib/assignToLastCaller');
 
 // Just "unassigned", without the status narrowing above. Only for the manager oversight report,
 // which exists precisely to surface leads that were worked while still unclaimed — narrowing it
@@ -92,15 +85,29 @@ router.get('/', protect, async (req, res) => {
 
     const [leads, total] = await Promise.all([
       Lead.find(filter)
-        // Sort matches the { assignedTo, pooledAt } index. `createdAt` is the tiebreaker for
-        // rows predating pooledAt (backfilled or legacy unassigned leads).
-        .sort({ pooledAt: -1, createdAt: -1 })
+        // Least-worked first: every never-attempted lead, then the once-attempted, and so on.
+        // A pool sorted purely by arrival buries the untouched numbers under whatever landed
+        // most recently, so the same few leads get dialled repeatedly while others are never
+        // called at all. `pooledAt` stays the tiebreaker WITHIN an attempt count, keeping the
+        // old newest-first feel inside each band; `createdAt` covers rows predating pooledAt.
+        // Backed by { assignedTo, status, attempts, pooledAt } — see models/Lead.js.
+        .sort({ attempts: 1, pooledAt: -1, createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum)
         // extraDetails/metaRef.leadgenId ride along so the pool card can show budget and
         // timeline chips without a second round trip per lead. recycleCount/lastRecycledAt let
         // the card warn an agent that someone already tried this number and got nowhere.
-        .select('name phone email source city tags status pooledAt createdAt extraDetails metaRef.leadgenId recycleCount lastRecycledAt')
+        //
+        // The call fields are the pool's link to the call log. Nothing new maintains them —
+        // POST /api/calls/sync already links every synced call to a matching lead BY PHONE,
+        // whether or not that lead was ever claimed, so a number dialled straight from an
+        // agent's handset updates these on the pooled lead. They were simply never projected,
+        // which is why Live Leads used to show no trace of calls made outside it.
+        .select([
+          'name phone email source city tags status pooledAt createdAt extraDetails',
+          'metaRef.leadgenId recycleCount lastRecycledAt',
+          'attempts connectedCallCount lastCallAt lastCallType lastCallDuration lastCallEmployee',
+        ].join(' '))
         .lean(),
       Lead.countDocuments(filter),
     ]);
@@ -143,6 +150,7 @@ router.get('/export', protect, async (req, res) => {
 
     const header = [
       'Name', 'Phone', 'Email', 'Source', 'City', 'Tags', 'Status',
+      'Attempts', 'Connected Calls', 'Last Call At', 'Last Call By',
       'Recycle Count', 'Waiting Since', 'Form Answers',
     ].join(',') + '\n';
     res.write(header);
@@ -153,8 +161,10 @@ router.get('/export', protect, async (req, res) => {
     let outBuf = '';
 
     const cursor = Lead.find(filter)
-      .sort({ pooledAt: -1, createdAt: -1 })
-      .select('name phone email source city tags status recycleCount pooledAt createdAt extraDetails')
+      // Same least-worked-first order as the listing, so the file reads in the order the screen
+      // that produced it did.
+      .sort({ attempts: 1, pooledAt: -1, createdAt: -1 })
+      .select('name phone email source city tags status recycleCount pooledAt createdAt extraDetails attempts connectedCallCount lastCallAt lastCallEmployee')
       .lean()
       .cursor();
 
@@ -169,6 +179,10 @@ router.get('/export', protect, async (req, res) => {
         csvEsc(doc.city),
         csvEsc((doc.tags || []).join('; ')),
         csvEsc(doc.status),
+        doc.attempts || 0,
+        doc.connectedCallCount || 0,
+        doc.lastCallAt ? new Date(doc.lastCallAt).toLocaleString('en-IN') : '',
+        csvEsc(doc.lastCallEmployee),
         doc.recycleCount || 0,
         waitingSince ? new Date(waitingSince).toLocaleString('en-IN') : '',
         csvEsc(formAnswers),
@@ -495,6 +509,12 @@ async function runRecycleSweep() {
     claimedAt: { $ne: null, $lte: cutoff },
     assignedTo: { $ne: null },
     status: { $nin: RECYCLE_PROTECTED_STATUSES },
+    // Recycling returns a lead to the pool, and a lead past MAX_POOL_ATTEMPTS is not poolable —
+    // so recycling one would only unassign it into a place it cannot appear. Worse, the
+    // auto-assign sweep would hand it straight back to the same last caller on its next tick and
+    // the two sweeps would trade the lead every few minutes, inflating recycleCount until it hit
+    // the cap. This bound is what keeps them from fighting over the same lead.
+    attempts: { $lte: MAX_POOL_ATTEMPTS },
     $and: [
       // No future follow-up — a lead with a scheduled callback is being worked, not stalled.
       { $or: [{ followUpDate: null }, { followUpDate: { $exists: false } }, { followUpDate: { $lte: now } }] },
@@ -565,6 +585,22 @@ async function runRecycleSweep() {
   const result = await Lead.bulkWrite(ops, { ordered: false });
   broadcast('pool_refreshed', { recycled: result.modifiedCount });
   return { candidates: candidates.length, recycled: result.modifiedCount };
+}
+
+// ── Auto-assign sweep ──────────────────────────────────────────────────────────
+// Exported and run on the same timer as the recycle sweep (see server.js). Gives an owner to
+// every unassigned lead that has been dialled more than MAX_POOL_ATTEMPTS times, so those leads
+// end up with the person already working them rather than sitting unassigned and — because
+// POOL_FILTER also caps attempts — invisible.
+//
+// POOL_FILTER is what guarantees an over-attempted lead never shows on the board; this is what
+// stops it being orphaned. The filter is the correctness boundary, this is the cleanup.
+async function runAutoAssignSweep() {
+  const result = await assignOverAttemptedLeadsToLastCaller({ minAttempts: MAX_POOL_ATTEMPTS });
+  if (result.assigned) {
+    broadcast('pool_refreshed', { autoAssigned: result.assigned });
+  }
+  return result;
 }
 
 // ── Meta lead-ads webhook ──────────────────────────────────────────────────────
@@ -666,5 +702,6 @@ router.post('/meta-webhook', async (req, res) => {
 // router is a function (express.Router()), so it can carry the sweep alongside the routes
 // without changing the `app.use('/api/lead-pool', leadPoolRoutes)` mount in server.js.
 router.runRecycleSweep = runRecycleSweep;
+router.runAutoAssignSweep = runAutoAssignSweep;
 
 module.exports = router;

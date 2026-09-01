@@ -1,8 +1,12 @@
-// One-off cleanup: permanently delete every lead currently sitting in the open pool
-// (assignedTo: null — the same filter the Live Leads / Live Data pages use) that has never
+// One-off cleanup: permanently delete every unassigned lead (assignedTo: null) that has never
 // been attempted (attempts: 0, no lastCallAt). This is a subset of what's visually on the pool
 // page right now: a released-back lead that already has call history stays untouched here even
 // though it's still unassigned, since "unattempted" is the second half of the ask.
+//
+// NOTE: this filter is deliberately NOT lib/poolFilter.js's POOL_FILTER. The pool now also
+// requires a poolable status, but an unattempted lead is 'new' by definition, so the two agree
+// on every document this can match — and staying on the looser filter means a never-called lead
+// that somehow carries a decided status still gets cleaned up rather than being stranded.
 //
 // Dry run by default — only counts and previews what would go:
 //   node backend/scripts/deleteUnattemptedPoolLeads.js

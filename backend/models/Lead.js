@@ -87,6 +87,16 @@ leadSchema.index({ createdAt: -1 });
 // system once the tab is in use. Without the sort key in the index, each poll re-sorts the
 // entire unassigned set in memory.
 leadSchema.index({ assignedTo: 1, pooledAt: -1 });
+// The pool listing's sort since it became least-worked-first. Key order is
+// equality (assignedTo) -> EVERY sort key in order -> filter (status), which is the only
+// arrangement that lets Mongo read rows already ordered:
+//   - `status` is an $in (a multi-range), so putting it before the sort keys forces a blocking
+//     in-memory sort of the whole pool on every poll — measured at 4,823 docs examined and
+//     ~160ms server-side, versus 30 docs and ~3ms this way. It sits last, where it is still
+//     checked straight off the index key without fetching the document.
+//   - `createdAt` must be here even though it is only a tiebreaker: omit any sort key and the
+//     index can no longer provide the ordering, and the blocking sort comes straight back.
+leadSchema.index({ assignedTo: 1, attempts: 1, pooledAt: -1, createdAt: -1, status: 1 }, { name: 'pool_attempts_order' });
 // Backs the "attended today" counter on the pool stats endpoint.
 leadSchema.index({ claimedAt: -1 });
 // Backs the recycle sweep, which runs every few minutes for the life of the process against

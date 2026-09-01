@@ -24,6 +24,16 @@ const Lead = require('../models/Lead');
 const INDEXES = [
   { coll: Lead, name: 'status_1_followUpDate_1', key: { status: 1, followUpDate: 1 }, why: 'retry-queue P0: interested + past follow-up' },
   { coll: Lead, name: 'status_1_lastCallAt_1',   key: { status: 1, lastCallAt: 1 },   why: 'retry-queue P1/P3: contacted / not_connected + lastCallAt cutoff' },
+  { coll: Lead, name: 'pool_attempts_order', key: { assignedTo: 1, attempts: 1, pooledAt: -1, createdAt: -1, status: 1 }, why: 'pool listing sorted least-worked-first (polled every 12s per agent)' },
+];
+
+// Superseded shapes for the pool sort, dropped so they stop costing write throughput and disk.
+// Both were attempts at the index above that put the $in on `status`, or an incomplete set of
+// sort keys, ahead of the sort — neither lets Mongo provide the ordering, so both left a
+// blocking in-memory sort in the plan while still being maintained on every write.
+const DROP = [
+  { coll: Lead, name: 'assignedTo_1_status_1_attempts_1_pooledAt_-1' },
+  { coll: Lead, name: 'assignedTo_1_attempts_1_pooledAt_-1_status_1' },
 ];
 
 (async () => {
@@ -44,6 +54,18 @@ const INDEXES = [
       console.log(`  done in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     } catch (err) {
       console.error(`  FAILED: ${err.message}`);
+    }
+  }
+
+  for (const d of DROP) {
+    const collName = d.coll.collection.collectionName;
+    const existing = await d.coll.collection.indexes();
+    if (!existing.some((e) => e.name === d.name)) continue;
+    try {
+      await d.coll.collection.dropIndex(d.name);
+      console.log(`- ${collName}.${d.name} dropped (superseded)`);
+    } catch (err) {
+      console.error(`  FAILED to drop ${d.name}: ${err.message}`);
     }
   }
 

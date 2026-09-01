@@ -397,7 +397,9 @@ export default function LiveDataPage() {
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Unclaimed leads</h3>
-              <p className="text-xs text-gray-400">Any agent can attend these from the app</p>
+              <p className="text-xs text-gray-400">
+                Any agent can attend these from the app · least-worked first (0 attempts at the top)
+              </p>
             </div>
             <div className="w-56">
               <Field label="Search">
@@ -464,6 +466,39 @@ export default function LiveDataPage() {
                 ),
               },
               { key: 'phone',  label: 'Phone',  width: 130, render: (r) => <span className="tabular-nums">{r.phone}</span> },
+              {
+                // Attempts drive the pool's ordering (least-worked first), so it belongs on the
+                // row rather than buried in the expander. Counted from the call log by phone, so
+                // it includes calls placed without going through this screen at all.
+                key: 'attempts', label: 'Attempts', width: 90, align: 'right', searchable: false,
+                render: (r) => {
+                  const n = r.attempts || 0;
+                  return (
+                    <span
+                      className="text-xs font-bold px-2 py-0.5 rounded-full tabular-nums"
+                      style={n === 0
+                        ? { background: '#ECFDF5', color: '#059669' }   // untouched — the ones to work first
+                        : { background: '#F1F5F9', color: '#475569' }}
+                      title={n === 0 ? 'Never called' : `${n} call(s) logged · ${r.connectedCallCount || 0} connected`}
+                    >
+                      {n}
+                    </span>
+                  );
+                },
+              },
+              {
+                key: 'lastCall', label: 'Last call', width: 170, searchable: false, sortable: false,
+                render: (r) => (r.lastCallAt
+                  ? (
+                    <div className="leading-tight">
+                      <div className="text-xs text-gray-700">{fmtDateTime(r.lastCallAt)}</div>
+                      {!!r.lastCallEmployee && (
+                        <div className="text-[11px] text-gray-400">by {r.lastCallEmployee}</div>
+                      )}
+                    </div>
+                  )
+                  : <span className="text-gray-300">—</span>),
+              },
               {
                 key: 'source', label: 'Source', width: 120,
                 render: (r) => (

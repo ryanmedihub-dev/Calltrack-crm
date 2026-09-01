@@ -183,6 +183,17 @@ async function runRecycleSweepSafely() {
     // sweep runs forever, so a bad tick must just get logged and retried next interval.
     console.error('[recycle-sweep] failed:', err.message);
   }
+
+  // Runs after the recycle sweep, on the same tick and the same single-worker guard: recycling
+  // can leave a lead unassigned, and this is what stops one that is past the attempt limit from
+  // sitting there with no owner. Its own try/catch so a failure here cannot take the recycle
+  // sweep's interval down with it.
+  try {
+    const result = await leadPoolRoutes.runAutoAssignSweep();
+    if (result.assigned) console.log(`[auto-assign] assigned ${result.assigned} over-attempted lead(s) to their last caller`);
+  } catch (err) {
+    console.error('[auto-assign] failed:', err.message);
+  }
 }
 
 if (isSweepWorker) {

@@ -43,6 +43,32 @@ function RecycleChip({ count }) {
   );
 }
 
+// Call history from the call log, which links calls to leads by phone whether or not the lead
+// was ever claimed — so this counts calls colleagues made straight from their handsets too, not
+// just ones started from this screen. The pool is ordered by this, so it's worth showing plainly:
+// green "Never called" is the lead you're meant to take first.
+function AttemptsChip({ attempts, connected, lastCallAt, lastCallEmployee }) {
+  const n = attempts || 0;
+  if (n === 0) {
+    return (
+      <View style={[s.attemptChip, s.attemptChipFresh]}>
+        <Text style={[s.attemptChipText, s.attemptChipTextFresh]}>Never called</Text>
+      </View>
+    );
+  }
+  const when = lastCallAt ? waitingSince(lastCallAt) : null;
+  const who = lastCallEmployee ? ` by ${lastCallEmployee}` : '';
+  return (
+    <View style={s.attemptChip}>
+      <Text style={s.attemptChipText} numberOfLines={1}>
+        {n} {n === 1 ? 'attempt' : 'attempts'}
+        {connected ? ` · ${connected} connected` : ''}
+        {when ? ` · last ${when}${who}` : ''}
+      </Text>
+    </View>
+  );
+}
+
 // An agent choosing which lead to grab first is choosing on budget and urgency. Surfacing just
 // those two inline means they don't have to expand every card to triage the pool — which is the
 // whole reason the pool screen exists. Matched on label substring because the exact question
@@ -110,7 +136,15 @@ function LeadCard({ item, onAttend, claiming, expanded, onToggleDetails }) {
         </View>
       </View>
 
-      <RecycleChip count={item.recycleCount} />
+      <View style={s.metaRow}>
+        <AttemptsChip
+          attempts={item.attempts}
+          connected={item.connectedCallCount}
+          lastCallAt={item.lastCallAt}
+          lastCallEmployee={item.lastCallEmployee}
+        />
+        <RecycleChip count={item.recycleCount} />
+      </View>
 
       {(item.city || (item.tags && item.tags.length > 0)) && (
         <View style={s.chipRow}>
@@ -370,8 +404,14 @@ const s = StyleSheet.create({
   sourcePill:     { backgroundColor: Colors.primaryLight, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   sourcePillText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
 
-  recycleChip:     { alignSelf: 'flex-start', backgroundColor: Colors.warningBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, marginTop: 8 },
+  recycleChip:     { alignSelf: 'flex-start', backgroundColor: Colors.warningBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   recycleChipText: { fontSize: 10, fontWeight: '700', color: Colors.warning },
+
+  metaRow:   { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 8 },
+  attemptChip:      { backgroundColor: Colors.bgAlt, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, maxWidth: '100%' },
+  attemptChipText:  { fontSize: 10, fontWeight: '600', color: Colors.textSec },
+  attemptChipFresh:     { backgroundColor: Colors.successBg },
+  attemptChipTextFresh: { color: Colors.success, fontWeight: '700' },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
   chip:    { backgroundColor: Colors.bgAlt, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
