@@ -170,6 +170,12 @@ async function computePeriodStats(start, end, employeeId) {
   // Full per-employee breakdown (not capped at top 5) — used by Analytics
   // Agent Performance and the Daily Targets page, which need every employee's
   // numbers, not just the day's leaders.
+  //
+  // firstCallAt/lastCallAt: the aggregation above already computes `first`/`last`
+  // per employee ($min/$max on timestamp) but this mapping used to drop them —
+  // ryan-crm's Owner Panel employee-report needs them to show each agent's
+  // active call window for the period. This is CALL ACTIVITY, not attendance —
+  // consumers must label it accordingly, not as "working hours".
   const employeeStats = employees.map((e) => {
     const target = e.dailyTarget || 0;
     return {
@@ -182,6 +188,8 @@ async function computePeriodStats(start, end, employeeId) {
       connRate: e.count > 0 ? Math.round((e.connectedCalls / e.count) * 100) : 0,
       dailyTarget: target,
       targetAchievement: target > 0 ? Math.round((e.count / target) * 100) : null,
+      firstCallAt: e.first || null,
+      lastCallAt: e.last || null,
     };
   });
 
@@ -526,11 +534,21 @@ router.post('/sync', protect, async (req, res) => {
 });
 
 // GET /api/calls — all call logs with filters (manager)
+//
+// tlName/durationMin/durationMax/connectedOnly and the leadId populate were
+// added for ryan-crm's Owner Panel call report (/owner/calls/report), which
+// needs the same shape as this route already returns plus team-level
+// filtering and a "linked lead" column — additive, nothing existing changes.
 router.get('/', protect, isManager, async (req, res) => {
   try {
-    const { employeeId, callType, startDate, endDate, search, unsynced, page = 1, limit = 20 } = req.query;
+    const {
+      employeeId, callType, startDate, endDate, search, unsynced,
+      tlName, durationMin, durationMax, connectedOnly,
+      page = 1, limit = 20,
+    } = req.query;
     const filter = {};
     if (employeeId) filter.employeeId = employeeId;
+    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
     // "Unsynced" here means "no matching lead was auto-linked" (leadId is null),
     // not the CallLog.synced device-sync flag — matches the page's own copy.
@@ -544,6 +562,13 @@ router.get('/', protect, isManager, async (req, res) => {
         filter.timestamp.$lte = ed;
       }
     }
+    if (connectedOnly === 'true') {
+      filter.duration = { ...(filter.duration || {}), $gt: 0 };
+    } else if (durationMin || durationMax) {
+      filter.duration = { ...(filter.duration || {}) };
+      if (durationMin) filter.duration.$gte = parseInt(durationMin);
+      if (durationMax) filter.duration.$lte = parseInt(durationMax);
+    }
     if (search) {
       filter.$or = [
         { contactNumber: { $regex: search, $options: 'i' } },
@@ -552,10 +577,17 @@ router.get('/', protect, isManager, async (req, res) => {
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [callsRaw, total] = await Promise.all([
-      CallLog.find(filter).populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      CallLog.find(filter)
+        .populate('employeeId', 'name phone tlName')
+        .populate('leadId', 'name status')
+        .sort({ timestamp: -1, _id: -1 }).skip(skip).limit(parseInt(limit)).lean(),
       CallLog.countDocuments(filter)
     ]);
-    const calls = callsRaw.map(enrichWithEmployee);
+    const calls = callsRaw.map((c) => ({
+      ...enrichWithEmployee(c),
+      leadName:   c.leadId?.name   || null,
+      leadStatus: c.leadId?.status || null,
+    }));
     return res.json({
       success: true,
       data: { calls, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) }

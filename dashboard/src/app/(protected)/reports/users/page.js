@@ -94,11 +94,11 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
 
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', phone: '', tlName: '' });
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', phone: '', tlName: '', employeeId: '' });
   const [addSaving, setAddSaving] = useState(false);
 
   const [editUser, setEditUser] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', deviceId: '', tlName: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', deviceId: '', tlName: '', employeeId: '' });
   const [editSaving, setEditSaving] = useState(false);
 
   const [deleteUser, setDeleteUser] = useState(null);
@@ -126,7 +126,7 @@ export default function UsersPage() {
       await api.post('/api/employees', addForm);
       toast.success('User added');
       setShowAdd(false);
-      setAddForm({ name: '', email: '', password: '', phone: '', tlName: '' });
+      setAddForm({ name: '', email: '', password: '', phone: '', tlName: '', employeeId: '' });
       fetchUsers();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to add user');
@@ -135,7 +135,7 @@ export default function UsersPage() {
     }
   };
 
-  const openEdit = (u) => { setEditUser(u); setEditForm({ name: u.name || '', phone: u.phone || '', deviceId: u.deviceId || '', tlName: u.tlName || '' }); };
+  const openEdit = (u) => { setEditUser(u); setEditForm({ name: u.name || '', phone: u.phone || '', deviceId: u.deviceId || '', tlName: u.tlName || '', employeeId: u.employeeId || '' }); };
   const handleEdit = async (e) => {
     e.preventDefault();
     setEditSaving(true);
@@ -184,6 +184,7 @@ export default function UsersPage() {
         </div>
       ),
     },
+    { key: 'employeeId', label: 'Employee ID', render: (u) => u.employeeId || '—' },
     { key: 'phone', label: 'Phone', render: (u) => u.phone || '—' },
     { key: 'tlName', label: 'TL Name', render: (u) => u.tlName || '—' },
     { key: 'isActive', label: 'Status', sortable: false, searchable: false, render: (u) => <StatusToggle user={u} onSaved={patchLocal} /> },
@@ -257,6 +258,7 @@ export default function UsersPage() {
                 { k: 'password', l: 'Password', t: 'password', ph: 'Min 6 characters', req: true },
                 { k: 'phone', l: 'Phone (optional)', t: 'text', ph: '+91 99999 99999', req: false },
                 { k: 'tlName', l: 'TL Name (optional)', t: 'text', ph: 'e.g. Priya Singh', req: false },
+                { k: 'employeeId', l: 'Employee ID (optional)', t: 'text', ph: 'e.g. RC-014', req: false },
               ].map(({ k, l, t, ph, req }) => (
                 <div key={k}>
                   <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
@@ -304,6 +306,10 @@ export default function UsersPage() {
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">TL Name</label>
                 <input type="text" value={editForm.tlName} onChange={(e) => setEditForm({ ...editForm, tlName: e.target.value })} className="form-input" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Employee ID</label>
+                <input type="text" value={editForm.employeeId} placeholder="e.g. RC-014" onChange={(e) => setEditForm({ ...editForm, employeeId: e.target.value })} className="form-input" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>

@@ -35,6 +35,15 @@ router.post('/login', async (req, res) => {
     if (!match) {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
+    // Deactivated accounts must not get a token — every protected route rejects
+    // !isActive with a 401, which the app shows as "Session Expired" and bounces
+    // straight back to the login screen. Fail here with a clear reason instead.
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been deactivated. Please contact your manager.',
+      });
+    }
     const token = signToken(user._id);
     const userObj = user.toJSON();
     return res.json({ success: true, data: { user: userObj, token }, message: 'Login successful' });

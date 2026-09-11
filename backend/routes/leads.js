@@ -150,13 +150,27 @@ router.post('/', protect, async (req, res) => {
 });
 
 // GET /api/leads — all leads with filters + search
+//
+// tlName/source/attemptsMin/attemptsMax were added for ryan-crm's Owner Panel
+// leads report (/owner/leads/report and the status-preset pages) — additive,
+// same pattern as the existing filters on this route and on GET /api/calls.
 router.get('/', protect, isManager, async (req, res) => {
   try {
-    const { status, assignedTo, search, tags, page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate } = req.query;
+    const {
+      status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax,
+      page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate,
+    } = req.query;
     const filter = {};
-    if (status) filter.status = status;
+    if (status) filter.status = { $in: status.split(',') };
     if (assignedTo) filter.assignedTo = assignedTo;
+    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (tags) filter.tags = { $in: tags.split(',') };
+    if (source) filter.source = { $regex: source, $options: 'i' };
+    if (attemptsMin || attemptsMax) {
+      filter.attempts = {};
+      if (attemptsMin) filter.attempts.$gte = parseInt(attemptsMin);
+      if (attemptsMax) filter.attempts.$lte = parseInt(attemptsMax);
+    }
     if (search) {
       filter.$or = [
         { name:  { $regex: search, $options: 'i' } },
@@ -171,7 +185,7 @@ router.get('/', protect, isManager, async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sort = { [sortBy]: parseInt(sortDir) };
     const [leads, total] = await Promise.all([
-      Lead.find(filter).populate('assignedTo', 'name email phone').sort(sort).skip(skip).limit(parseInt(limit)),
+      Lead.find(filter).populate('assignedTo', 'name email phone tlName').sort(sort).skip(skip).limit(parseInt(limit)),
       Lead.countDocuments(filter)
     ]);
     return res.json({ success: true, data: { leads, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });

@@ -468,6 +468,7 @@ export default function EmployeeReportsPage() {
                   </div>
                 ),
               },
+              { key: 'employeeCode', label: 'Employee ID', render: (r) => r.employeeCode || <span className="text-gray-300">—</span> },
               { key: 'tlName', label: 'Team Lead', render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-gray-300">—</span> },
               { key: 'phone', label: 'Phone', searchable: false },
               {

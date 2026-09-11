@@ -807,6 +807,10 @@ export default function AnalyticsPage() {
                   ),
                 },
                 {
+                  key: 'employeeId', label: 'Employee ID',
+                  render: (emp) => emp.employeeId || <span className="text-gray-300">—</span>,
+                },
+                {
                   key: 'tlName', label: 'Team Lead', filterType: 'select',
                   filterOptions: [...new Set(agentRows.map((e) => e.tlName).filter(Boolean))],
                   render: (emp) => emp.tlName ? <Truncate text={emp.tlName} /> : <span className="text-gray-300">—</span>,

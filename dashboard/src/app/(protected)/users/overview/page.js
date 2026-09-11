@@ -34,7 +34,7 @@ export default function UsersOverviewPage() {
 
   const roles   = [...new Set(users.map(u=>u.role||'agent'))];
   const filtered = users.filter(u=>{
-    const ms = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()) || u.phone?.includes(search);
+    const ms = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()) || u.phone?.includes(search) || u.employeeId?.toLowerCase().includes(search.toLowerCase());
     const mr = !role   || (u.role||'agent')===role;
     const mw = !status || (u.workingStatus||u.status||'active')===status;
     return ms&&mr&&mw;
@@ -68,7 +68,7 @@ export default function UsersOverviewPage() {
       <div className="filter-bar flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <span className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color:'#94A3B8' }}><SearchIco/></span>
-          <input className="form-input pl-8 text-xs" placeholder="Search by name, email, or phone…"
+          <input className="form-input pl-8 text-xs" placeholder="Search by name, email, phone, or employee ID…"
             value={search} onChange={e=>setSearch(e.target.value)}/>
         </div>
         <select className="form-input text-xs w-36" value={role} onChange={e=>setRole(e.target.value)}>
@@ -111,6 +111,7 @@ export default function UsersOverviewPage() {
                     <div>
                       <p className="font-bold text-sm" style={{ color:'#0F172A' }}>{u.name||'Unknown'}</p>
                       <span className="badge capitalize text-[10px]" style={{ background:c.bg, color:c.color }}>{r}</span>
+                      {u.employeeId && <span className="text-[10px] ml-1.5" style={{ color:'#94A3B8' }}>{u.employeeId}</span>}
                     </div>
                   </div>
                   <span className={`badge text-[10px] ${ws==='active'?'':'opacity-60'}`}

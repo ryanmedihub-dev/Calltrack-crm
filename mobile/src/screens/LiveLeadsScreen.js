@@ -43,10 +43,6 @@ function RecycleChip({ count }) {
   );
 }
 
-// Call history from the call log, which links calls to leads by phone whether or not the lead
-// was ever claimed — so this counts calls colleagues made straight from their handsets too, not
-// just ones started from this screen. The pool is ordered by this, so it's worth showing plainly:
-// green "Never called" is the lead you're meant to take first.
 function AttemptsChip({ attempts, connected, lastCallAt, lastCallEmployee }) {
   const n = attempts || 0;
   if (n === 0) {

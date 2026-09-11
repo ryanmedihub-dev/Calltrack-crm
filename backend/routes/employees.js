@@ -9,7 +9,12 @@ router.get('/', protect, isManager, async (req, res) => {
   try {
     const { search, page = 1, limit = 200 } = req.query;
     const filter = { role: 'employee' };
-    if (search) filter.name = { $regex: search, $options: 'i' };
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { employeeId: { $regex: search, $options: 'i' } },
+      ];
+    }
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [employees, total] = await Promise.all([
       User.find(filter).sort({ name: 1 }).skip(skip).limit(parseInt(limit)),
@@ -35,10 +40,14 @@ router.get('/tl-names', protect, isManager, async (req, res) => {
 // POST /api/employees
 router.post('/', protect, isManager, async (req, res) => {
   try {
-    const { name, email, password, phone, deviceId, tlName } = req.body;
+    const { name, email, password, phone, deviceId, tlName, employeeId } = req.body;
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ success: false, error: 'Email already registered' });
-    const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName });
+    if (employeeId) {
+      const dupe = await User.findOne({ employeeId });
+      if (dupe) return res.status(400).json({ success: false, error: 'Employee ID already in use' });
+    }
+    const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName, employeeId: employeeId || null });
     return res.status(201).json({ success: true, data: user, message: 'Employee created' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -89,8 +98,14 @@ router.patch('/:id/target', protect, isManager, async (req, res) => {
 // PUT /api/employees/:id
 router.put('/:id', protect, isManager, async (req, res) => {
   try {
-    const { name, phone, deviceId, tlName } = req.body;
-    const employee = await User.findByIdAndUpdate(req.params.id, { name, phone, deviceId, tlName }, { new: true });
+    const { name, phone, deviceId, tlName, employeeId } = req.body;
+    if (employeeId) {
+      const dupe = await User.findOne({ employeeId, _id: { $ne: req.params.id } });
+      if (dupe) return res.status(400).json({ success: false, error: 'Employee ID already in use' });
+    }
+    const update = { name, phone, deviceId, tlName };
+    if (employeeId !== undefined) update.employeeId = employeeId || null;
+    const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     return res.json({ success: true, data: employee });
   } catch (err) {

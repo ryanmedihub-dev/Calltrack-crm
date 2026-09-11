@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema({
   fcmToken:    { type: String, default: null },
   dailyTarget: { type: Number, default: 100 },
   isActive:    { type: Boolean, default: true },
+  employeeId:  { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

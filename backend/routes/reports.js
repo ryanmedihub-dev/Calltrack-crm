@@ -63,6 +63,12 @@ function applyDurationFilter(filter, duration) {
   else if (duration === '60-300') filter.duration = { $gte: 60, $lt: 300 };
   else if (duration === '300+') filter.duration = { $gte: 300 };
 }
+// Added for ryan-crm's Owner Panel call report (/owner/calls/report) — a
+// simple "hide unanswered calls" toggle, additive alongside the bucketed
+// `duration` filter above (a caller should pass one or the other, not both).
+function applyConnectedOnlyFilter(filter, connectedOnly) {
+  if (connectedOnly === 'true') filter.duration = { ...(filter.duration || {}), $gt: 0 };
+}
 function applyCallTimeFilter(filter, callTime) {
   const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
   const r = ranges[callTime];
@@ -75,8 +81,8 @@ function applyCallTimeFilter(filter, callTime) {
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
     const {
-      startDate, endDate, employeeId, callType, duration, callTime, tlName, source,
-      tab = 'summary', page = 1, limit = 100
+      startDate, endDate, employeeId, callType, duration, callTime, tlName, source, search,
+      connectedOnly, tab = 'summary', page = 1, limit = 100
     } = req.query;
 
     const start = startDate ? istDateStrStart(startDate) : istDayStart(0);
@@ -93,7 +99,16 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       const matchingLeadIds = await Lead.find({ source: { $regex: source, $options: 'i' } }).distinct('_id');
       filter.leadId = { $in: matchingLeadIds };
     }
+    // Added for ryan-crm's Owner Panel call report — "search by number" (also
+    // matches contact name), same pattern as GET /api/calls's own `search`.
+    if (search) {
+      filter.$or = [
+        { contactNumber: { $regex: search, $options: 'i' } },
+        { contactName:   { $regex: search, $options: 'i' } },
+      ];
+    }
     applyDurationFilter(filter, duration);
+    applyConnectedOnlyFilter(filter, connectedOnly);
     applyCallTimeFilter(filter, callTime);
 
     // Only the fields actually read below (notes/callStatus/leadId/synced are
@@ -712,7 +727,7 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const statsMap = {};
     employeesList.forEach((e) => {
       statsMap[e._id.toString()] = {
-        employeeId: e._id.toString(), employeeName: e.name, email: e.email, phone: e.phone || '',
+        employeeId: e._id.toString(), employeeCode: e.employeeId || '', employeeName: e.name, email: e.email, phone: e.phone || '',
         tlName: e.tlName || '', isActive: e.isActive, dailyTarget: e.dailyTarget || 0,
         totalCalls: 0, connectedCalls: 0, totalDuration: 0, leadsAssigned: 0, leadsConverted: 0
       };
@@ -900,7 +915,7 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     const header = [
-      'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
+      'Employee ID', 'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
       'Total Calls', 'Connected Calls', 'Total Talktime',
       'Leads Assigned', 'Leads Converted', 'Conversion Rate (%)', 'Target Achievement (%)',
       'Joined At'
@@ -919,6 +934,7 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
       const conversionRate = l.leadsAssigned ? Math.round((l.leadsConverted / l.leadsAssigned) * 100) : 0;
 
       const line = [
+        csvEsc(e.employeeId),
         csvEsc(e.name),
         e.email || '',
         e.phone || '',
