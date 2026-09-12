@@ -727,7 +727,7 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const statsMap = {};
     employeesList.forEach((e) => {
       statsMap[e._id.toString()] = {
-        employeeId: e._id.toString(), employeeCode: e.employeeId || '', employeeName: e.name, email: e.email, phone: e.phone || '',
+        employeeId: e._id.toString(), employeeCode: e.ryanEmployeeCode || '', employeeName: e.name, email: e.email, phone: e.phone || '',
         tlName: e.tlName || '', isActive: e.isActive, dailyTarget: e.dailyTarget || 0,
         totalCalls: 0, connectedCalls: 0, totalDuration: 0, leadsAssigned: 0, leadsConverted: 0
       };
@@ -934,7 +934,7 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
       const conversionRate = l.leadsAssigned ? Math.round((l.leadsConverted / l.leadsAssigned) * 100) : 0;
 
       const line = [
-        csvEsc(e.employeeId),
+        csvEsc(e.ryanEmployeeCode),
         csvEsc(e.name),
         e.email || '',
         e.phone || '',

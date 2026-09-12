@@ -15,6 +15,13 @@
 //                       The window actually used is echoed back in `data.range`.
 //                       `leads` is a present-moment snapshot and ignores all of this — see
 //                       lib/workforceStats.js.
+//
+// Field-name note: the `:employeeId` route param and every `employeeId` reference in this file
+// (callFilter, callMap/leadMap lookups) is this app's own User._id (an ObjectId string) — the
+// same value CallLog.employeeId and Lead.assignedTo key off. `employee.ryanEmployeeCode` in the
+// response below is a different thing entirely: ryan-crm's own Employee.employeeId code (e.g.
+// "RC-014"), stored on User.ryanEmployeeCode, used only to match this agent to its ryan-crm
+// record — never used to query callby's own data.
 const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
@@ -35,7 +42,7 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
     const employee = await User.findOne({ _id: employeeId, role: 'employee' })
-      .select('name tlName isActive dailyTarget')
+      .select('name tlName isActive dailyTarget ryanEmployeeCode')
       .lean();
     if (!employee) {
       return res.status(404).json({ success: false, message: 'Employee not found' });
@@ -93,6 +100,7 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
         employee: {
           id: employee._id, name: employee.name, tlName: employee.tlName || null,
           isActive: employee.isActive, dailyTarget: employee.dailyTarget,
+          ryanEmployeeCode: employee.ryanEmployeeCode || null,
         },
         range: { from: range.from, to: range.to, defaulted: range.defaulted },
         calls: callMap[employeeId] || emptyCallStats(),

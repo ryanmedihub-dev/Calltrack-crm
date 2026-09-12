@@ -34,7 +34,7 @@ export default function UsersOverviewPage() {
 
   const roles   = [...new Set(users.map(u=>u.role||'agent'))];
   const filtered = users.filter(u=>{
-    const ms = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()) || u.phone?.includes(search) || u.employeeId?.toLowerCase().includes(search.toLowerCase());
+    const ms = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()) || u.phone?.includes(search) || u.ryanEmployeeCode?.toLowerCase().includes(search.toLowerCase());
     const mr = !role   || (u.role||'agent')===role;
     const mw = !status || (u.workingStatus||u.status||'active')===status;
     return ms&&mr&&mw;
@@ -111,7 +111,7 @@ export default function UsersOverviewPage() {
                     <div>
                       <p className="font-bold text-sm" style={{ color:'#0F172A' }}>{u.name||'Unknown'}</p>
                       <span className="badge capitalize text-[10px]" style={{ background:c.bg, color:c.color }}>{r}</span>
-                      {u.employeeId && <span className="text-[10px] ml-1.5" style={{ color:'#94A3B8' }}>{u.employeeId}</span>}
+                      {u.ryanEmployeeCode && <span className="text-[10px] ml-1.5" style={{ color:'#94A3B8' }}>{u.ryanEmployeeCode}</span>}
                     </div>
                   </div>
                   <span className={`badge text-[10px] ${ws==='active'?'':'opacity-60'}`}

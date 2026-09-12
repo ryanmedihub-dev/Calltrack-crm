@@ -121,7 +121,7 @@ export default function EmployeeDetailPage() {
             <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.email}</p>
             {employee.phone && <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.phone}</p>}
             {employee.tlName && <p className="text-sm" style={{ color:'#94A3B8' }}>TL: {employee.tlName}</p>}
-            {employee.employeeId && <p className="text-sm" style={{ color:'#94A3B8' }}>ID: {employee.employeeId}</p>}
+            {employee.ryanEmployeeCode && <p className="text-sm" style={{ color:'#94A3B8' }}>ID: {employee.ryanEmployeeCode}</p>}
           </div>
           <span className="badge"
             style={employee.isActive

@@ -69,7 +69,7 @@ export default function SettingsPage() {
   const [pw,        setPw]        = useState({ current:'', next:'', confirm:'' });
   const [prefs,     setPrefs]     = useState(DEFAULT_PREFS);
   const [employees, setEmployees] = useState([]);
-  const [newEmp,    setNewEmp]    = useState({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'', employeeId:'' });
+  const [newEmp,    setNewEmp]    = useState({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'', ryanEmployeeCode:'' });
   const [creatingEmp, setCreatingEmp] = useState(false);
   const [empSaving,   setEmpSaving]   = useState(false);
 
@@ -114,7 +114,7 @@ export default function SettingsPage() {
     try {
       await api.post('/api/employees', newEmp);
       toast.success('Employee created');
-      setNewEmp({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'', employeeId:'' });
+      setNewEmp({ name:'', email:'', password:'', phone:'', deviceId:'', tlName:'', ryanEmployeeCode:'' });
       setCreatingEmp(false); loadEmployees();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed to create employee'); }
     finally { setEmpSaving(false); }
@@ -267,7 +267,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate" style={{ color:'#0F172A' }}>{emp.name}</p>
-                    <p className="text-xs" style={{ color:'#94A3B8' }}>{emp.email}{emp.employeeId ? ` · ${emp.employeeId}` : ''}</p>
+                    <p className="text-xs" style={{ color:'#94A3B8' }}>{emp.email}{emp.ryanEmployeeCode ? ` · ${emp.ryanEmployeeCode}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="badge text-[10px]"
@@ -319,7 +319,7 @@ export default function SettingsPage() {
                       { key:'phone',    label:'Phone',      type:'text',     placeholder:'10-digit' },
                       { key:'deviceId', label:'Device ID',  type:'text',     placeholder:'Optional' },
                       { key:'tlName',   label:'TL Name',    type:'text',     placeholder:'Optional' },
-                      { key:'employeeId', label:'Employee ID', type:'text',  placeholder:'e.g. RC-014' },
+                      { key:'ryanEmployeeCode', label:'Employee ID', type:'text',  placeholder:'e.g. RC-014' },
                     ].map(({ key, label, type, placeholder }) => (
                       <div key={key}>
                         <label className="block text-xs font-medium mb-1" style={{ color:'#94A3B8' }}>{label}</label>

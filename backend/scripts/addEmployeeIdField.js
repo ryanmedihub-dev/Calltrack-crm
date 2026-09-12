@@ -1,6 +1,9 @@
 // Writes a ryan-crm `Employee.employeeId` string onto each matching callby `User`
-// document, so callby carries the reverse link (ryan-crm already stores the forward
-// link as `Employee.callbyUserId`, set by ryan-crm's link-employees-to-callby.mjs).
+// document's `ryanEmployeeCode` field, so callby carries the reverse link (ryan-crm
+// already stores the forward link as `Employee.callbyUserId`, set by ryan-crm's
+// link-employees-to-callby.mjs). Named `ryanEmployeeCode` on the User schema — not
+// `employeeId` — because `employeeId` already means this app's own User._id
+// elsewhere (CallLog.employeeId, workforceSummary/agentDetail).
 //
 // This does NOT do any name/phone matching itself — it takes a mapping you already
 // have (from the ryan-crm reconciliation script's output: confirmed matches +
@@ -66,20 +69,20 @@ async function run() {
   const results = { willSet: [], alreadyCorrect: [], willOverwrite: [], userNotFound: [] };
 
   for (const { callbyUserId, employeeId } of cleaned) {
-    const user = await User.findById(callbyUserId).select('name employeeId').lean();
+    const user = await User.findById(callbyUserId).select('name ryanEmployeeCode').lean();
     if (!user) { results.userNotFound.push({ callbyUserId, employeeId }); continue; }
-    if (user.employeeId === employeeId) { results.alreadyCorrect.push({ user, employeeId }); continue; }
-    if (user.employeeId && user.employeeId !== employeeId) {
-      results.willOverwrite.push({ user, from: user.employeeId, to: employeeId });
+    if (user.ryanEmployeeCode === employeeId) { results.alreadyCorrect.push({ user, employeeId }); continue; }
+    if (user.ryanEmployeeCode && user.ryanEmployeeCode !== employeeId) {
+      results.willOverwrite.push({ user, from: user.ryanEmployeeCode, to: employeeId });
       continue;
     }
     results.willSet.push({ user, employeeId });
   }
 
   console.log(`\nalready correct, no change needed: ${results.alreadyCorrect.length}`);
-  console.log(`new employeeId to set: ${results.willSet.length}`);
+  console.log(`new ryanEmployeeCode to set: ${results.willSet.length}`);
   console.log(`callbyUserId not found in User collection: ${results.userNotFound.length}`);
-  console.log(`WOULD OVERWRITE an existing different employeeId: ${results.willOverwrite.length}`);
+  console.log(`WOULD OVERWRITE an existing different ryanEmployeeCode: ${results.willOverwrite.length}`);
 
   if (results.userNotFound.length) {
     console.log('\nMissing callby users (check these IDs — typo, or the user was deleted since matching):');
@@ -87,13 +90,13 @@ async function run() {
   }
 
   if (results.willOverwrite.length) {
-    console.log('\nCONFLICTS — these already have a DIFFERENT employeeId set. Not touched automatically, review by hand:');
+    console.log('\nCONFLICTS — these already have a DIFFERENT ryanEmployeeCode set. Not touched automatically, review by hand:');
     results.willOverwrite.forEach((r) => console.log(`  ${r.user.name} (${r.user._id}): has "${r.from}", mapping says "${r.to}"`));
   }
 
   if (results.willSet.length) {
     console.log('\nSample of what will be set (up to 15):');
-    results.willSet.slice(0, 15).forEach((r) => console.log(`  ${r.user.name} (${r.user._id}) -> employeeId "${r.employeeId}"`));
+    results.willSet.slice(0, 15).forEach((r) => console.log(`  ${r.user.name} (${r.user._id}) -> ryanEmployeeCode "${r.employeeId}"`));
   }
 
   if (!confirm) {
@@ -104,10 +107,10 @@ async function run() {
 
   let written = 0;
   for (const { user, employeeId } of results.willSet) {
-    await User.updateOne({ _id: user._id }, { $set: { employeeId } });
+    await User.updateOne({ _id: user._id }, { $set: { ryanEmployeeCode: employeeId } });
     written += 1;
   }
-  console.log(`\nWrote employeeId on ${written} user(s). Conflicts and not-found entries were left untouched — resolve those manually and re-run.`);
+  console.log(`\nWrote ryanEmployeeCode on ${written} user(s). Conflicts and not-found entries were left untouched — resolve those manually and re-run.`);
 
   await mongoose.disconnect();
 }

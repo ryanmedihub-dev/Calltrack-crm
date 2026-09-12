@@ -14,7 +14,7 @@ const UsersIco  = ({s=20}) => <Ico size={s}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4
 const EyeIco    = ({s=14}) => <Ico size={s}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></Ico>;
 const EyeOffIco = ({s=14}) => <Ico size={s}><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></Ico>;
 
-const EMPTY = { name:'', email:'', phone:'', role:'agent', status:'active', password:'', confirmPassword:'', tlName:'', employeeId:'' };
+const EMPTY = { name:'', email:'', phone:'', role:'agent', status:'active', password:'', confirmPassword:'', tlName:'', ryanEmployeeCode:'' };
 
 export default function UpdateUsersPage() {
   const params   = useSearchParams();
@@ -38,18 +38,18 @@ export default function UpdateUsersPage() {
       setUsers(list);
       if (editId) {
         const u = list.find(x=>x._id===editId);
-        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.workingStatus||u.status||'active', password:'', confirmPassword:'', tlName:u.tlName||'', employeeId:u.employeeId||'' }); }
+        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.workingStatus||u.status||'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' }); }
       }
     }).catch(()=>{}).finally(()=>setLoading(false));
   }, [editId]);
 
   useEffect(()=>{ load(); },[load]);
 
-  const filtered = users.filter(u=>!search||(u.name||'').toLowerCase().includes(search.toLowerCase())||(u.email||'').toLowerCase().includes(search.toLowerCase())||(u.employeeId||'').toLowerCase().includes(search.toLowerCase()));
+  const filtered = users.filter(u=>!search||(u.name||'').toLowerCase().includes(search.toLowerCase())||(u.email||'').toLowerCase().includes(search.toLowerCase())||(u.ryanEmployeeCode||'').toLowerCase().includes(search.toLowerCase()));
 
   const selectUser = (u) => {
     setSelected(u); setMode('edit'); setError(''); setSuccess('');
-    setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.workingStatus||u.status||'active', password:'', confirmPassword:'', tlName:u.tlName||'', employeeId:u.employeeId||'' });
+    setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.workingStatus||u.status||'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' });
   };
 
   const startAdd = () => {
@@ -64,7 +64,7 @@ export default function UpdateUsersPage() {
     if (form.password && form.password!==form.confirmPassword) { setError('Passwords do not match.'); return; }
     setSaving(true); setError(''); setSuccess('');
     try {
-      const body = { name:form.name, email:form.email, phone:form.phone, role:form.role, status:form.status, tlName:form.tlName, employeeId:form.employeeId };
+      const body = { name:form.name, email:form.email, phone:form.phone, role:form.role, status:form.status, tlName:form.tlName, ryanEmployeeCode:form.ryanEmployeeCode };
       if (form.password) body.password = form.password;
       if (mode==='edit' && selected) {
         await api.put(`/api/employees/${selected._id}`, body);
@@ -125,7 +125,7 @@ export default function UpdateUsersPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-xs truncate" style={{ color:active?'#2563EB':'#0F172A' }}>{u.name||'Unknown'}</p>
-                    <p className="text-[10px] truncate capitalize" style={{ color:'#94A3B8' }}>{u.role||'agent'} · {u.workingStatus||u.status||'active'}{u.employeeId ? ` · ${u.employeeId}` : ''}</p>
+                    <p className="text-[10px] truncate capitalize" style={{ color:'#94A3B8' }}>{u.role||'agent'} · {u.workingStatus||u.status||'active'}{u.ryanEmployeeCode ? ` · ${u.ryanEmployeeCode}` : ''}</p>
                   </div>
                   {active && <span style={{ color:'#2563EB', fontSize:18 }}>›</span>}
                 </button>
@@ -203,7 +203,7 @@ export default function UpdateUsersPage() {
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color:'#374151' }}>Employee ID</label>
                   <input className="form-input text-sm" placeholder="e.g. RC-014"
-                    value={form.employeeId} onChange={e=>setF('employeeId',e.target.value)}/>
+                    value={form.ryanEmployeeCode} onChange={e=>setF('ryanEmployeeCode',e.target.value)}/>
                 </div>
               </div>
 

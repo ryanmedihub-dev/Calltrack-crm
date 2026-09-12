@@ -17,6 +17,15 @@
 // `leads` figures are a present-moment ownership snapshot, not scoped by dateFrom/dateTo and NOT
 // subject to the 30-day default — see the comment on getLeadStatsByEmployee in
 // lib/workforceStats.js for why.
+//
+// Field-name note: each agent object carries TWO different identifiers — don't confuse them.
+//   agent.employeeId        — this app's own User._id (an ObjectId string). Every call/lead
+//                              query in this codebase (CallLog.employeeId, Lead.assignedTo,
+//                              agent-detail/:employeeId) keys off THIS value. Unchanged by the
+//                              field below; do not repurpose it.
+//   agent.ryanEmployeeCode  — ryan-crm's own Employee.employeeId code (e.g. "RC-014"), stored on
+//                              User.ryanEmployeeCode. Used only for matching an agent to its
+//                              ryan-crm record; never used to query callby's own data.
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
@@ -37,7 +46,7 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
       const teamList = teams.split(',').filter(Boolean);
       employeeFilter.tlName = { $in: teamList };
     }
-    const employees = await User.find(employeeFilter).select('name tlName isActive dailyTarget').lean();
+    const employees = await User.find(employeeFilter).select('name tlName isActive dailyTarget ryanEmployeeCode').lean();
 
     let callMap = {}, leadMap = {};
     if (employees.length) {
@@ -51,7 +60,8 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
     const agents = employees.map((emp) => {
       const id = emp._id.toString();
       return {
-        employeeId:  id,
+        employeeId:       id, // this app's User._id — see field-name note above, not ryan-crm's code
+        ryanEmployeeCode: emp.ryanEmployeeCode || null,
         name:        emp.name,
         tlName:      emp.tlName || null,
         isActive:    emp.isActive,

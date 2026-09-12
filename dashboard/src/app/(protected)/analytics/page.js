@@ -807,8 +807,8 @@ export default function AnalyticsPage() {
                   ),
                 },
                 {
-                  key: 'employeeId', label: 'Employee ID',
-                  render: (emp) => emp.employeeId || <span className="text-gray-300">—</span>,
+                  key: 'ryanEmployeeCode', label: 'Employee ID',
+                  render: (emp) => emp.ryanEmployeeCode || <span className="text-gray-300">—</span>,
                 },
                 {
                   key: 'tlName', label: 'Team Lead', filterType: 'select',

@@ -12,7 +12,12 @@ const userSchema = new mongoose.Schema({
   fcmToken:    { type: String, default: null },
   dailyTarget: { type: Number, default: 100 },
   isActive:    { type: Boolean, default: true },
-  employeeId:  { type: String, default: null },
+  // ryan-crm's Employee.employeeId code (e.g. "RC-014"), NOT this app's own User._id.
+  // Deliberately NOT named `employeeId` — that name is already load-bearing elsewhere in this
+  // codebase (CallLog.employeeId, workforceSummary/agentDetail response fields, the
+  // agent-detail/:employeeId route param) as this User document's own _id. Reusing it here
+  // would let the two meanings silently swap under a future refactor.
+  ryanEmployeeCode: { type: String, default: null, index: true, trim: true },
   createdAt: { type: Date, default: Date.now }
 });
 

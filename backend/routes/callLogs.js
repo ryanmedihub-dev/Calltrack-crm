@@ -659,6 +659,66 @@ router.get('/stats', protect, isManager, async (req, res) => {
   }
 });
 
+// GET /api/calls/daily-by-employee — per-employee, per-IST-calendar-day call
+// activity for a date range: calls, connected, first/last call timestamp,
+// target attainment vs each employee's own dailyTarget. Added for ryan-crm's
+// Owner Panel "Attendance" page (Part 6): that page SUGGESTS a day status
+// from this activity data but a human must confirm/override it — this
+// endpoint only reports call counts, it makes no claim about presence.
+router.get('/daily-by-employee', protect, isManager, async (req, res) => {
+  try {
+    const { startDate, endDate, employeeId } = req.query;
+    const { start, end } = getISTCustomBounds(startDate, endDate);
+    const match = { timestamp: { $gte: start, $lt: end } };
+    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
+      match.employeeId = new mongoose.Types.ObjectId(employeeId);
+    }
+
+    const rows = await CallLog.aggregate([
+      { $match: match },
+      { $group: {
+        _id: {
+          employeeId: '$employeeId',
+          day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: 'Asia/Kolkata' } },
+        },
+        count:          { $sum: 1 },
+        connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+        first:          { $min: '$timestamp' },
+        last:           { $max: '$timestamp' }
+      }},
+      { $lookup: { from: 'users', localField: '_id.employeeId', foreignField: '_id', as: 'userInfo' } },
+      { $addFields: {
+        name:        { $arrayElemAt: ['$userInfo.name', 0] },
+        tlName:      { $arrayElemAt: ['$userInfo.tlName', 0] },
+        dailyTarget: { $arrayElemAt: ['$userInfo.dailyTarget', 0] }
+      }},
+      { $project: { userInfo: 0 } },
+      { $sort: { '_id.day': 1 } }
+    ]);
+
+    const records = rows.map((r) => {
+      const target = r.dailyTarget || 0;
+      return {
+        employeeId:        r._id.employeeId ? r._id.employeeId.toString() : '',
+        date:              r._id.day,
+        name:              r.name || 'Unknown',
+        tlName:            r.tlName || '',
+        totalCalls:        r.count,
+        connectedCalls:    r.connectedCalls,
+        connRate:          r.count > 0 ? Math.round((r.connectedCalls / r.count) * 100) : 0,
+        dailyTarget:       target,
+        targetAchievement: target > 0 ? Math.round((r.count / target) * 100) : null,
+        firstCallAt:       r.first || null,
+        lastCallAt:        r.last || null
+      };
+    });
+
+    return res.json({ success: true, data: { records } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/calls/realtime — latest 50 calls
 router.get('/realtime', protect, isManager, async (req, res) => {
   try {

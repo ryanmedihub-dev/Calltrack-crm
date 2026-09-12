@@ -1,9 +1,13 @@
-// Ensures every User document (any role) actually has an `employeeId` field in the
-// database (set to null), not just as a schema default that only appears when a
+// Ensures every User document (any role) actually has a `ryanEmployeeCode` field in
+// the database (set to null), not just as a schema default that only appears when a
 // document happens to be read/saved through Mongoose. Run this once after adding
-// `employeeId` to models/User.js so the field shows up consistently everywhere
+// `ryanEmployeeCode` to models/User.js so the field shows up consistently everywhere
 // (e.g. in Compass, raw aggregation pipelines, exports) before real values are
 // filled in later via addEmployeeIdField.js.
+//
+// Named `ryanEmployeeCode` — not `employeeId` — because `employeeId` already means
+// this app's own User._id elsewhere in this codebase (CallLog.employeeId,
+// workforceSummary/agentDetail responses, the agent-detail/:employeeId route param).
 //
 //   node backend/scripts/initEmployeeIdField.js
 //   node backend/scripts/initEmployeeIdField.js --confirm
@@ -20,11 +24,11 @@ async function run() {
   await mongoose.connect(process.env.MONGO_URI);
   console.log(`db: ${mongoose.connection.name} | mode: ${confirm ? 'APPLY' : 'DRY RUN'}`);
 
-  const missing = await User.find({ employeeId: { $exists: false } })
+  const missing = await User.find({ ryanEmployeeCode: { $exists: false } })
     .select('name email role')
     .lean();
 
-  console.log(`\nusers missing employeeId field: ${missing.length}`);
+  console.log(`\nusers missing ryanEmployeeCode field: ${missing.length}`);
   if (missing.length) {
     console.log('Sample (up to 15):');
     missing.slice(0, 15).forEach((u) => console.log(`  ${u.name} (${u._id}) <${u.email}> [${u.role}]`));
@@ -37,10 +41,10 @@ async function run() {
   }
 
   const result = await User.updateMany(
-    { employeeId: { $exists: false } },
-    { $set: { employeeId: null } }
+    { ryanEmployeeCode: { $exists: false } },
+    { $set: { ryanEmployeeCode: null } }
   );
-  console.log(`\nSet employeeId: null on ${result.modifiedCount} document(s).`);
+  console.log(`\nSet ryanEmployeeCode: null on ${result.modifiedCount} document(s).`);
 
   await mongoose.disconnect();
 }

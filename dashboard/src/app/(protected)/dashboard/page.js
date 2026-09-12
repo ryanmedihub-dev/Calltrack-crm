@@ -359,7 +359,7 @@ const CreateLeadModal = ({ call, employees, onClose }) => {
               <option value="">Unassigned</option>
               {employees.map((e) => (
                 <option key={e._id} value={e._id}>
-                  {e.name}{e.employeeId ? ` (${e.employeeId})` : ''}
+                  {e.name}{e.ryanEmployeeCode ? ` (${e.ryanEmployeeCode})` : ''}
                 </option>
               ))}
             </select>

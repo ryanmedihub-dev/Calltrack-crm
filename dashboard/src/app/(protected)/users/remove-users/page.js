@@ -229,7 +229,7 @@ export default function RemoveUsersPage() {
                 },
               },
               { key: 'email', label: 'Email', render: (u) => <span className="text-xs" style={{ color:'#475569' }}>{u.email||'—'}</span> },
-              { key: 'employeeId', label: 'Employee ID', render: (u) => <span className="text-xs font-mono" style={{ color:'#475569' }}>{u.employeeId||'—'}</span> },
+              { key: 'ryanEmployeeCode', label: 'Employee ID', render: (u) => <span className="text-xs font-mono" style={{ color:'#475569' }}>{u.ryanEmployeeCode||'—'}</span> },
               {
                 key: 'role', label: 'Role', filterType: 'select', filterOptions: roles,
                 filterValue: (u) => u.role||'agent',
