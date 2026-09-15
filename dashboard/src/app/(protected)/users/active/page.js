@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import api from '../../../../lib/api';
+import { todayIST } from '../../../../lib/timezone';
 import {
   DataTable, StatCard, EmptyState,
   UsersIco, CheckIco, PhoneIco, GaugeIco,
@@ -50,8 +51,14 @@ export default function ActiveUsersPage() {
   const load = useCallback(async (silent = false) => {
     silent ? setRefreshing(true) : setLoading(true);
     try {
-      // Same endpoint the Employee Reports page uses — defaults to "today" when no date range is passed.
-      const res = await api.get('/api/reports/employees-periodic', { params: { tab: 'summary' } });
+      // Same endpoint the Employee Reports page uses. Scoped to today only —
+      // the endpoint's own default (no startDate/endDate) is a rolling 29-day
+      // window, which made this page scan a month of calls/leads on every
+      // 30s poll for a screen that only needs today's snapshot.
+      const today = todayIST();
+      const res = await api.get('/api/reports/employees-periodic', {
+        params: { tab: 'summary', startDate: today, endDate: today },
+      });
       setReport(res.data?.data || null);
     } catch {
       setReport(null);

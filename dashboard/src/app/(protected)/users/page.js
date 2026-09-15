@@ -28,7 +28,7 @@ export default function UsersPage() {
   useEffect(() => {
     api.get('/api/employees').then(r=>{
       const users  = r.data?.data||[];
-      const active = users.filter(u=>(u.workingStatus||u.status||'active')==='active').length;
+      const active = users.filter(u=>u.isActive!==false).length;
       setStats({ total:users.length, active, inactive:users.length-active });
     }).catch(()=>{}).finally(()=>setLoading(false));
   }, []);

@@ -36,7 +36,7 @@ export default function UsersOverviewPage() {
   const filtered = users.filter(u=>{
     const ms = !search || u.name?.toLowerCase().includes(search.toLowerCase()) || u.email?.toLowerCase().includes(search.toLowerCase()) || u.phone?.includes(search) || u.ryanEmployeeCode?.toLowerCase().includes(search.toLowerCase());
     const mr = !role   || (u.role||'agent')===role;
-    const mw = !status || (u.workingStatus||u.status||'active')===status;
+    const mw = !status || (u.isActive===false?'inactive':'active')===status;
     return ms&&mr&&mw;
   });
 
@@ -99,7 +99,7 @@ export default function UsersOverviewPage() {
           {filtered.map((u,i)=>{
             const r   = u.role||'agent';
             const c   = ROLE_COLORS[r]||{ color:'#64748B', bg:'#F1F5F9' };
-            const ws  = u.workingStatus||u.status||'active';
+            const ws  = u.isActive===false?'inactive':'active';
             return (
               <div key={u._id||i} className="page-card p-5 animate-fade-in-up hover:shadow-md transition-all" style={{ animationDelay:`${i*0.03}s` }}>
                 <div className="flex items-start justify-between mb-3">

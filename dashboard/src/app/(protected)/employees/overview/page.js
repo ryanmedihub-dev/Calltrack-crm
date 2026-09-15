@@ -21,7 +21,6 @@ const ChartTip   = ({ active, payload, label }) => {
 const STATUS_STYLES = {
   active:   { bg:'#F0FDF4', color:'#16A34A', border:'#BBF7D0' },
   inactive: { bg:'#FFF1F2', color:'#DC2626', border:'#FECACA' },
-  on_leave: { bg:'#FFFBEB', color:'#D97706', border:'#FDE68A' },
 };
 
 export default function EmployeesOverviewPage() {
@@ -44,8 +43,8 @@ export default function EmployeesOverviewPage() {
     })();
   }, []);
 
-  const activeCount   = employees.filter(e => (e.workingStatus||e.status||'active') === 'active').length;
-  const inactiveCount = employees.filter(e => (e.workingStatus||e.status) === 'inactive').length;
+  const activeCount   = employees.filter(e => e.isActive!==false).length;
+  const inactiveCount = employees.filter(e => e.isActive===false).length;
 
   const chartData = employees
     .map(e => ({ name: (e.name||'').split(' ')[0], calls: callStats?.today?.topDialers?.find(d=>d.employeeId===e._id)?.count || 0 }))
@@ -133,10 +132,10 @@ export default function EmployeesOverviewPage() {
               },
               {
                 key: 'status', label: 'Status', filterType: 'select',
-                filterOptions: [{ value:'active', label:'Active' }, { value:'inactive', label:'Inactive' }, { value:'on_leave', label:'On Leave' }],
-                filterValue: (e) => e.workingStatus||e.status||'active',
+                filterOptions: [{ value:'active', label:'Active' }, { value:'inactive', label:'Inactive' }],
+                filterValue: (e) => e.isActive===false?'inactive':'active',
                 render: (e) => {
-                  const ws = e.workingStatus||e.status||'active';
+                  const ws = e.isActive===false?'inactive':'active';
                   const ss = STATUS_STYLES[ws]||STATUS_STYLES.active;
                   return (
                     <span className="badge capitalize" style={{ background:ss.bg, color:ss.color, border:`1px solid ${ss.border}` }}>
