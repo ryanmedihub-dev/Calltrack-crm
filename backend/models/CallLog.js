@@ -35,7 +35,11 @@ callLogSchema.index({ contactNumber: 1 });
 // (New/Repeat column) — matches on contactNumber with timestamp covered by
 // the same index instead of scanning every historical call for that number.
 callLogSchema.index({ contactNumber: 1, timestamp: 1 });
-callLogSchema.index({ leadId: 1 });
+// Was a bare { leadId: 1 }. The call report's `source` filter resolves to a list of lead ids
+// and then intersects it with the report's date range — with timestamp on the index that stays
+// one ordered range walk per lead id, and the report's `sort({ timestamp: -1 })` comes free
+// instead of a blocking sort. Every bare-leadId lookup still uses the prefix.
+callLogSchema.index({ leadId: 1, timestamp: -1 });
 // Legacy dedup key, now partial — scoped to only the rows that predate clientCallId
 // (still null). Left unconditional, this collided with fresh inserts of a pre-existing
 // call once it started carrying a clientCallId: the new upsert filter (below) no longer

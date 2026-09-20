@@ -18,6 +18,7 @@ import {
   Area,
 } from "recharts";
 import api from "../../../../lib/api";
+import { useReportData, invalidateReportCache } from "../../../../lib/useReportData";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
@@ -495,13 +496,10 @@ function PeriodicReportsPageContent() {
   const fromDateParam = searchParams.get("fromDate");
   const toDateParam = searchParams.get("toDate");
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [activeTab, setActiveTab] = useState("summary");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [chartMode, setChartMode] = useState("composed");
-  const [report, setReport] = useState(null);
   const [pinned, setPinned] = useState({});
   // Call History is served page-by-page rather than capped at one big client-side slab —
   // a wide date range runs to tens of thousands of calls, and the old flat `limit: 500`
@@ -550,7 +548,7 @@ function PeriodicReportsPageContent() {
     });
   };
 
-  const buildParams = useCallback(
+  const queryParams = useMemo(
     () => ({
       ...(filters.fromDate && { startDate: filters.fromDate }),
       ...(filters.toDate && { endDate: filters.toDate }),
@@ -563,43 +561,40 @@ function PeriodicReportsPageContent() {
     }),
     [filters],
   );
-
-  const load = useCallback(
-    async (silent = false) => {
-      silent ? setRefreshing(true) : setLoading(true);
-      try {
-        const isHistory = activeTab === "callHistory";
-        const res = await api.get("/api/reports/periodic", {
-          params: {
-            ...buildParams(),
-            tab: activeTab,
-            // Call History walks real server pages; the other tabs are bounded
-            // aggregates that still come back in one shot.
-            ...(isHistory
-              ? { page: histPage, limit: histLimit }
-              : { limit: 500 }),
-          },
-        });
-        setReport(res.data?.data || null);
-      } catch {
-        setReport(null);
-      }
-      setLoading(false);
-      setRefreshing(false);
-    },
-    [buildParams, activeTab, histPage, histLimit],
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  const buildParams = useCallback(() => queryParams, [queryParams]);
 
   // Changing the tab or any filter invalidates the current Call History page number —
   // without this, jumping to page 40 then narrowing the date range would request a page
   // that no longer exists and render an empty table.
+  //
+  // This runs *before* the fetch effect inside useReportData (effects fire in declaration
+  // order), so the page reset is already folded into `requestParams` by the time a request
+  // goes out — the old code reset the page in a later effect and paid for two requests per
+  // tab switch, the first of which was for a page number it had already invalidated.
   useEffect(() => {
     setHistPage(1);
-  }, [activeTab, filters]);
+  }, [activeTab, queryParams]);
+
+  const requestParams = useMemo(
+    () => ({
+      ...queryParams,
+      tab: activeTab,
+      // Call History walks real server pages; the other tabs are bounded
+      // aggregates that still come back in one shot.
+      ...(activeTab === "callHistory"
+        ? { page: histPage, limit: histLimit }
+        : { limit: 500 }),
+    }),
+    [queryParams, activeTab, histPage, histLimit],
+  );
+
+  const {
+    data: report,
+    loading,
+    refreshing,
+    refresh,
+  } = useReportData("/api/reports/periodic", requestParams);
+  const load = refresh;
   useEffect(() => {
     api
       .get("/api/employees")
@@ -611,6 +606,10 @@ function PeriodicReportsPageContent() {
   // showing an edit that never actually reached the server.
   const saveNote = async (callId, notes) => {
     await api.patch(`/api/calls/${callId}/notes`, { notes });
+    // The row on screen already shows the new text optimistically, but every cached page of
+    // this report still holds the old one — drop them so leaving the tab and coming back
+    // inside the cache window doesn't resurrect the pre-edit remark.
+    invalidateReportCache();
   };
 
   const handleExport = () =>

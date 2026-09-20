@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
@@ -7,6 +8,7 @@ const { protect, isManager } = require('../middleware/auth');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 const fmtDuration = require('../lib/formatDuration');
+const reportCache = require('../lib/reportCache');
 
 // Parses a 'YYYY-MM-DD' IST calendar-date string (as sent by the dashboard's
 // date-range filters) into the UTC instant of that day's IST start/end — using
@@ -77,20 +79,265 @@ function applyCallTimeFilter(filter, callTime) {
   filter.$expr = { $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] };
 }
 
+
+const IST_TZ = 'Asia/Kolkata';
+
+const isConnected = { $gt: ['$duration', 0] };
+const typeIs = (t) => ({ $eq: ['$callType', t] });
+const countIf = (cond) => ({ $sum: { $cond: [cond, 1, 0] } });
+const anyIf = (cond) => ({ $max: { $cond: [cond, 1, 0] } });
+
+/*
+ * MEMORY BUDGET — read before adding an accumulator to any $group below.
+ *
+ * This deployment refuses `allowDiskUse` (an Atlas shared tier: the driver sends the option and
+ * the server rejects it), so every $group and $sort is hard-capped at 100MB of in-memory state
+ * with no spill. That is not a tuning knob — a pipeline that exceeds it fails the request with
+ * "Exceeded memory limit for $group". A $facet sub-pipeline cannot even be offered the option.
+ *
+ * The binding number is bucket COUNT x bucket SIZE, and the counts here are large:
+ *   ~474k calls  ->  ~136k distinct contact numbers  ->  ~272k distinct (employee, number)
+ * Those barely move between a 90-day window and the whole collection, because the business
+ * re-dials the same customers rather than adding new ones.
+ *
+ * The rule that follows: group at a high-cardinality key ONLY with the few small accumulators
+ * that genuinely need that grain. A first attempt carried all fourteen per-employee counters at
+ * (employee, number) grain and died at roughly 272k x ~350B.
+ *
+ * Two consequences shape everything below:
+ *   - Bounded groups (call type: 4, hour: 24, employee: dozens, day: one per day in range) are
+ *     cheap enough to share a single $facet, so they cost one pass between them.
+ *   - The one unavoidable high-cardinality pass groups at (employee, number) carrying three 1/0
+ *     flags, and then a $facet re-groups that *intermediate* — by employee for the per-employee
+ *     set metrics, by number for the global ones. Both re-groups are small, so the whole
+ *     report's set-shaped metrics cost one pass rather than one pass each.
+ *
+ * Anything needed only for the rows actually rendered — employee names, contact names — is
+ * resolved AFTER paging by pageDetailsByNumber, never accumulated across the range.
+ */
+
+// --- bounded branches, safe to share one $facet -------------------------------------------
+
+const BY_TYPE_BRANCH = [
+  {
+    $group: {
+      _id: '$callType',
+      calls: { $sum: 1 },
+      duration: { $sum: '$duration' },
+      connected: countIf(isConnected),
+    },
+  },
+];
+
+// Grand totals, and NOT the sum of BY_TYPE_BRANCH's four enum buckets — the live collection
+// holds 634 calls with callType "unknown", written through a path that skipped schema
+// validation. The old JS totalled `calls.length` and summed durations over every call it had
+// loaded, so those rows count toward the total, the working-hours figure and the connected
+// count even though they appear under no type. Summing the four buckets instead would quietly
+// drop them and make every headline number disagree with the previous report.
+const ALL_TOTALS_BRANCH = [
+  {
+    $group: {
+      _id: null,
+      calls: { $sum: 1 },
+      duration: { $sum: '$duration' },
+      connected: countIf(isConnected),
+    },
+  },
+];
+
+// One bucket per employee, so this side can afford every counter the table shows. Names are
+// NOT looked up here: that would be a $lookup inside a $facet, and resolving a few dozen ids
+// with one User.find afterwards is both cheaper and plainly legal.
+const EMPLOYEE_COUNTER_BRANCH = [
+  { $match: { employeeId: { $ne: null } } },
+  {
+    $group: {
+      _id: '$employeeId',
+      totalCalls: { $sum: 1 },
+      totalDuration: { $sum: '$duration' },
+      connectedCalls: countIf(isConnected),
+      incoming: countIf(typeIs('incoming')),
+      incomingDuration: { $sum: { $cond: [typeIs('incoming'), '$duration', 0] } },
+      incomingConnected: countIf({ $and: [typeIs('incoming'), isConnected] }),
+      outgoing: countIf(typeIs('outgoing')),
+      outgoingDuration: { $sum: { $cond: [typeIs('outgoing'), '$duration', 0] } },
+      outgoingConnected: countIf({ $and: [typeIs('outgoing'), isConnected] }),
+      missed: countIf(typeIs('missed')),
+      rejected: countIf(typeIs('rejected')),
+      lastSyncTime: { $max: '$timestamp' },
+    },
+  },
+];
+
+const HOURLY_BRANCH = [
+  {
+    $group: {
+      _id: { $hour: { date: '$timestamp', timezone: IST_TZ } },
+      totalCalls: { $sum: 1 },
+      connected: countIf(isConnected),
+    },
+  },
+];
+
+const DAY_COUNT_BRANCH = [
+  { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: IST_TZ } } } },
+  { $count: 'n' },
+];
+
+// --- the one high-cardinality pass ---------------------------------------------------------
+
+// Collapses to one row per (employee, contact number) carrying only three 1/0 flags — the
+// minimum needed to answer every "distinct" question the report asks. The two branches below
+// re-group this intermediate rather than the call collection.
+const PAIR_GROUP = {
+  $group: {
+    _id: { e: '$employeeId', n: '$contactNumber' },
+    hadMissed: anyIf(typeIs('missed')),
+    hadOutgoing: anyIf(typeIs('outgoing')),
+    hadConnected: anyIf(isConnected),
+  },
+};
+
+// Per employee: at (employee, number) grain `$sum: 1` *is* the distinct-client count, and a
+// number this employee missed but never dialled back *is* a never-attended.
+const PER_EMPLOYEE_BRANCH = [
+  { $match: { '_id.e': { $ne: null } } },
+  {
+    $group: {
+      _id: '$_id.e',
+      uniqueClients: { $sum: 1 },
+      neverAttended: countIf({ $and: [{ $eq: ['$hadMissed', 1] }, { $eq: ['$hadOutgoing', 0] }] }),
+    },
+  },
+];
+
+// Globally: fold the per-employee rows back down to one row per number first, so "missed by
+// one agent, dialled by another" correctly counts as attended — then to a single total row.
+const PER_NUMBER_BRANCH = [
+  {
+    $group: {
+      _id: '$_id.n',
+      hadMissed: { $max: '$hadMissed' },
+      hadOutgoing: { $max: '$hadOutgoing' },
+      hadConnected: { $max: '$hadConnected' },
+    },
+  },
+  {
+    $group: {
+      _id: null,
+      uniqueClients: { $sum: 1 },
+      uniqueConnectedCalls: { $sum: '$hadConnected' },
+      neverAttended: countIf({ $and: [{ $eq: ['$hadMissed', 1] }, { $eq: ['$hadOutgoing', 0] }] }),
+    },
+  },
+];
+
+// --- shaping ------------------------------------------------------------------------------
+
+// Employee names for the handful of ids a rollup produced. One query, off the primary key.
+async function employeeNameMap(counterRows) {
+  const ids = counterRows.map((r) => r._id).filter(Boolean);
+  if (!ids.length) return new Map();
+  const users = await User.find({ _id: { $in: ids } }).select('name tlName').lean();
+  return new Map(users.map((u) => [String(u._id), u]));
+}
+
+// `setRows` is optional: the analysis tab reads only the scalar counters, so it skips the
+// (employee, number) pass entirely rather than computing set metrics it never renders.
+async function shapeEmployeeRollup(counterRows, setRows) {
+  const names = await employeeNameMap(counterRows);
+  const sets = new Map((setRows || []).map((r) => [String(r._id), r]));
+  return counterRows
+    .map((c) => {
+      const id = String(c._id);
+      const u = names.get(id) || {};
+      const s = sets.get(id) || {};
+      return {
+        employeeId: id,
+        employeeName: u.name || 'Unknown',
+        tlName: u.tlName || '',
+        totalCalls: c.totalCalls,
+        connectedCalls: c.connectedCalls,
+        incoming: c.incoming,
+        incomingConnected: c.incomingConnected,
+        outgoing: c.outgoing,
+        outgoingConnected: c.outgoingConnected,
+        missed: c.missed,
+        rejected: c.rejected,
+        notPickupByClient: c.outgoing - c.outgoingConnected,
+        uniqueClients: s.uniqueClients || 0,
+        neverAttended: s.neverAttended || 0,
+        lastSyncTime: c.lastSyncTime,
+        totalDurationSec: c.totalDuration,
+        totalDuration: fmtDuration(c.totalDuration),
+        incomingDuration: fmtDuration(c.incomingDuration),
+        outgoingDuration: fmtDuration(c.outgoingDuration),
+      };
+    })
+    .sort((a, b) => b.totalCalls - a.totalCalls);
+}
+
+// Per-number detail for the rows of ONE page: who called the number, and the contact name as
+// of its most recent call.
+//
+// Both were originally accumulated for every number in the range ($addToSet for the employees,
+// and the name carried alongside a max timestamp) and then discarded for all but the ~50 rows
+// rendered — the single largest term in those groups. Scoped to one page's numbers this is a
+// short walk of { contactNumber: 1, timestamp: 1 }, and $sort + $first reproduce the old
+// "name from the newest call" semantics exactly rather than approximating them.
+async function pageDetailsByNumber(pre, numbers, extraMatch) {
+  if (!numbers.length) return new Map();
+  const rows = await CallLog.aggregate([
+    ...pre,
+    { $match: { contactNumber: { $in: numbers }, ...(extraMatch || {}) } },
+    { $sort: { timestamp: -1 } },
+    {
+      $group: {
+        _id: '$contactNumber',
+        contactName: { $first: '$contactName' },
+        emps: { $addToSet: '$employeeId' },
+      },
+    },
+    { $lookup: { from: 'users', localField: 'emps', foreignField: '_id', as: 'u' } },
+    { $project: { contactName: 1, names: '$u.name' } },
+  ]);
+  return new Map(
+    rows.map((r) => [r._id, { contactName: r.contactName, employees: r.names || [] }]),
+  );
+}
+
 // GET /api/reports/periodic — full periodic report
+//
+// Every tab is answered by an aggregation that returns only the rows that tab renders. The
+// previous implementation loaded the entire filtered call set into Node
+// (`CallLog.find(filter).populate(...).lean()`, no limit) and grouped it in JavaScript — on a
+// month-wide range that is hundreds of thousands of documents over the wire on every single
+// request, and the callHistory tab paid for that slab only to discard it and re-query one page.
 router.get('/periodic', protect, isManager, async (req, res) => {
   try {
     const {
       startDate, endDate, employeeId, callType, duration, callTime, tlName, source, search,
-      connectedOnly, tab = 'summary', page = 1, limit = 100
+      connectedOnly, tab = 'summary', page = 1, limit = 100,
     } = req.query;
 
     const start = startDate ? istDateStrStart(startDate) : istDayStart(0);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const pageSize = Math.min(1000, Math.max(1, parseInt(limit, 10) || 100));
+    const skip = (pageNum - 1) * pageSize;
 
     const filter = { timestamp: { $gte: start, $lte: end } };
-    if (employeeId) filter.employeeId = employeeId;
-    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
+    // `aggregate()` does no schema casting the way `find()` does — an employeeId left as a
+    // string matches nothing in a $match and the report silently comes back empty.
+    if (employeeId) {
+      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+      }
+      filter.employeeId = new mongoose.Types.ObjectId(employeeId);
+    } else if (tlName) {
+      filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
+    }
     if (callType) filter.callType = callType;
     // Source lives on the linked Lead, not the call itself — resolve to the matching lead ids
     // first so every tab below (they all read off the same `filter`) narrows consistently. A
@@ -104,349 +351,464 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     if (search) {
       filter.$or = [
         { contactNumber: { $regex: search, $options: 'i' } },
-        { contactName:   { $regex: search, $options: 'i' } },
+        { contactName: { $regex: search, $options: 'i' } },
       ];
     }
     applyDurationFilter(filter, duration);
     applyConnectedOnlyFilter(filter, connectedOnly);
     applyCallTimeFilter(filter, callTime);
 
-    // Only the fields actually read below (notes/callStatus/leadId/synced are
-    // never used by this route) — cuts payload/memory for wide date ranges.
-    const calls = await CallLog.find(filter)
-      .select('employeeId callType contactNumber contactName duration timestamp')
-      .populate('employeeId', 'name phone tlName')
-      .sort({ timestamp: -1, _id: -1 })
-      .lean();
+    // The call-time filter is an `$expr` on $hour, which no index can serve. Kept in its own
+    // second $match so the first one still resolves as an index range on timestamp/employeeId
+    // instead of degrading the whole pipeline into a collection scan. (`filter` itself stays
+    // whole for the plain `find()` paths further down, where Mongo does this split itself.)
+    const baseMatch = { ...filter };
+    delete baseMatch.$expr;
+    const pre = filter.$expr
+      ? [{ $match: baseMatch }, { $match: { $expr: filter.$expr } }]
+      : [{ $match: baseMatch }];
 
-    const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
-    calls.forEach((c) => { if (byType[c.callType]) byType[c.callType].push(c); });
+    const agg = (stages) => CallLog.aggregate([...pre, ...stages]).allowDiskUse(true);
+    // Cache key must cover every input that changes the answer, including the caller's TL scope.
+    const cacheParts = [
+      'periodic', tab, start.getTime(), end.getTime(), employeeId || '', tlName || '',
+      callType || '', duration || '', callTime || '', source || '', search || '',
+      connectedOnly || '', pageNum, pageSize,
+    ];
+    // callHistory is deliberately uncached: it is the one tab whose rows are editable from the
+    // dashboard (inline remarks), so serving a 45s-old copy would show a manager their own edit
+    // reverting. It is also the cheapest tab — one paginated find — so it has least to gain.
+    const cached = (producer) =>
+      tab === 'callHistory' ? producer() : reportCache.memo(cacheParts, producer);
 
-    const totalDuration = calls.reduce((s, c) => s + (c.duration || 0), 0);
-    const incomingDuration = byType.incoming.reduce((s, c) => s + (c.duration || 0), 0);
-    const outgoingDuration = byType.outgoing.reduce((s, c) => s + (c.duration || 0), 0);
-    const connectedCalls = calls.filter((c) => (c.duration || 0) > 0).length;
-    const notPickupByClientCalls = byType.outgoing.filter((c) => !c.duration || c.duration === 0);
-    const missedNums = new Set(byType.missed.map((c) => c.contactNumber));
-    const outgoingNums = new Set(byType.outgoing.map((c) => c.contactNumber));
-    const neverAttendedNums = [...missedNums].filter((n) => !outgoingNums.has(n));
-    const uniqueClientsSet = new Set(calls.map((c) => c.contactNumber));
-
-    // Employee summary map
-    const empSummary = {};
-    calls.forEach((c) => {
-      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
-      if (!id) return;
-      if (!empSummary[id]) empSummary[id] = {
-        employeeId: id, employeeName: empName(c), tlName: empTL(c),
-        totalCalls: 0, totalDuration: 0,
-        incoming: 0, incomingConnected: 0, incomingDuration: 0,
-        outgoing: 0, outgoingConnected: 0, outgoingDuration: 0,
-        missed: 0, rejected: 0, neverAttended: 0, notPickupByClient: 0,
-        connectedCalls: 0, lastSyncTime: c.timestamp, uniqueContacts: new Set()
-      };
-      const e = empSummary[id];
-      e.totalCalls++;
-      e.totalDuration += c.duration || 0;
-      e.uniqueContacts.add(c.contactNumber);
-      if ((c.duration || 0) > 0) e.connectedCalls++;
-      if (c.callType === 'incoming') {
-        e.incoming++;
-        e.incomingDuration += c.duration || 0;
-        if ((c.duration || 0) > 0) e.incomingConnected++;
-      } else if (c.callType === 'outgoing') {
-        e.outgoing++;
-        e.outgoingDuration += c.duration || 0;
-        if ((c.duration || 0) > 0) e.outgoingConnected++;
-        else e.notPickupByClient++;
-      } else if (c.callType === 'missed') {
-        e.missed++;
-      } else if (c.callType === 'rejected') {
-        e.rejected++;
-      }
-      if (new Date(c.timestamp) > new Date(e.lastSyncTime)) e.lastSyncTime = c.timestamp;
-    });
-
-    const empMissedNums = {};
-    const empOutgoingNums = {};
-    byType.missed.forEach((c) => {
-      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
-      if (!id) return;
-      if (!empMissedNums[id]) empMissedNums[id] = new Set();
-      empMissedNums[id].add(c.contactNumber);
-    });
-    byType.outgoing.forEach((c) => {
-      const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
-      if (!id) return;
-      if (!empOutgoingNums[id]) empOutgoingNums[id] = new Set();
-      empOutgoingNums[id].add(c.contactNumber);
-    });
-    for (const id of Object.keys(empSummary)) {
-      const mn = empMissedNums[id] || new Set();
-      const on = empOutgoingNums[id] || new Set();
-      let na = 0;
-      for (const n of mn) { if (!on.has(n)) na++; }
-      empSummary[id].neverAttended = na;
-    }
-
-    const employeeSummaryList = Object.values(empSummary)
-      .map((e) => {
-        const { uniqueContacts, ...rest } = e;
-        return {
-          ...rest,
-          uniqueClients:    uniqueContacts.size,
-          totalDurationSec: e.totalDuration,
-          totalDuration:    fmtDuration(e.totalDuration),
-          incomingDuration: fmtDuration(e.incomingDuration),
-          outgoingDuration: fmtDuration(e.outgoingDuration)
-        };
-      })
-      .sort((a, b) => b.totalCalls - a.totalCalls);
+    const dateLabel =
+      start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+      (startDate !== endDate
+        ? ' to ' + end.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+        : '');
 
     if (tab === 'summary') {
-      return res.json({
-        success: true,
-        data: {
-          dateLabel: start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
-            (startDate !== endDate ? ' to ' + end.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : ''),
+      const data = await cached(async () => {
+        // Two passes over the range, concurrently: one for every bounded group (call type and
+        // per-employee counters share a $facet because both are tiny), one for the distinct-
+        // count metrics, whose $facet re-groups the (employee, number) intermediate by employee
+        // and by number instead of re-reading the collection for each.
+        const [[bounded], [distinct]] = await Promise.all([
+          agg([
+            {
+              $facet: {
+                byType: BY_TYPE_BRANCH,
+                all: ALL_TOTALS_BRANCH,
+                empCounters: EMPLOYEE_COUNTER_BRANCH,
+              },
+            },
+          ]),
+          agg([
+            PAIR_GROUP,
+            { $facet: { perEmployee: PER_EMPLOYEE_BRANCH, perNumber: PER_NUMBER_BRANCH } },
+          ]),
+        ]);
+
+        const t = {};
+        for (const r of bounded?.byType || []) t[r._id] = r;
+        const n = (k, f = 'calls') => t[k]?.[f] || 0;
+        const nums = distinct?.perNumber?.[0] || {
+          uniqueClients: 0, uniqueConnectedCalls: 0, neverAttended: 0,
+        };
+
+        const all = bounded?.all?.[0] || { calls: 0, duration: 0, connected: 0 };
+        const totalCalls = all.calls;
+        const totalDuration = all.duration;
+        const connectedCalls = all.connected;
+
+        return {
+          dateLabel,
           summary: {
-            incoming: { calls: byType.incoming.length, duration: fmtDuration(incomingDuration) },
-            outgoing: { calls: byType.outgoing.length, duration: fmtDuration(outgoingDuration) },
-            missed:   { calls: byType.missed.length,   duration: '—' },
-            rejected: { calls: byType.rejected.length, duration: '—' },
-            total:    { calls: calls.length, duration: fmtDuration(totalDuration) }
+            incoming: { calls: n('incoming'), duration: fmtDuration(n('incoming', 'duration')) },
+            outgoing: { calls: n('outgoing'), duration: fmtDuration(n('outgoing', 'duration')) },
+            missed: { calls: n('missed'), duration: '—' },
+            rejected: { calls: n('rejected'), duration: '—' },
+            total: { calls: totalCalls, duration: fmtDuration(totalDuration) },
           },
           sidebarStats: {
-            neverAttended: neverAttendedNums.length,
-            notPickupByClient: notPickupByClientCalls.length,
+            neverAttended: nums.neverAttended,
+            notPickupByClient: n('outgoing') - n('outgoing', 'connected'),
             connectedCalls,
-            uniqueConnectedCalls: new Set(calls.filter(c => (c.duration||0) > 0).map(c => c.contactNumber)).size,
-            uniqueClients: uniqueClientsSet.size,
-            workingHours: fmtDuration(totalDuration)
+            uniqueConnectedCalls: nums.uniqueConnectedCalls,
+            uniqueClients: nums.uniqueClients,
+            workingHours: fmtDuration(totalDuration),
           },
           pieData: [
-            { name: 'Incoming', value: byType.incoming.length, color: '#34C759' },
-            { name: 'Outgoing', value: byType.outgoing.length, color: '#FF9500' },
-            { name: 'Missed',   value: byType.missed.length,   color: '#FF3B30' },
-            { name: 'Rejected', value: byType.rejected.length, color: '#7C3AED' }
-          ].filter(d => d.value > 0),
-          employeeSummary: employeeSummaryList
-        }
+            { name: 'Incoming', value: n('incoming'), color: '#34C759' },
+            { name: 'Outgoing', value: n('outgoing'), color: '#FF9500' },
+            { name: 'Missed', value: n('missed'), color: '#FF3B30' },
+            { name: 'Rejected', value: n('rejected'), color: '#7C3AED' },
+          ].filter((d) => d.value > 0),
+          employeeSummary: await shapeEmployeeRollup(
+            bounded?.empCounters || [],
+            distinct?.perEmployee || []
+          ),
+        };
       });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'daywise') {
-      const dayMap = {};
-      calls.forEach((c) => {
-        const key = istDayKey(c.timestamp);
-        if (!dayMap[key]) dayMap[key] = {
-          date: key, label: istDayLabel(c.timestamp),
-          totalCalls: 0, connected: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0
+      const data = await cached(async () => {
+        const rows = await agg([
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: IST_TZ } },
+              totalCalls: { $sum: 1 },
+              duration: { $sum: '$duration' },
+              connected: countIf(isConnected),
+              incoming: countIf(typeIs('incoming')),
+              outgoing: countIf(typeIs('outgoing')),
+              missed: countIf(typeIs('missed')),
+              rejected: countIf(typeIs('rejected')),
+            },
+          },
+          { $sort: { _id: -1 } },
+        ]);
+        return {
+          daywise: rows.map((d) => ({
+            date: d._id,
+            label: istDayLabel(`${d._id}T00:00:00+05:30`),
+            totalCalls: d.totalCalls,
+            connected: d.connected,
+            incoming: d.incoming,
+            outgoing: d.outgoing,
+            missed: d.missed,
+            rejected: d.rejected,
+            duration: fmtDuration(d.duration),
+          })),
         };
-        dayMap[key].totalCalls++;
-        dayMap[key].duration += c.duration || 0;
-        if ((c.duration || 0) > 0) dayMap[key].connected++;
-        if (byType[c.callType]) dayMap[key][c.callType]++;
       });
-      const daywise = Object.values(dayMap)
-        .sort((a, b) => b.date.localeCompare(a.date))
-        .map(d => ({ ...d, duration: fmtDuration(d.duration) }));
-      return res.json({ success: true, data: { daywise } });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'hourly') {
-      const hourly = Array.from({ length: 24 }, (_, h) => ({
-        hour: h, label: hourSlotLabel(h),
-        totalCalls: 0, connected: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0
-      }));
-      calls.forEach((c) => {
-        const h = istHourOf(c.timestamp);
-        hourly[h].totalCalls++;
-        hourly[h].duration += c.duration || 0;
-        if ((c.duration || 0) > 0) hourly[h].connected++;
-        if (hourly[h][c.callType] !== undefined) hourly[h][c.callType]++;
-      });
-      const totalAll = calls.length || 1;
-      return res.json({
-        success: true,
-        data: {
-          hourly: hourly.map(h => ({
+      const data = await cached(async () => {
+        const rows = await agg([
+          {
+            $group: {
+              _id: { $hour: { date: '$timestamp', timezone: IST_TZ } },
+              totalCalls: { $sum: 1 },
+              duration: { $sum: '$duration' },
+              connected: countIf(isConnected),
+              incoming: countIf(typeIs('incoming')),
+              outgoing: countIf(typeIs('outgoing')),
+              missed: countIf(typeIs('missed')),
+              rejected: countIf(typeIs('rejected')),
+            },
+          },
+        ]);
+        const hourly = Array.from({ length: 24 }, (_, h) => ({
+          hour: h, label: hourSlotLabel(h),
+          totalCalls: 0, connected: 0, incoming: 0, outgoing: 0, missed: 0, rejected: 0, duration: 0,
+        }));
+        let totalAll = 0;
+        for (const r of rows) {
+          const h = hourly[r._id];
+          if (!h) continue;
+          Object.assign(h, {
+            totalCalls: r.totalCalls, connected: r.connected, incoming: r.incoming,
+            outgoing: r.outgoing, missed: r.missed, rejected: r.rejected, duration: r.duration,
+          });
+          totalAll += r.totalCalls;
+        }
+        const denom = totalAll || 1;
+        return {
+          hourly: hourly.map((h) => ({
             ...h,
             duration: fmtDuration(h.duration),
-            pct: Number(((h.totalCalls / totalAll) * 100).toFixed(2))
-          }))
-        }
+            pct: Number(((h.totalCalls / denom) * 100).toFixed(2)),
+          })),
+        };
       });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'analysis') {
-      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), totalCalls: 0, connected: 0 }));
-      calls.forEach((c) => {
-        const h = istHourOf(c.timestamp);
-        hourly[h].totalCalls++;
-        if ((c.duration || 0) > 0) hourly[h].connected++;
-      });
+      const data = await cached(async () => {
+        // Every group this tab needs is bounded — 24 hours, 4 call types, one bucket per day,
+        // one per employee — so they all share a single $facet and a single pass. This tab
+        // deliberately does NOT run the (employee, number) pass: it reads only the scalar
+        // counters below (top dialer / receiver / caller / talk time), never uniqueClients or
+        // neverAttended, so computing those would be a second full scan for nothing.
+        const [[facet], longestRows] = await Promise.all([
+          agg([
+            {
+              $facet: {
+                hourly: HOURLY_BRANCH,
+                byType: BY_TYPE_BRANCH,
+                all: ALL_TOTALS_BRANCH,
+                days: DAY_COUNT_BRANCH,
+                empCounters: EMPLOYEE_COUNTER_BRANCH,
+              },
+            },
+          ]),
+          // Ties resolve to the newest call, as the old "strictly greater" JS scan over a
+          // timestamp-desc list did. The `$gt: 0` is not an optimisation: that scan seeded
+          // `longestCall` with null and compared `> (longestCall?.durationSec || 0)`, so a
+          // range in which every call has zero duration yields no longest call at all.
+          agg([
+            { $match: { duration: { $gt: 0 } } },
+            { $sort: { duration: -1, timestamp: -1 } },
+            { $limit: 1 },
+            { $lookup: { from: 'users', localField: 'employeeId', foreignField: '_id', as: 'emp' } },
+            {
+              $project: {
+                _id: 0, duration: 1, callType: 1, contactNumber: 1,
+                contactName: { $ifNull: ['$contactName', 'Unknown'] },
+                timestamp: 1,
+                employeeName: { $ifNull: [{ $arrayElemAt: ['$emp.name', 0] }, 'Unknown'] },
+              },
+            },
+          ]),
+        ]);
 
-      let topDialer = null, topReceiver = null, topOverall = null, mostDuration = null;
-      Object.values(empSummary).forEach((e) => {
-        if (!topDialer || e.outgoing > topDialer.count) topDialer = { employeeName: e.employeeName, count: e.outgoing };
-        if (!topReceiver || e.incoming > topReceiver.count) topReceiver = { employeeName: e.employeeName, count: e.incoming };
-        if (!topOverall || e.totalCalls > topOverall.count) topOverall = { employeeName: e.employeeName, count: e.totalCalls };
-        if (!mostDuration || e.totalDuration > mostDuration.durationSec) mostDuration = { employeeName: e.employeeName, durationSec: e.totalDuration };
-      });
-      if (mostDuration) mostDuration = { employeeName: mostDuration.employeeName, duration: fmtDuration(mostDuration.durationSec) };
-
-      let longestCall = null;
-      calls.forEach((c) => {
-        if ((c.duration || 0) > (longestCall?.durationSec || 0)) {
-          longestCall = {
-            durationSec: c.duration || 0, duration: fmtDuration(c.duration || 0),
-            callType: c.callType, contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
-            employeeName: empName(c), timestamp: c.timestamp
-          };
+        const hourly = Array.from({ length: 24 }, (_, h) => ({
+          hour: h, label: hourSlotLabel(h), totalCalls: 0, connected: 0,
+        }));
+        for (const r of facet?.hourly || []) {
+          if (hourly[r._id]) {
+            hourly[r._id].totalCalls = r.totalCalls;
+            hourly[r._id].connected = r.connected;
+          }
         }
-      });
 
-      const incomingDurTotal = byType.incoming.reduce((s, c) => s + (c.duration || 0), 0);
-      const incomingConnCount = byType.incoming.filter((c) => (c.duration || 0) > 0).length;
-      const outgoingDurTotal = byType.outgoing.reduce((s, c) => s + (c.duration || 0), 0);
-      const outgoingConnCount = byType.outgoing.filter((c) => (c.duration || 0) > 0).length;
-      const dayCount = new Set(calls.map((c) => istDayKey(c.timestamp))).size || 1;
+        const emps = await shapeEmployeeRollup(facet?.empCounters || []);
+        const pick = (field) =>
+          emps.reduce((best, e) => (!best || e[field] > best[field] ? e : best), null);
+        const byCount = (e, field) => (e ? { employeeName: e.employeeName, count: e[field] } : null);
 
-      return res.json({
-        success: true,
-        data: {
-          hourly, topDialer, topReceiver, topOverall, mostDuration, longestCall,
-          avgIncomingDuration: fmtDuration(incomingConnCount ? Math.round(incomingDurTotal / incomingConnCount) : 0),
-          avgOutgoingDuration: fmtDuration(outgoingConnCount ? Math.round(outgoingDurTotal / outgoingConnCount) : 0),
+        // `totalDuration` is the formatted string by this point — compare the seconds.
+        const topDurationEmp = pick('totalDurationSec');
+        const t = {};
+        for (const r of facet?.byType || []) t[r._id] = r;
+        const n = (k, f = 'calls') => t[k]?.[f] || 0;
+
+        // Across every call, including the out-of-enum ones — see ALL_TOTALS_BRANCH.
+        const totalDuration = facet?.all?.[0]?.duration || 0;
+        const dayCount = facet?.days?.[0]?.n || 1;
+        const longestRaw = longestRows[0] || null;
+
+        return {
+          hourly,
+          topDialer: byCount(pick('outgoing'), 'outgoing'),
+          topReceiver: byCount(pick('incoming'), 'incoming'),
+          topOverall: byCount(pick('totalCalls'), 'totalCalls'),
+          mostDuration: topDurationEmp
+            ? { employeeName: topDurationEmp.employeeName, duration: topDurationEmp.totalDuration }
+            : null,
+          longestCall: longestRaw
+            ? { ...longestRaw, durationSec: longestRaw.duration || 0, duration: fmtDuration(longestRaw.duration || 0) }
+            : null,
+          avgIncomingDuration: fmtDuration(
+            n('incoming', 'connected') ? Math.round(n('incoming', 'duration') / n('incoming', 'connected')) : 0
+          ),
+          avgOutgoingDuration: fmtDuration(
+            n('outgoing', 'connected') ? Math.round(n('outgoing', 'duration') / n('outgoing', 'connected')) : 0
+          ),
           avgPerDay: fmtDuration(Math.round(totalDuration / dayCount)),
-          dayCount
-        }
+          dayCount,
+        };
       });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'neverAttended') {
-      const numMap = {};
-      byType.missed.forEach((c) => {
-        if (!numMap[c.contactNumber]) numMap[c.contactNumber] = {
-          contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
-          missedCount: 0, lastMissedAt: c.timestamp, employees: new Set()
+      const data = await cached(async () => {
+        // Count and page as two top-level pipelines instead of one $facet, for the same
+        // reason as the summary tab: this group holds a bucket per distinct contact number,
+        // well past what a $facet sub-pipeline can hold when it is unable to spill to disk.
+        const core = [
+          {
+            $group: {
+              _id: '$contactNumber',
+              hadOutgoing: anyIf(typeIs('outgoing')),
+              missedCount: countIf(typeIs('missed')),
+              lastMissedAt: { $max: { $cond: [typeIs('missed'), '$timestamp', null] } },
+            },
+          },
+          { $match: { hadOutgoing: 0, missedCount: { $gt: 0 } } },
+        ];
+        const [countRows, rows] = await Promise.all([
+          agg([...core, { $count: 'n' }]),
+          // Newest miss first — the old code walked a timestamp-desc list and kept first-seen
+          // order, which is the same ordering. It matters because the tab is paginated.
+          agg([...core, { $sort: { lastMissedAt: -1, _id: 1 } }, { $skip: skip }, { $limit: pageSize }]),
+        ]);
+
+        // Who missed the call, and the name as of the latest miss. Scoped to missed calls:
+        // these numbers have no outgoing call in range by definition, but saying so is clearer
+        // than relying on it.
+        const details = await pageDetailsByNumber(pre, rows.map((r) => r._id), { callType: 'missed' });
+
+        const total = countRows[0]?.n || 0;
+        return {
+          total,
+          records: rows.map((r) => ({
+            contactNumber: r._id,
+            contactName: details.get(r._id)?.contactName || 'Unknown',
+            missedCount: r.missedCount,
+            lastMissedAt: r.lastMissedAt,
+            employees: details.get(r._id)?.employees || [],
+          })),
+          pages: Math.ceil(total / pageSize),
         };
-        numMap[c.contactNumber].missedCount++;
-        numMap[c.contactNumber].employees.add(empName(c));
-        if (new Date(c.timestamp) > new Date(numMap[c.contactNumber].lastMissedAt)) {
-          numMap[c.contactNumber].lastMissedAt = c.timestamp;
-        }
       });
-      const result = Object.values(numMap)
-        .filter((n) => !outgoingNums.has(n.contactNumber))
-        .map((n) => ({ ...n, employees: [...n.employees] }));
-      const pageNum = parseInt(page), pageSize = parseInt(limit);
-      return res.json({
-        success: true,
-        data: {
-          total: result.length,
-          records: result.slice((pageNum - 1) * pageSize, pageNum * pageSize),
-          pages: Math.ceil(result.length / pageSize)
-        }
-      });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'notPickupByClient') {
-      const pageNum = parseInt(page), pageSize = parseInt(limit);
-      const records = notPickupByClientCalls.map((c) => ({
-        _id: c._id, contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
-        employeeName: empName(c), timestamp: c.timestamp, callType: c.callType
-      }));
-      return res.json({
-        success: true,
-        data: {
-          total: records.length,
-          records: records.slice((pageNum - 1) * pageSize, pageNum * pageSize),
-          pages: Math.ceil(records.length / pageSize)
+      const data = await cached(async () => {
+        // "Outgoing that the client never picked up" narrows the same filter rather than
+        // re-deriving it from a full in-memory list. An explicit callType filter for some
+        // *other* type can't also be outgoing, so it yields nothing — matching the old
+        // behaviour, where `byType.outgoing` was empty because the query excluded it.
+        if (filter.callType && filter.callType !== 'outgoing') {
+          return { total: 0, records: [], pages: 0 };
         }
+        const npFilter = {
+          ...filter,
+          callType: 'outgoing',
+          duration: { ...(filter.duration || {}), $lte: 0 },
+        };
+        const [total, rows] = await Promise.all([
+          CallLog.countDocuments(npFilter),
+          CallLog.find(npFilter)
+            .select('contactNumber contactName employeeId timestamp callType')
+            .populate('employeeId', 'name')
+            .sort({ timestamp: -1, _id: -1 })
+            .skip(skip)
+            .limit(pageSize)
+            .lean(),
+        ]);
+        return {
+          total,
+          records: rows.map((c) => ({
+            _id: c._id,
+            contactNumber: c.contactNumber,
+            contactName: c.contactName || 'Unknown',
+            employeeName: empName(c),
+            timestamp: c.timestamp,
+            callType: c.callType,
+          })),
+          pages: Math.ceil(total / pageSize),
+        };
       });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'uniqueClients') {
-      const clientMap = {};
-      calls.forEach((c) => {
-        if (!clientMap[c.contactNumber]) {
-          clientMap[c.contactNumber] = {
-            contactNumber: c.contactNumber, contactName: c.contactName || 'Unknown',
-            totalCalls: 0, connectedCalls: 0, incoming: 0, outgoing: 0, missed: 0,
-            totalDuration: 0, lastCallAt: c.timestamp, employees: new Set()
-          };
-        }
-        const cl = clientMap[c.contactNumber];
-        cl.totalCalls++;
-        cl.totalDuration += c.duration || 0;
-        if ((c.duration || 0) > 0) cl.connectedCalls++;
-        if (cl[c.callType] !== undefined) cl[c.callType]++;
-        cl.employees.add(empName(c));
-        if (new Date(c.timestamp) > new Date(cl.lastCallAt)) cl.lastCallAt = c.timestamp;
+      const data = await cached(async () => {
+        const [countRows, rows] = await Promise.all([
+          // Counting distinct numbers needs none of the per-number counters, so it groups on
+          // the key alone — a far smaller pipeline than reusing the one below.
+          agg([{ $group: { _id: '$contactNumber' } }, { $count: 'n' }]),
+          agg([
+            {
+              $group: {
+                _id: '$contactNumber',
+                totalCalls: { $sum: 1 },
+                totalDuration: { $sum: '$duration' },
+                connectedCalls: countIf(isConnected),
+                incoming: countIf(typeIs('incoming')),
+                outgoing: countIf(typeIs('outgoing')),
+                missed: countIf(typeIs('missed')),
+                lastCallAt: { $max: '$timestamp' },
+              },
+            },
+            // Most-recently-called first. This ordering is load-bearing, not cosmetic: the tab
+            // is paginated, so sorting differently would put different clients on page 2 than
+            // the old code did. It walked a timestamp-desc list and kept first-seen order,
+            // which is exactly "newest last call first".
+            { $sort: { lastCallAt: -1, _id: 1 } },
+            { $skip: skip },
+            { $limit: pageSize },
+          ]),
+        ]);
+
+        const details = await pageDetailsByNumber(pre, rows.map((r) => r._id));
+
+        const total = countRows[0]?.n || 0;
+        return {
+          total,
+          records: rows.map((r) => ({
+            contactNumber: r._id,
+            contactName: details.get(r._id)?.contactName || 'Unknown',
+            totalCalls: r.totalCalls,
+            connectedCalls: r.connectedCalls,
+            incoming: r.incoming,
+            outgoing: r.outgoing,
+            missed: r.missed,
+            totalDuration: fmtDuration(r.totalDuration),
+            lastCallAt: r.lastCallAt,
+            employees: details.get(r._id)?.employees || [],
+          })),
+          pages: Math.ceil(total / pageSize),
+        };
       });
-      const records = Object.values(clientMap).map((c) => ({
-        ...c, employees: [...c.employees], totalDuration: fmtDuration(c.totalDuration)
-      }));
-      const pageNum = parseInt(page), pageSize = parseInt(limit);
-      return res.json({
-        success: true,
-        data: {
-          total: records.length,
-          records: records.slice((pageNum - 1) * pageSize, pageNum * pageSize),
-          pages: Math.ceil(records.length / pageSize)
-        }
-      });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'callHistory') {
-      const pageNum = parseInt(page), pageSize = parseInt(limit);
-      const total = await CallLog.countDocuments(filter);
-      const historyCalls = await CallLog.find(filter)
-        .populate('employeeId', 'name phone tlName')
-        .populate('leadId', 'source')
-        .sort({ timestamp: -1, _id: -1 })
-        .skip((pageNum - 1) * pageSize)
-        .limit(pageSize)
-        .lean();
+      const data = await cached(async () => {
+        const [total, historyCalls] = await Promise.all([
+          CallLog.countDocuments(filter),
+          CallLog.find(filter)
+            .select('employeeId callType contactNumber contactName duration timestamp notes callStatus notesUpdatedAt notesUpdatedByName leadId')
+            .populate('employeeId', 'name phone tlName')
+            .populate('leadId', 'source')
+            .sort({ timestamp: -1, _id: -1 })
+            .skip(skip)
+            .limit(pageSize)
+            .lean(),
+        ]);
 
-      // Global first-ever-contact check for the visible page only (cheap —
-      // one page's worth of numbers), mirrors the New/Repeat export column.
-      const numbers = [...new Set(historyCalls.map((c) => c.contactNumber).filter(Boolean))];
-      const firstSeenAgg = numbers.length
-        ? await CallLog.aggregate([
-            { $match: { contactNumber: { $in: numbers } } },
-            { $group: { _id: '$contactNumber', first: { $min: '$timestamp' } } }
-          ])
-        : [];
-      const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
+        // Global first-ever-contact check for the visible page only (cheap —
+        // one page's worth of numbers), mirrors the New/Repeat export column.
+        const numbers = [...new Set(historyCalls.map((c) => c.contactNumber).filter(Boolean))];
+        const firstSeenAgg = numbers.length
+          ? await CallLog.aggregate([
+              { $match: { contactNumber: { $in: numbers } } },
+              { $group: { _id: '$contactNumber', first: { $min: '$timestamp' } } },
+            ])
+          : [];
+        const firstSeenMap = new Map(firstSeenAgg.map((r) => [r._id, new Date(r.first).getTime()]));
 
-      return res.json({
-        success: true,
-        data: {
+        return {
           total,
-          calls: historyCalls.map(c => ({
+          calls: historyCalls.map((c) => ({
             ...c,
             employeeName: empName(c),
             employeePhone: empPhone(c),
             employeeTL: empTL(c),
             source: c.leadId?.source || null,
-            contactType: firstSeenMap.get(c.contactNumber) === new Date(c.timestamp).getTime() ? 'New' : 'Repeat'
+            contactType:
+              firstSeenMap.get(c.contactNumber) === new Date(c.timestamp).getTime() ? 'New' : 'Repeat',
           })),
           pages: Math.ceil(total / pageSize),
-          page: pageNum
-        }
+          page: pageNum,
+        };
       });
+      return res.json({ success: true, data });
     }
 
-    return res.json({
-      success: true,
-      data: {
-        employeeSummary: employeeSummaryList,
-        dateLabel: start.toLocaleDateString('en-GB')
-      }
+    // Unknown tab — the employee rollup alone, as before.
+    const data = await cached(async () => {
+      const [counters, [distinct]] = await Promise.all([
+        agg(EMPLOYEE_COUNTER_BRANCH),
+        agg([PAIR_GROUP, { $facet: { perEmployee: PER_EMPLOYEE_BRANCH } }]),
+      ]);
+      return {
+        employeeSummary: await shapeEmployeeRollup(counters, distinct?.perEmployee || []),
+        dateLabel: start.toLocaleDateString('en-GB'),
+      };
     });
+    return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -475,31 +837,86 @@ function applyLeadTimeFilter(filter, leadTime) {
 }
 function round1(n) { return Math.round(n * 10) / 10; }
 
+
+const leadIsContacted = { $gt: ['$attempts', 0] };
+const statusIs = (s) => ({ $eq: ['$status', s] });
+
+// Per-assignee rollup. `assignedTo` is null for pool leads, which $group keeps as its own
+// bucket — that bucket is the "Unassigned" row the old JS built under the 'unassigned' key.
+const LEAD_EMPLOYEE_STAGES = [
+  {
+    $group: {
+      _id: '$assignedTo',
+      total: { $sum: 1 },
+      new: countIf(statusIs('new')),
+      contacted: countIf(statusIs('contacted')),
+      follow_up: countIf(statusIs('follow_up')),
+      converted: countIf(statusIs('converted')),
+      lost: countIf(statusIs('lost')),
+      attemptsSum: { $sum: { $ifNull: ['$attempts', 0] } },
+    },
+  },
+  { $sort: { total: -1 } },
+  { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'emp' } },
+  {
+    $project: {
+      _id: 0,
+      employeeName: { $ifNull: [{ $arrayElemAt: ['$emp.name', 0] }, 'Unassigned'] },
+      tlName: { $ifNull: [{ $arrayElemAt: ['$emp.tlName', 0] }, ''] },
+      total: 1, new: 1, contacted: 1, follow_up: 1, converted: 1, lost: 1, attemptsSum: 1,
+    },
+  },
+];
+
 // GET /api/reports/leads-periodic — leads report (Lead Reports page)
+//
+// Same rewrite as /periodic above: each tab is one aggregation returning only what it renders.
+// The old version ran `Lead.find(filter).populate(...).lean()` with no limit *and no
+// projection*, so every lead dragged its entire `changelog` audit array, `callLogs` array and
+// `extraDetails` across the wire — by far the heaviest payload in the app — just to count
+// statuses in JavaScript.
 router.get('/leads-periodic', protect, isManager, async (req, res) => {
   try {
     const {
       startDate, endDate, employeeId, status, source, leadTime, tlName,
-      tab = 'summary', page = 1, limit = 500
+      tab = 'summary', page = 1, limit = 500,
     } = req.query;
 
     const filter = {};
-    if (startDate) {
-      filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
+    if (startDate) filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
+    if (endDate) filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
+    if (employeeId) {
+      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+      }
+      filter.assignedTo = new mongoose.Types.ObjectId(employeeId);
+    } else if (tlName) {
+      filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     }
-    if (endDate) {
-      filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
-    }
-    if (employeeId) filter.assignedTo = employeeId;
-    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (status) filter.status = status;
     if (source) filter.source = { $regex: source, $options: 'i' };
     applyLeadTimeFilter(filter, leadTime);
 
-    const leads = await Lead.find(filter)
-      .populate('assignedTo', 'name tlName')
-      .sort({ createdAt: -1 })
-      .lean();
+    // As in /periodic: the $hour `$expr` can never use an index, so it runs as its own stage
+    // after the indexable createdAt/assignedTo/status range has already narrowed the set.
+    const baseMatch = { ...filter };
+    delete baseMatch.$expr;
+    const pre = filter.$expr
+      ? [{ $match: baseMatch }, { $match: { $expr: filter.$expr } }]
+      : [{ $match: baseMatch }];
+
+    const agg = (stages) => Lead.aggregate([...pre, ...stages]).allowDiskUse(true);
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const pageSize = Math.min(2000, Math.max(1, parseInt(limit, 10) || 500));
+    const skip = (pageNum - 1) * pageSize;
+
+    const cacheParts = [
+      'leads-periodic', tab, startDate || '', endDate || '', employeeId || '', tlName || '',
+      status || '', source || '', leadTime || '', pageNum, pageSize,
+    ];
+    // leadList carries the inline-editable note column — same reasoning as callHistory above.
+    const cached = (producer) =>
+      tab === 'leadList' ? producer() : reportCache.memo(cacheParts, producer);
 
     const dateLabel = startDate
       ? new Date(startDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
@@ -508,192 +925,321 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
           : '')
       : 'All Leads';
 
-    const empNameOf = (l) => l.assignedTo?.name || 'Unassigned';
-    const empTLOf = (l) => l.assignedTo?.tlName || '';
-    const pageNum = parseInt(page), pageSize = parseInt(limit);
-
     if (tab === 'summary') {
-      const byStatus = {};
-      LEAD_STATUS_KEYS.forEach((k) => { byStatus[k] = leads.filter((l) => l.status === k); });
+      const data = await cached(async () => {
+        const [facet] = await agg([
+          {
+            $facet: {
+              byStatus: [
+                { $group: { _id: '$status', leads: { $sum: 1 }, attempts: { $sum: { $ifNull: ['$attempts', 0] } } } },
+              ],
+              overall: [
+                {
+                  $group: {
+                    _id: null,
+                    leads: { $sum: 1 },
+                    attempts: { $sum: { $ifNull: ['$attempts', 0] } },
+                    contacted: countIf(leadIsContacted),
+                    // The `$ne null` guard is load-bearing: in BSON ordering null sorts
+                    // *below* every date, so a lead with no followUpDate would satisfy
+                    // `$lte: now` on its own and inflate the count.
+                    followUpsDue: countIf({
+                      $and: [
+                        statusIs('follow_up'),
+                        { $ne: ['$followUpDate', null] },
+                        { $lte: ['$followUpDate', new Date()] },
+                      ],
+                    }),
+                  },
+                },
+              ],
+              sources: [{ $match: { source: { $nin: [null, ''] } } }, { $group: { _id: '$source' } }, { $count: 'n' }],
+              employees: LEAD_EMPLOYEE_STAGES,
+            },
+          },
+        ]);
 
-      const summary = {};
-      LEAD_STATUS_KEYS.forEach((k) => {
-        const arr = byStatus[k];
-        const attemptsSum = arr.reduce((s, l) => s + (l.attempts || 0), 0);
-        summary[k] = { leads: arr.length, avgAttempts: arr.length ? round1(attemptsSum / arr.length) : 0 };
-      });
-      const totalAttempts = leads.reduce((s, l) => s + (l.attempts || 0), 0);
-      summary.total = { leads: leads.length, avgAttempts: leads.length ? round1(totalAttempts / leads.length) : 0 };
+        const st = {};
+        for (const r of facet?.byStatus || []) st[r._id] = r;
+        const o = facet?.overall?.[0] || { leads: 0, attempts: 0, contacted: 0, followUpsDue: 0 };
 
-      const pieData = LEAD_STATUS_KEYS
-        .map((k) => ({ key: k, name: LEAD_STATUS_LABELS[k], value: byStatus[k].length }))
-        .filter((d) => d.value > 0);
+        const summary = {};
+        for (const k of LEAD_STATUS_KEYS) {
+          const leads = st[k]?.leads || 0;
+          summary[k] = { leads, avgAttempts: leads ? round1((st[k]?.attempts || 0) / leads) : 0 };
+        }
+        summary.total = { leads: o.leads, avgAttempts: o.leads ? round1(o.attempts / o.leads) : 0 };
 
-      const now = new Date();
-      const sidebarStats = {
-        uncontacted:    leads.filter((l) => !(l.attempts > 0)).length,
-        notConnected:   byStatus.not_connected.length,
-        contacted:      leads.filter((l) => l.attempts > 0).length,
-        converted:      byStatus.converted.length,
-        uniqueSources:  new Set(leads.map((l) => l.source).filter(Boolean)).size,
-        followUpsDue:   leads.filter((l) => l.status === 'follow_up' && l.followUpDate && new Date(l.followUpDate) <= now).length
-      };
-
-      const empMap = {};
-      leads.forEach((l) => {
-        const id = l.assignedTo?._id?.toString() || 'unassigned';
-        if (!empMap[id]) empMap[id] = {
-          employeeName: empNameOf(l), tlName: empTLOf(l), total: 0, new: 0, contacted: 0,
-          follow_up: 0, converted: 0, lost: 0, attemptsSum: 0
+        return {
+          dateLabel,
+          summary,
+          pieData: LEAD_STATUS_KEYS
+            .map((k) => ({ key: k, name: LEAD_STATUS_LABELS[k], value: st[k]?.leads || 0 }))
+            .filter((d) => d.value > 0),
+          sidebarStats: {
+            uncontacted: o.leads - o.contacted,
+            notConnected: st.not_connected?.leads || 0,
+            contacted: o.contacted,
+            converted: st.converted?.leads || 0,
+            uniqueSources: facet?.sources?.[0]?.n || 0,
+            followUpsDue: o.followUpsDue,
+          },
+          employeeSummary: (facet?.employees || []).map(({ attemptsSum, ...e }) => ({
+            ...e,
+            conversionRate: e.total ? Math.round((e.converted / e.total) * 100) : 0,
+            avgAttempts: e.total ? round1(attemptsSum / e.total) : 0,
+          })),
         };
-        const e = empMap[id];
-        e.total++;
-        if (l.status === 'new') e.new++;
-        if (l.status === 'contacted') e.contacted++;
-        if (l.status === 'follow_up') e.follow_up++;
-        if (l.status === 'converted') e.converted++;
-        if (l.status === 'lost') e.lost++;
-        e.attemptsSum += l.attempts || 0;
       });
-      const employeeSummary = Object.values(empMap)
-        .map((e) => ({
-          ...e,
-          conversionRate: e.total ? Math.round((e.converted / e.total) * 100) : 0,
-          avgAttempts: e.total ? round1(e.attemptsSum / e.total) : 0
-        }))
-        .sort((a, b) => b.total - a.total);
-      employeeSummary.forEach((e) => delete e.attemptsSum);
-
-      return res.json({ success: true, data: { dateLabel, summary, pieData, sidebarStats, employeeSummary } });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'analysis') {
-      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), total: 0, contacted: 0 }));
-      leads.forEach((l) => {
-        const h = istHourOf(l.createdAt);
-        hourly[h].total++;
-        if (l.attempts > 0) hourly[h].contacted++;
-      });
+      const data = await cached(async () => {
+        const [facet] = await agg([
+          {
+            $facet: {
+              hourly: [
+                {
+                  $group: {
+                    _id: { $hour: { date: '$createdAt', timezone: IST_TZ } },
+                    total: { $sum: 1 },
+                    contacted: countIf(leadIsContacted),
+                  },
+                },
+              ],
+              overall: [
+                {
+                  $group: {
+                    _id: null,
+                    total: { $sum: 1 },
+                    converted: countIf(statusIs('converted')),
+                    attempts: { $sum: { $ifNull: ['$attempts', 0] } },
+                    convertedAttempts: {
+                      $sum: { $cond: [statusIs('converted'), { $ifNull: ['$attempts', 0] }, 0] },
+                    },
+                  },
+                },
+              ],
+              days: [
+                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: IST_TZ } } } },
+                { $count: 'n' },
+              ],
+              mostAttempted: [
+                { $sort: { attempts: -1, createdAt: -1 } },
+                { $limit: 1 },
+                { $project: { _id: 0, name: 1, phone: 1, status: 1, attempts: { $ifNull: ['$attempts', 0] } } },
+              ],
+              employees: LEAD_EMPLOYEE_STAGES,
+            },
+          },
+        ]);
 
-      const empMap = {};
-      leads.forEach((l) => {
-        const id = l.assignedTo?._id?.toString() || 'unassigned';
-        if (!empMap[id]) empMap[id] = { employeeName: empNameOf(l), total: 0, converted: 0, attemptsSum: 0 };
-        empMap[id].total++;
-        if (l.status === 'converted') empMap[id].converted++;
-        empMap[id].attemptsSum += l.attempts || 0;
-      });
-      const empList = Object.values(empMap);
-
-      let topAssignee = null, topConverter = null, topOverall = null, mostAttempts = null;
-      empList.forEach((e) => {
-        if (!topAssignee || e.total > topAssignee.count) topAssignee = { employeeName: e.employeeName, count: e.total };
-        if (!topConverter || e.converted > topConverter.count) topConverter = { employeeName: e.employeeName, count: e.converted };
-        if (!topOverall || e.attemptsSum > topOverall.count) topOverall = { employeeName: e.employeeName, count: e.attemptsSum };
-        if (!mostAttempts || e.attemptsSum > mostAttempts.count) mostAttempts = { employeeName: e.employeeName, count: e.attemptsSum };
-      });
-
-      let mostAttemptedLead = null;
-      leads.forEach((l) => {
-        if (!mostAttemptedLead || (l.attempts || 0) > mostAttemptedLead.attempts) {
-          mostAttemptedLead = { name: l.name, phone: l.phone, attempts: l.attempts || 0, status: l.status };
+        const hourly = Array.from({ length: 24 }, (_, h) => ({
+          hour: h, label: hourSlotLabel(h), total: 0, contacted: 0,
+        }));
+        for (const r of facet?.hourly || []) {
+          if (hourly[r._id]) { hourly[r._id].total = r.total; hourly[r._id].contacted = r.contacted; }
         }
-      });
 
-      const total = leads.length;
-      const convertedCount = leads.filter((l) => l.status === 'converted').length;
-      const attemptsSumAll = leads.reduce((s, l) => s + (l.attempts || 0), 0);
-      const convertedAttemptsSum = leads.filter((l) => l.status === 'converted').reduce((s, l) => s + (l.attempts || 0), 0);
-      const dayCount = new Set(leads.map((l) => istDayKey(l.createdAt))).size || 1;
+        const emps = facet?.employees || [];
+        const pick = (f) => emps.reduce((best, e) => (!best || e[f] > best[f] ? e : best), null);
+        const asCount = (e, f) => (e ? { employeeName: e.employeeName, count: e[f] } : null);
+        const topAttempts = asCount(pick('attemptsSum'), 'attemptsSum');
 
-      return res.json({
-        success: true,
-        data: {
-          dateLabel, hourly, topAssignee, topConverter, topOverall, mostAttempts, mostAttemptedLead,
-          conversionRate: total ? Math.round((convertedCount / total) * 100) : 0,
-          avgAttemptsPerLead: total ? round1(attemptsSumAll / total) : 0,
-          avgAttemptsPerConverted: convertedCount ? round1(convertedAttemptsSum / convertedCount) : 0,
-          avgLeadsPerDay: round1(total / dayCount),
-          dayCount
-        }
+        const o = facet?.overall?.[0] || { total: 0, converted: 0, attempts: 0, convertedAttempts: 0 };
+        const dayCount = facet?.days?.[0]?.n || 1;
+
+        return {
+          dateLabel,
+          hourly,
+          topAssignee: asCount(pick('total'), 'total'),
+          topConverter: asCount(pick('converted'), 'converted'),
+          topOverall: topAttempts,
+          mostAttempts: topAttempts,
+          mostAttemptedLead: facet?.mostAttempted?.[0] || null,
+          conversionRate: o.total ? Math.round((o.converted / o.total) * 100) : 0,
+          avgAttemptsPerLead: o.total ? round1(o.attempts / o.total) : 0,
+          avgAttemptsPerConverted: o.converted ? round1(o.convertedAttempts / o.converted) : 0,
+          avgLeadsPerDay: round1(o.total / dayCount),
+          dayCount,
+        };
       });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'dayWise') {
-      const dayMap = {};
-      leads.forEach((l) => {
-        const key = istDayKey(l.createdAt);
-        if (!dayMap[key]) dayMap[key] = { date: key, label: istDayLabel(l.createdAt), total: 0, converted: 0 };
-        dayMap[key].total++;
-        if (l.status === 'converted') dayMap[key].converted++;
+      const data = await cached(async () => {
+        const rows = await agg([
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: IST_TZ } },
+              total: { $sum: 1 },
+              converted: countIf(statusIs('converted')),
+            },
+          },
+          { $sort: { _id: -1 } },
+        ]);
+        return {
+          dateLabel,
+          daywise: rows.map((d) => ({
+            date: d._id,
+            label: istDayLabel(`${d._id}T00:00:00+05:30`),
+            total: d.total,
+            converted: d.converted,
+            conversionRate: d.total ? Math.round((d.converted / d.total) * 100) : 0,
+          })),
+        };
       });
-      const daywise = Object.values(dayMap)
-        .sort((a, b) => b.date.localeCompare(a.date))
-        .map((d) => ({ ...d, conversionRate: d.total ? Math.round((d.converted / d.total) * 100) : 0 }));
-      return res.json({ success: true, data: { dateLabel, daywise } });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'hourly') {
-      const hourly = Array.from({ length: 24 }, (_, h) => ({ hour: h, label: hourSlotLabel(h), total: 0, contacted: 0, converted: 0 }));
-      leads.forEach((l) => {
-        const h = istHourOf(l.createdAt);
-        hourly[h].total++;
-        if (l.attempts > 0) hourly[h].contacted++;
-        if (l.status === 'converted') hourly[h].converted++;
+      const data = await cached(async () => {
+        const rows = await agg([
+          {
+            $group: {
+              _id: { $hour: { date: '$createdAt', timezone: IST_TZ } },
+              total: { $sum: 1 },
+              contacted: countIf(leadIsContacted),
+              converted: countIf(statusIs('converted')),
+            },
+          },
+        ]);
+        const hourly = Array.from({ length: 24 }, (_, h) => ({
+          hour: h, label: hourSlotLabel(h), total: 0, contacted: 0, converted: 0,
+        }));
+        let totalAll = 0;
+        for (const r of rows) {
+          const h = hourly[r._id];
+          if (!h) continue;
+          h.total = r.total; h.contacted = r.contacted; h.converted = r.converted;
+          totalAll += r.total;
+        }
+        const denom = totalAll || 1;
+        return {
+          dateLabel,
+          hourly: hourly.map((h) => ({ ...h, pct: Number(((h.total / denom) * 100).toFixed(2)) })),
+        };
       });
-      const totalAll = leads.length || 1;
-      return res.json({
-        success: true,
-        data: { dateLabel, hourly: hourly.map((h) => ({ ...h, pct: Number(((h.total / totalAll) * 100).toFixed(2)) })) }
-      });
+      return res.json({ success: true, data });
     }
 
+    // The remaining tabs are plain row listings — a narrowed, projected, paginated find
+    // rather than a full load that was then filtered and sliced in Node. `page` is honoured
+    // now too; page 1 returns exactly what the old `slice(0, limit)` did.
+    // `filter` already carries any $expr; find() splits indexable clauses from it itself.
+    const listFilter = (extra) => ({ ...filter, ...extra });
+    const runList = async (f, projection, sort) => {
+      const [total, rows] = await Promise.all([
+        Lead.countDocuments(f),
+        Lead.find(f).select(projection).populate('assignedTo', 'name tlName').sort(sort).skip(skip).limit(pageSize).lean(),
+      ]);
+      return { total, rows };
+    };
+    const empNameOf = (l) => l.assignedTo?.name || 'Unassigned';
+
     if (tab === 'uncontacted') {
-      const uncontacted = leads
-        .filter((l) => !(l.attempts > 0))
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-      const records = uncontacted.slice(0, pageSize).map((l) => ({
-        _id: l._id, name: l.name, phone: l.phone, source: l.source || '—',
-        employeeName: empNameOf(l), createdAt: l.createdAt,
-        daysSince: Math.max(0, Math.floor((Date.now() - new Date(l.createdAt).getTime()) / 86400000))
-      }));
-      return res.json({ success: true, data: { dateLabel, total: uncontacted.length, records } });
+      const data = await cached(async () => {
+        // `!(attempts > 0)` in the old JS — covers 0, negative, null and missing alike.
+        const { total, rows } = await runList(
+          listFilter({ attempts: { $not: { $gt: 0 } } }),
+          'name phone source assignedTo createdAt',
+          { createdAt: 1 }
+        );
+        return {
+          dateLabel,
+          total,
+          pages: Math.ceil(total / pageSize),
+          records: rows.map((l) => ({
+            _id: l._id, name: l.name, phone: l.phone, source: l.source || '—',
+            employeeName: empNameOf(l), createdAt: l.createdAt,
+            daysSince: Math.max(0, Math.floor((Date.now() - new Date(l.createdAt).getTime()) / 86400000)),
+          })),
+        };
+      });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'notConnected') {
-      const notConnected = leads.filter((l) => l.status === 'not_connected');
-      const records = notConnected.slice(0, pageSize).map((l) => ({
-        _id: l._id, employeeName: empNameOf(l), name: l.name, phone: l.phone,
-        status: l.status, attempts: l.attempts || 0, lastCallAt: l.lastCallAt || null
-      }));
-      return res.json({ success: true, data: { dateLabel, total: notConnected.length, records } });
+      const data = await cached(async () => {
+        // An explicit status filter for some other status can never also be not_connected —
+        // the old code filtered the already-status-narrowed list and got nothing.
+        if (filter.status && filter.status !== 'not_connected') {
+          return { dateLabel, total: 0, pages: 0, records: [] };
+        }
+        const { total, rows } = await runList(
+          listFilter({ status: 'not_connected' }),
+          'name phone status attempts lastCallAt assignedTo createdAt',
+          { createdAt: -1 }
+        );
+        return {
+          dateLabel,
+          total,
+          pages: Math.ceil(total / pageSize),
+          records: rows.map((l) => ({
+            _id: l._id, employeeName: empNameOf(l), name: l.name, phone: l.phone,
+            status: l.status, attempts: l.attempts || 0, lastCallAt: l.lastCallAt || null,
+          })),
+        };
+      });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'sources') {
-      const sourceMap = {};
-      leads.forEach((l) => {
-        const src = l.source || 'Unknown';
-        if (!sourceMap[src]) sourceMap[src] = { source: src, total: 0, converted: 0, lost: 0 };
-        sourceMap[src].total++;
-        if (l.status === 'converted') sourceMap[src].converted++;
-        if (l.status === 'lost') sourceMap[src].lost++;
+      const data = await cached(async () => {
+        const rows = await agg([
+          {
+            $group: {
+              // `l.source || 'Unknown'` in the old JS — an empty string folds in too,
+              // which $ifNull alone would not do.
+              _id: { $cond: [{ $in: ['$source', [null, '']] }, 'Unknown', '$source'] },
+              total: { $sum: 1 },
+              converted: countIf(statusIs('converted')),
+              lost: countIf(statusIs('lost')),
+            },
+          },
+          { $sort: { total: -1 } },
+        ]);
+        return {
+          dateLabel,
+          total: rows.length,
+          records: rows.map((s) => ({
+            source: s._id,
+            total: s.total,
+            converted: s.converted,
+            lost: s.lost,
+            conversionRate: s.total ? Math.round((s.converted / s.total) * 100) : 0,
+          })),
+        };
       });
-      const records = Object.values(sourceMap)
-        .map((s) => ({ ...s, conversionRate: s.total ? Math.round((s.converted / s.total) * 100) : 0 }))
-        .sort((a, b) => b.total - a.total);
-      return res.json({ success: true, data: { dateLabel, total: records.length, records } });
+      return res.json({ success: true, data });
     }
 
     if (tab === 'leadList') {
-      const leadsList = leads.slice(0, pageSize).map((l) => ({
-        _id: l._id, employeeName: empNameOf(l), tlName: empTLOf(l), phone: l.phone, name: l.name,
-        status: l.status, source: l.source || '—', attempts: l.attempts || 0,
-        followUpDate: l.followUpDate || null, createdAt: l.createdAt, lastCallNote: l.lastCallNote || ''
-      }));
-      return res.json({ success: true, data: { dateLabel, total: leads.length, leads: leadsList } });
+      const data = await cached(async () => {
+        const { total, rows } = await runList(
+          listFilter(),
+          'name phone status source attempts followUpDate createdAt lastCallNote assignedTo',
+          { createdAt: -1 }
+        );
+        return {
+          dateLabel,
+          total,
+          pages: Math.ceil(total / pageSize),
+          leads: rows.map((l) => ({
+            _id: l._id, employeeName: empNameOf(l), tlName: l.assignedTo?.tlName || '',
+            phone: l.phone, name: l.name, status: l.status, source: l.source || '—',
+            attempts: l.attempts || 0, followUpDate: l.followUpDate || null,
+            createdAt: l.createdAt, lastCallNote: l.lastCallNote || '',
+          })),
+        };
+      });
+      return res.json({ success: true, data });
     }
 
-    return res.json({ success: true, data: { dateLabel, total: leads.length } });
+    const data = await cached(async () => ({ dateLabel, total: await Lead.countDocuments(filter) }));
+    return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

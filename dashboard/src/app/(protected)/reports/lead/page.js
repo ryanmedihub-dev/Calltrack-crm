@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useState, useCallback, useMemo } from "react";
+import { Suspense, useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   BarChart,
@@ -18,6 +18,7 @@ import {
   Area,
 } from "recharts";
 import api from "../../../../lib/api";
+import { useReportData, invalidateReportCache } from "../../../../lib/useReportData";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
@@ -551,13 +552,10 @@ function LeadReportsPageContent() {
   const fromDateParam = searchParams.get("fromDate");
   const toDateParam = searchParams.get("toDate");
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [employees, setEmployees] = useState([]);
   const [activeTab, setActiveTab] = useState("summary");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [chartMode, setChartMode] = useState("composed");
-  const [report, setReport] = useState(null);
   const [pinned, setPinned] = useState({});
 
   const [filters, setFilters] = useState({
@@ -599,7 +597,7 @@ function LeadReportsPageContent() {
     });
   };
 
-  const buildParams = useCallback(
+  const queryParams = useMemo(
     () => ({
       ...(filters.fromDate && { startDate: filters.fromDate }),
       ...(filters.toDate && { endDate: filters.toDate }),
@@ -611,27 +609,18 @@ function LeadReportsPageContent() {
     }),
     [filters],
   );
-
-  const load = useCallback(
-    async (silent = false) => {
-      silent ? setRefreshing(true) : setLoading(true);
-      try {
-        const res = await api.get("/api/reports/leads-periodic", {
-          params: { ...buildParams(), tab: activeTab, limit: 500 },
-        });
-        setReport(res.data?.data || null);
-      } catch {
-        setReport(null);
-      }
-      setLoading(false);
-      setRefreshing(false);
-    },
-    [buildParams, activeTab],
+  const requestParams = useMemo(
+    () => ({ ...queryParams, tab: activeTab, limit: 500 }),
+    [queryParams, activeTab],
   );
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const {
+    data: report,
+    loading,
+    refreshing,
+    refresh,
+  } = useReportData("/api/reports/leads-periodic", requestParams);
+  const load = refresh;
   useEffect(() => {
     api
       .get("/api/employees")
@@ -642,6 +631,9 @@ function LeadReportsPageContent() {
   const saveNote = async (leadId, text) => {
     try {
       await api.post(`/api/leads/${leadId}/note`, { text });
+      // Drop the cached report pages so the pre-edit note can't come back when the user
+      // leaves this tab and returns inside the cache window.
+      invalidateReportCache();
     } catch {}
   };
 

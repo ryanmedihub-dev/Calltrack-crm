@@ -78,9 +78,18 @@ const leadSchema = new mongoose.Schema({
   createdAt:       { type: Date, default: Date.now }
 });
 
-leadSchema.index({ status: 1 });
-leadSchema.index({ assignedTo: 1 });
+// These two were bare { status: 1 } / { assignedTo: 1 }. Both were already redundant as
+// prefixes of the compound indexes further down, so extending each with `createdAt` costs
+// nothing in index count and removes a blocking in-memory sort from the lead report's row
+// tabs (notConnected / leadList), which filter on status or assignee and sort by createdAt.
+leadSchema.index({ status: 1, createdAt: -1 });
+leadSchema.index({ assignedTo: 1, createdAt: -1 });
 leadSchema.index({ phone: 1 });
+// `source` is filtered with a case-insensitive regex by both the lead report and the call
+// report (which resolves source -> lead ids first). An unanchored regex cannot seek, but with
+// this index Mongo scans index keys instead of every lead document — and Lead documents are
+// fat (changelog, callLogs, extraDetails), so the difference is large.
+leadSchema.index({ source: 1, createdAt: -1 });
 leadSchema.index({ tags: 1 });
 leadSchema.index({ createdAt: -1 });
 // The pool listing, polled by every agent's phone every 12s — easily the hottest query in the
