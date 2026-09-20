@@ -4,7 +4,14 @@ import { motion } from 'framer-motion';
 import api from '../../../../lib/api';
 import { fmtDate } from '../../../../lib/timezone';
 import { DataTable, LeadStatusBadge } from '../../../../components/report-shared';
+import EngagementBadge from '../../../../components/EngagementBadge';
 import { STATUSES, STATUS_LABELS, statusStyle, statusLabel } from '../../../../lib/leadStatus';
+
+const ENGAGEMENT_OPTIONS = [
+  ['NOT_CONNECTED', 'Not Connected'], ['LOW', 'Low'], ['CONTACTED', 'Contacted'],
+  ['ENGAGED', 'Engaged'], ['INTERESTED', 'Interested'], ['WARM', 'Warm'],
+  ['HOT', 'Hot'], ['HIGH_ENGAGEMENT', 'High Engagement'],
+];
 
 function Ico({ size=16, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
@@ -21,6 +28,7 @@ export default function AssignedLeadsPage() {
   const [search,    setSearch]    = useState('');
   const [employee,  setEmployee]  = useState('');
   const [status,    setStatus]    = useState('');
+  const [engagement,setEngagement]= useState('');
   const [employees, setEmployees] = useState([]);
   const [page,      setPage]      = useState(1);
   const [total,     setTotal]     = useState(0);
@@ -39,6 +47,7 @@ export default function AssignedLeadsPage() {
           search: search||undefined,
           assignedTo: employee||undefined,
           status: status||undefined,
+          engagement: engagement||undefined,
           page, limit: PER_PAGE,
         },
       });
@@ -46,11 +55,11 @@ export default function AssignedLeadsPage() {
       setTotal(r.data?.data?.total||0);
     } catch { setLeads([]); }
     setLoading(false);
-  }, [search, employee, status, page]);
+  }, [search, employee, status, engagement, page]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data?.data||[])).catch(()=>{}); }, []);
-  useEffect(() => { setSelected(new Set()); }, [search, employee, status, page]);
+  useEffect(() => { setSelected(new Set()); }, [search, employee, status, engagement, page]);
 
   const totalPages = Math.ceil(total/PER_PAGE);
 
@@ -123,6 +132,11 @@ export default function AssignedLeadsPage() {
       label: 'Status',
       render: (l) => <LeadStatusBadge status={l.status} style={statusStyle(l.status)} label={statusLabel(l.status)} />,
     },
+    {
+      key: 'engagement',
+      label: 'Engagement',
+      render: (l) => <EngagementBadge engagement={l.engagement} />,
+    },
     { key: 'source', label: 'Source', render: (l) => l.source ? <span className="badge bg-gray-100 text-gray-500 border border-gray-300">{l.source}</span> : null },
     { key: 'assignedAt', label: 'Assigned Date', render: (l) => <span className="text-xs text-gray-400">{fmt(l.assignedAt||l.updatedAt)}</span> },
     {
@@ -170,9 +184,13 @@ export default function AssignedLeadsPage() {
           <option value="">All Status</option>
           {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
         </select>
-        {(search||employee||status) && (
+        <select className="form-input text-xs w-40" value={engagement} onChange={e=>{setEngagement(e.target.value);setPage(1);}}>
+          <option value="">All Engagement</option>
+          {ENGAGEMENT_OPTIONS.map(([v,label])=><option key={v} value={v}>{label}</option>)}
+        </select>
+        {(search||employee||status||engagement) && (
           <button className="btn-secondary text-xs py-2 px-3"
-            onClick={()=>{setSearch('');setEmployee('');setStatus('');setPage(1);}}>Clear</button>
+            onClick={()=>{setSearch('');setEmployee('');setStatus('');setEngagement('');setPage(1);}}>Clear</button>
         )}
       </motion.div>
 

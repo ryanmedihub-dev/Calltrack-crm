@@ -1,6 +1,15 @@
 const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
+const { BANDS } = require('./engagement');
+
+// Engagement counts ride along on the call-stats aggregation that already runs. Same $match,
+// same index, so this costs one extra accumulator per band rather than a second round trip.
+// Consumed by ryan-crm's Owner panel, which uses call duration (not Lead.status) as its
+// interest signal — see the byEngagement note in emptyCallStats below.
+const engagementAccumulators = Object.fromEntries(
+  BANDS.map((b) => [`eng_${b.key}`, { $sum: { $cond: [{ $eq: ['$engagement', b.key] }, 1, 0] } }])
+);
 
 // Shared by workforce-summary and agent-detail (backend/routes/workforceSummary.js,
 // backend/routes/agentDetail.js) so the same agent's numbers can never disagree between the two
@@ -14,7 +23,15 @@ const LEAD_STATUSES = [
 ];
 
 function emptyCallStats() {
-  return { total: 0, outgoing: 0, incoming: 0, missed: 0, rejected: 0, connected: 0, connectRate: 0, totalDurationSeconds: 0 };
+  return {
+    total: 0, outgoing: 0, incoming: 0, missed: 0, rejected: 0, connected: 0,
+    connectRate: 0, totalDurationSeconds: 0,
+    // Every band key is always present and zeroed, never omitted — same contract the existing
+    // emptyLeadStats().byStatus follows, so a consumer never has to guess whether a missing
+    // key means zero or means "not implemented".
+    byEngagement: Object.fromEntries(BANDS.map((b) => [b.key, 0])),
+    engagementUnclassified: 0,
+  };
 }
 
 function emptyLeadStats() {
@@ -91,6 +108,7 @@ async function getCallStatsByEmployee({ employeeIds, dateFrom, dateTo }) {
           },
         },
         totalDurationSeconds: { $sum: { $ifNull: ['$duration', 0] } },
+        ...engagementAccumulators,
       },
     },
   ]);
@@ -99,11 +117,17 @@ async function getCallStatsByEmployee({ employeeIds, dateFrom, dateTo }) {
   rows.forEach((r) => {
     const total = r.total || 0;
     const connected = r.connected || 0;
+    const byEngagement = Object.fromEntries(BANDS.map((b) => [b.key, r[`eng_${b.key}`] || 0]));
     map[r._id.toString()] = {
       total, outgoing: r.outgoing, incoming: r.incoming, missed: r.missed, rejected: r.rejected, connected,
       // Guarded so an agent with zero calls in range reads 0, never NaN.
       connectRate: total > 0 ? Math.round((connected / total) * 10000) / 10000 : 0,
       totalDurationSeconds: r.totalDurationSeconds || 0,
+      byEngagement,
+      // Rows synced before the engagement backfill ran have engagement: null and land in no
+      // band, so these two will not always sum to `total`. Exposed so a consumer can tell
+      // "zero such calls" apart from "not backfilled yet".
+      engagementUnclassified: total - BANDS.reduce((s, b) => s + byEngagement[b.key], 0),
     };
   });
   return map;

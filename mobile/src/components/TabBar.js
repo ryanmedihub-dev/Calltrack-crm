@@ -1,17 +1,20 @@
 import React, { useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { Colors } from '../theme/colors';
+import { FEATURES } from '../constants';
 
 // Six is the practical ceiling for this bar. If a seventh is ever needed, move one under
 // `more` rather than shrinking every tab to fit.
 const TABS = [
   { key: 'calls',     label: 'Calls',      icon: '📞' },
-  { key: 'live',      label: 'Live Data',  icon: '🔴' },
+  { key: 'live',      label: 'Live Data',  icon: '🔴', feature: 'LEAD_POOL' },
   { key: 'analytics', label: 'Analytics',  icon: '📊' },
   { key: 'followups', label: 'Follow-ups', icon: '📅' },
   { key: 'leads',     label: 'Leads',      icon: '🎯' },
   { key: 'more',      label: 'More',       icon: '⋯'  },
 ];
+
+const VISIBLE_TABS = TABS.filter((t) => !t.feature || FEATURES[t.feature]);
 
 function TabItem({ tab, isActive, badge, onPress }) {
   // Only use native driver — no color animations to avoid driver-mixing crash
@@ -46,7 +49,7 @@ function TabItem({ tab, isActive, badge, onPress }) {
 export default function TabBar({ active, onChange, badges = {} }) {
   return (
     <View style={s.bar}>
-      {TABS.map((t) => (
+      {VISIBLE_TABS.map((t) => (
         <TabItem
           key={t.key}
           tab={t}

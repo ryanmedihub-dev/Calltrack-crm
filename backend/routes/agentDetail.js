@@ -32,21 +32,37 @@ const { protect, isManager } = require('../middleware/auth');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
+const cache = require('../lib/cache');
 
 router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const { dateFrom, dateTo } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(employeeId)) {
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
+
+    // A plain object sentinel, not a Symbol — this value may round-trip through Redis as JSON,
+    // and a Symbol serializes to `undefined` and can't survive that.
+    const NOT_FOUND = { __notFound: true };
+    const result = await cache.cached(['leads', 'agent-detail', employeeId, req.query], 60, async () => {
+      const built = await buildAgentDetail(employeeId, req.query);
+      return built || NOT_FOUND;
+    });
+    if (result && result.__notFound) return res.status(404).json({ success: false, message: 'Employee not found' });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Not scoped to the requesting manager — every manager sees the same drill-down for a given
+// employeeId, so unlike scripts.js/my-stats there's no identity dimension needed in the key.
+async function buildAgentDetail(employeeId, { dateFrom, dateTo }) {
     const employee = await User.findOne({ _id: employeeId, role: 'employee' })
       .select('name tlName isActive dailyTarget ryanEmployeeCode')
       .lean();
-    if (!employee) {
-      return res.status(404).json({ success: false, message: 'Employee not found' });
-    }
+    if (!employee) return null;
 
     const [callMap, leadMap] = await Promise.all([
       getCallStatsByEmployee({ employeeIds: [employeeId], dateFrom, dateTo }),
@@ -94,31 +110,25 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
       },
     ]);
 
-    return res.json({
-      success: true,
-      data: {
-        employee: {
-          id: employee._id, name: employee.name, tlName: employee.tlName || null,
-          isActive: employee.isActive, dailyTarget: employee.dailyTarget,
-          ryanEmployeeCode: employee.ryanEmployeeCode || null,
-        },
-        range: { from: range.from, to: range.to, defaulted: range.defaulted },
-        calls: callMap[employeeId] || emptyCallStats(),
-        leads: leadMap[employeeId] || emptyLeadStats(),
-        recentCalls: recentCallDocs.map((c) => ({
-          contactName:   c.contactName,
-          contactNumber: c.contactNumber,
-          callType:      c.callType,
-          duration:      c.duration || 0,
-          timestamp:     c.timestamp,
-          callStatus:    c.callStatus || null,
-        })),
-        recentLeadChangelog,
+    return {
+      employee: {
+        id: employee._id, name: employee.name, tlName: employee.tlName || null,
+        isActive: employee.isActive, dailyTarget: employee.dailyTarget,
+        ryanEmployeeCode: employee.ryanEmployeeCode || null,
       },
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
+      range: { from: range.from, to: range.to, defaulted: range.defaulted },
+      calls: callMap[employeeId] || emptyCallStats(),
+      leads: leadMap[employeeId] || emptyLeadStats(),
+      recentCalls: recentCallDocs.map((c) => ({
+        contactName:   c.contactName,
+        contactNumber: c.contactNumber,
+        callType:      c.callType,
+        duration:      c.duration || 0,
+        timestamp:     c.timestamp,
+        callStatus:    c.callStatus || null,
+      })),
+      recentLeadChangelog,
+    };
+}
 
 module.exports = router;

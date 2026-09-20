@@ -5,6 +5,7 @@ import api from '../../../../lib/api';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { DataTable, StatCard, Field, Truncate, Ico, UsersIco } from '../../../../components/report-shared';
 import { triggerServerExport } from '../../../../lib/downloads';
+import { FEATURES } from '../../../../lib/features';
 
 const POLL_MS = 10_000;
 const POLL_BACKOFF_CEILING_MS = 2 * 60_000;
@@ -93,6 +94,20 @@ function waitingSince(ts) {
 const DEFAULT_PAGE_SIZE = 25;
 
 export default function LiveDataPage() {
+  // FEATURES.LEAD_POOL is a build-time env constant, never a value that changes across renders
+  // of a mounted instance of this component — so this return either fires on every render or
+  // never does, which keeps every hook below it firing in the same order every time. Returning
+  // here, before any state/effect is declared, is what stops the 10s poll (and the manager /
+  // attempts-by-employee fetches) from ever being wired up while the pool is paused.
+  if (!FEATURES.LEAD_POOL) {
+    return (
+      <div className="p-8 text-center text-slate-500">
+        <p className="text-lg font-semibold text-slate-700">Live Data is paused</p>
+        <p className="mt-1 text-sm">This feature has been temporarily switched off.</p>
+      </div>
+    );
+  }
+
   const [leads, setLeads]       = useState([]);
   const [stats, setStats]       = useState(null);
   const [loading, setLoading]   = useState(true);

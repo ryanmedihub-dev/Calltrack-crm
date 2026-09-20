@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ENGAGEMENT_KEYS } = require('../lib/engagement');
 
 const changelogSchema = new mongoose.Schema({
   changedAt:     { type: Date, default: Date.now },
@@ -73,6 +74,16 @@ const leadSchema = new mongoose.Schema({
   lastCallEmployeePhone:{ type: String },
   connectedCallCount:   { type: Number, default: 0 },
 
+  // Highest engagement band ever reached on this lead, derived from its calls. Monotonic:
+  // see lib/engagement.js for why it only moves up. Parallel to `status`, never a substitute.
+  engagement:          { type: String, enum: ENGAGEMENT_KEYS, default: null },
+  engagementScore:     { type: Number, default: 0 },
+  engagementUpdatedAt: { type: Date, default: null },
+  // The band of the MOST RECENT call, which can be lower than `engagement`. Kept separately so
+  // a manager can see "was hot, last call was a 5-second no-answer" — the monotonic field alone
+  // hides that.
+  lastCallEngagement:  { type: String, enum: ENGAGEMENT_KEYS, default: null },
+
   followUpDate:    { type: Date },
   tagAssignedDate: { type: Date },
   createdAt:       { type: Date, default: Date.now }
@@ -124,5 +135,7 @@ leadSchema.index({ assignedTo: 1, status: 1 });
 // so the ascending twins would be pure write-amplification on a collection this size.
 leadSchema.index({ status: 1, followUpDate: 1 });
 leadSchema.index({ status: 1, lastCallAt: 1 });
+leadSchema.index({ engagementScore: -1, createdAt: -1 });
+leadSchema.index({ engagement: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Lead', leadSchema);

@@ -7,6 +7,19 @@ const normalizePhone = require('../lib/normalizePhone');
 const getPusher = require('../lib/pusher');
 const { logAction } = require('../lib/audit');
 const { normalizeExtraDetails } = require('../lib/normalizeExtraDetails');
+const { FEATURES } = require('../config/features');
+
+// Feature gate. Registered before every handler in this file so one check closes the whole
+// surface. 404 rather than 403: to a client this endpoint does not exist right now, which is
+// also what the dashboard/app treat as "hide the feature" instead of "you lack permission".
+// EXCEPTION: the Meta lead-ads webhook is NOT part of the pool feature — it is how leads get
+// into the system at all, and Meta must keep receiving 200s or it will disable the
+// subscription. It stays open.
+router.use((req, res, next) => {
+  if (FEATURES.LEAD_POOL) return next();
+  if (req.path === '/meta-webhook') return next();
+  return res.status(404).json({ success: false, error: 'Route not found' });
+});
 
 // Tunable because the right values depend on how the floor actually works, and these will be
 // adjusted after watching real recycle volume for a week.

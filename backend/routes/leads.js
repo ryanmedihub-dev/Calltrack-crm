@@ -13,6 +13,7 @@ const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
 const { normalizeExtraDetails } = require('../lib/normalizeExtraDetails');
 const getPusher = require('../lib/pusher');
+const cache = require('../lib/cache');
 
 // Best-effort — a realtime outage must never fail the upload that triggered it.
 function broadcastPoolRefresh(payload) {
@@ -142,6 +143,7 @@ router.post('/', protect, async (req, res) => {
       }]
     });
     await logAction(req, 'lead.create', { entity: 'Lead', entityId: lead._id, details: { name: lead.name, phone: lead.phone } });
+    await cache.invalidate(['leads', 'tags']);
     return res.status(201).json({ success: true, data: lead, message: 'Lead created' });
   } catch (err) {
     if (err.code === 11000) return res.status(400).json({ success: false, error: 'Phone number already exists' });
@@ -157,7 +159,7 @@ router.post('/', protect, async (req, res) => {
 router.get('/', protect, isManager, async (req, res) => {
   try {
     const {
-      status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax,
+      status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax, engagement,
       page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate,
     } = req.query;
     const filter = {};
@@ -165,6 +167,7 @@ router.get('/', protect, isManager, async (req, res) => {
     if (assignedTo) filter.assignedTo = assignedTo;
     else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (tags) filter.tags = { $in: tags.split(',') };
+    if (engagement) filter.engagement = { $in: engagement.split(',') };
     if (source) filter.source = { $regex: source, $options: 'i' };
     if (attemptsMin || attemptsMax) {
       filter.attempts = {};
@@ -197,8 +200,11 @@ router.get('/', protect, isManager, async (req, res) => {
 // GET /api/leads/tags — unique tags (must be before /:id)
 router.get('/tags', protect, isManager, async (req, res) => {
   try {
-    const tags = await Lead.distinct('tags');
-    return res.json({ success: true, data: tags.filter(Boolean) });
+    const tags = await cache.cached(['leads', 'tags'], 300, async () => {
+      const distinct = await Lead.distinct('tags');
+      return distinct.filter(Boolean);
+    });
+    return res.json({ success: true, data: tags });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -426,6 +432,8 @@ router.post('/bulk-upload', protect, async (req, res) => {
       // the agent digs into that lead's history.
       broadcastPoolRefresh({ repooled });
     }
+
+    if (inserted || updated) await cache.invalidate(['leads', 'tags']);
 
     return res.json({
       success: true,
@@ -743,6 +751,7 @@ router.put('/:id', protect, async (req, res) => {
     ).populate('assignedTo', 'name email phone');
 
     await logAction(req, 'lead.update', { entity: 'Lead', entityId: req.params.id, details: payload });
+    if ('tags' in payload) await cache.invalidate(['leads', 'tags']);
     return res.json({ success: true, data: updated, message: 'Lead updated' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

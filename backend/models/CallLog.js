@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ENGAGEMENT_KEYS } = require('../lib/engagement');
 
 const callLogSchema = new mongoose.Schema({
   employeeId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -25,7 +26,12 @@ const callLogSchema = new mongoose.Schema({
   clientCallId:  { type: String, default: null },
   leadId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', default: null },
   synced:        { type: Boolean, default: true },
-  createdAt:     { type: Date, default: Date.now }
+  createdAt:     { type: Date, default: Date.now },
+
+  // Derived at sync time from duration + callType by lib/engagement.js. Never user-entered.
+  // `callStatus` (the old manual pick) is left in place and untouched for historical rows.
+  engagement:      { type: String, enum: ENGAGEMENT_KEYS, default: null },
+  engagementScore: { type: Number, default: null },
 });
 
 callLogSchema.index({ employeeId: 1, timestamp: -1 });
@@ -58,6 +64,8 @@ callLogSchema.index(
   { employeeId: 1, clientCallId: 1 },
   { unique: true, partialFilterExpression: { clientCallId: { $type: 'string' } } }
 );
+// Backs "calls by engagement band in a date range" on the reports pages.
+callLogSchema.index({ engagement: 1, timestamp: -1 });
 
 const CallLog = mongoose.model('CallLog', callLogSchema);
 

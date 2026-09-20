@@ -11,6 +11,21 @@ const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONT
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
+const { FEATURES } = require('../config/features');
+const { BANDS, deriveEngagement } = require('../lib/engagement');
+const cache = require('../lib/cache');
+const redis = require('../lib/redis');
+const crypto = require('crypto');
+
+// Built once at module scope (not per sync op) — maps the $max'd engagementScore back to its
+// label inside the same aggregation-pipeline update. $max can't produce a string, so the score
+// is the thing that gets maxed and this switch derives the label from whatever score won.
+const ENGAGEMENT_SWITCH = {
+  $switch: {
+    branches: BANDS.map((b) => ({ case: { $eq: ['$engagementScore', b.score] }, then: b.key })),
+    default: null,
+  },
+};
 
 // Stable per-call key used for both in-payload collapsing and the "already synced"
 // lead-linking lookup — prefers the device-generated clientCallId (stable across resyncs)
@@ -261,6 +276,7 @@ router.post('/sync', protect, async (req, res) => {
         // timestamp so such an entry always loses to any server-side edit made after the call.
         // That's the safe direction: a stale resync can never clobber a newer dashboard edit.
         const editedAt = c.notesUpdatedAt ? new Date(c.notesUpdatedAt) : ts;
+        const band = deriveEngagement({ callType: c.callType, duration: c.duration });
         return {
           contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
           contactName:   c.contactName,
@@ -274,7 +290,9 @@ router.post('/sync', protect, async (req, res) => {
           clientCallId:  c.clientCallId || null,
           submittedViaPostCall: !!c.submittedViaPostCall,
           employeeId:    req.user._id,
-          synced:        true
+          synced:        true,
+          engagement:      band.key,
+          engagementScore: band.score,
         };
       })
       .filter((d) => d.contactNumber && d.timestamp && !Number.isNaN(d.timestamp.getTime()) && d.callType);
@@ -309,11 +327,18 @@ router.post('/sync', protect, async (req, res) => {
       // one payload (the raw native row plus a locally enriched copy) in either order, so
       // "whichever came last wins" would non-deterministically drop the newer remark.
       const [newer, older] = d.notesEditedAt >= prev.notesEditedAt ? [d, prev] : [prev, d];
+      // Duration heals upward regardless of which copy is newer — see the $max note below.
+      const mergedDuration = Math.max(older.duration || 0, newer.duration || 0);
+      // Engagement is recomputed from the MERGED duration, not merged independently — a copy
+      // carrying a stale 0 duration would otherwise be able to carry a stale (lower) band
+      // forward even though the other copy's duration just healed it upward.
+      const mergedBand = deriveEngagement({ callType: newer.callType || older.callType, duration: mergedDuration });
       byKey.set(key, {
         ...older,
         ...newer,
-        // Duration heals upward regardless of which copy is newer — see the $max note below.
-        duration: Math.max(older.duration || 0, newer.duration || 0),
+        duration: mergedDuration,
+        engagement: mergedBand.key,
+        engagementScore: mergedBand.score,
         // Only fall back to the older copy's remark if the newer one isn't asserting any.
         ...(newer.hasRemark
           ? { notes: newer.notes, hasRemark: true }
@@ -324,8 +349,35 @@ router.post('/sync', protect, async (req, res) => {
       });
     }
 
+    // The app resyncs the entire day on each cycle, so most of a payload is bytes the server
+    // has already processed unchanged. Fingerprint each merged call on the fields that can
+    // actually change and skip any whose fingerprint we saw recently — Redis-only, best-effort:
+    // on a miss, or with Redis down, the call takes the normal path and the write is idempotent
+    // anyway. This is a shortcut, never a correctness mechanism, so the skip only ever fires on
+    // an exact fingerprint match; a missing fingerprint always falls through to full processing.
+    const mergedDocs = [...byKey.values()];
+    const fpKeyFor = (d) => redis.key('sync-fp', d.employeeId.toString(), callKey(d));
+    const fingerprintOf = (d) => crypto.createHash('sha1')
+      .update([callKey(d), d.duration || 0, d.notes ?? '', d.callStatus ?? '', d.notesEditedAt.getTime()].join('|'))
+      .digest('base64');
+
+    let toProcess = mergedDocs;
+    if (redis.isEnabled() && mergedDocs.length) {
+      try {
+        const fps = mergedDocs.map(fingerprintOf);
+        const seen = await redis.client.mget(...mergedDocs.map(fpKeyFor));
+        toProcess = mergedDocs.filter((_d, i) => seen[i] !== fps[i]);
+      } catch {
+        toProcess = mergedDocs; // Redis hiccup mid-request — fall through to full processing
+      }
+      if (process.env.DEBUG_SYNC_SKIPS === '1') {
+        const skipped = mergedDocs.length - toProcess.length;
+        console.log(`[calls/sync] skip ${skipped}/${mergedDocs.length} (${mergedDocs.length ? Math.round((skipped / mergedDocs.length) * 100) : 0}%)`);
+      }
+    }
+
     const now = new Date();
-    const ops = [...byKey.values()].map((d) => {
+    const ops = toProcess.map((d) => {
       // clientCallId is the primary dedup key going forward (stable across resyncs, unlike
       // an exact timestamp match) — only fall back to the timestamp triplet for calls
       // synced by an app version that predates it.
@@ -366,6 +418,10 @@ router.post('/sync', protect, async (req, res) => {
         // the first sync can carry a 0 that a later resync corrects. $max means a later
         // correct value heals an earlier 0, while a later spurious 0 never regresses it.
         duration:      { $max: ['$duration', d.duration || 0] },
+        // Engagement follows duration and heals the same way: Android can report 0 on the
+        // first sync and the real value on a resync, so a later, longer duration must be able
+        // to raise the band. $max on the ordinal score does that without a read.
+        engagementScore: { $max: [{ $ifNull: ['$engagementScore', -1] }, d.engagementScore] },
       };
 
       if (applyNotes)  stage.notes      = { $cond: [remarkWins, d.notes, '$notes'] };
@@ -376,7 +432,9 @@ router.post('/sync', protect, async (req, res) => {
         stage.notesUpdatedByName = { $cond: [remarkWins, req.user.name, '$notesUpdatedByName'] };
       }
 
-      return { updateOne: { filter, update: [{ $set: stage }], upsert: true } };
+      // The label can't be $max'd (it's a string) — a second stage derives it from whatever
+      // score the first stage just settled on, in the same pipeline update, no extra round trip.
+      return { updateOne: { filter, update: [{ $set: stage }, { $set: { engagement: ENGAGEMENT_SWITCH } }], upsert: true } };
     });
 
     let inserted = [];
@@ -401,6 +459,19 @@ router.post('/sync', protect, async (req, res) => {
         const newIds = Object.values(bulkErr.result?.upsertedIds || {});
         if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
       }
+
+      // Best-effort, pipelined (one round trip): remembers this batch's fingerprints so an
+      // identical resync of these same calls can skip them next time. Written for every op
+      // attempted here, success or partial failure — the write itself is idempotent (it's an
+      // upsert keyed the same way either way), so even a fingerprint recorded for an op that
+      // hit a transient error just means the NEXT resync repeats that one op, same as today.
+      if (redis.isEnabled() && toProcess.length) {
+        try {
+          const pipeline = redis.client.pipeline();
+          toProcess.forEach((d) => pipeline.set(fpKeyFor(d), fingerprintOf(d), 'EX', 86400));
+          await pipeline.exec();
+        } catch {}
+      }
     }
 
     // Auto-link to lead and update lead call stats / callLogs array.
@@ -410,7 +481,15 @@ router.post('/sync', protect, async (req, res) => {
     // its enriched resync arrives. Using `leadId` as the "already counted" guard
     // means every call still gets counted toward Lead.attempts exactly once, even
     // if the lead didn't exist yet on an earlier sync and only appeared later.
-    const batchKeys = docs
+    //
+    // Built from `toProcess`, not every doc in the payload — a fingerprint-skipped call was
+    // already linked (or deliberately left unlinked) the last time its content changed, so
+    // there's nothing new here for it. The one gap this opens: a call that's still unlinked
+    // because no Lead existed yet for its number won't retroactively pick one up if that Lead
+    // is created later out-of-band, until either the call's own content changes or its 24h
+    // fingerprint expires and it's reprocessed — an acceptable bound for what is a speed
+    // shortcut, not a correctness mechanism.
+    const batchKeys = toProcess
       .map((d) => d.clientCallId
         ? { employeeId: req.user._id, clientCallId: d.clientCallId }
         : { employeeId: req.user._id, contactNumber: d.contactNumber, timestamp: d.timestamp })
@@ -429,10 +508,10 @@ router.post('/sync', protect, async (req, res) => {
 
       const lead = phoneToLead[log.contactNumber];
       const fuDate = followUpMap[log.contactNumber];
-      // Only a call actually submitted through the post-call form (Save tapped) should be
-      // able to update a lead's pipeline status or create a brand-new lead — a routine
-      // background resync of the day's raw call log must not do either on its own.
-      const wasSubmitted = submittedMap.get(callKey(log)) || false;
+      // Informational only now — duration, not the post-call Save tap, decides everything
+      // (see lib/engagement.js). Still computed because old app builds keep sending
+      // submittedViaPostCall and nothing should break parsing it.
+      const wasSubmitted = submittedMap.get(callKey(log)) || false; // eslint-disable-line no-unused-vars
 
       if (lead) {
         // Existing lead: update call stats + add callLog reference
@@ -468,28 +547,43 @@ router.post('/sync', protect, async (req, res) => {
         if (fuDate) updateData.$set.followUpDate = new Date(fuDate);
         if (log.callStatus) updateData.$set.lastCallSummary = log.callStatus;
         if (log.notes && log.notes.trim()) updateData.$set.lastCallNote = log.notes.trim();
-        // Mirrors the old client-side PUT /api/leads/:id, which only ever ran from inside
-        // the post-call Save flow — the lead's actual pipeline status only moves here too.
-        if (wasSubmitted && log.callStatus) updateData.$set.status = log.callStatus;
+        // Lead.status is never written from a call anymore — see lib/engagement.js. It stays
+        // the manual/pipeline field; `engagement` (below) is the parallel derived track.
+
+        const band = deriveEngagement(log);
+        updateData.$set.lastCallEngagement = band.key;
+        updateData.$max = { engagementScore: band.score };
 
         await Lead.findByIdAndUpdate(lead._id, updateData);
+        // $max above can't also set the `engagement` label (it's a string), so it's written
+        // here in a second, filtered update that only fires when this call actually raises the
+        // band — cheaper and race-free versus a read-then-decide in JS.
+        await Lead.updateOne(
+          { _id: lead._id, $or: [{ engagement: null }, { engagementScore: { $lte: band.score } }] },
+          { $set: { engagement: band.key, engagementUpdatedAt: log.timestamp } }
+        );
 
-      } else if (wasSubmitted) {
-        // No lead exists yet, but the employee explicitly submitted this call — create
-        // one, mirroring the old client-side POST /api/leads/from-call fallback.
+      } else if (FEATURES.AUTO_LEAD_CREATE_ON_CALL && log.callType === 'outgoing' && (log.duration || 0) > 0) {
+        // No lead exists yet. Off by default — see config/features.js: every dialled number
+        // becoming a Lead pollutes the pool filter, retry queue, report tabs and ryan-crm.
         try {
           const contactName = log.contactName && log.contactName !== 'Unknown'
             ? log.contactName
             : log.contactNumber;
+          const band = deriveEngagement(log);
           const newLead = await createLeadFromCall({
             actor:  req.user,
             call:   log,
             name:   contactName,
             phone:  log.contactNumber,
             source: 'Call',
-            status: log.callStatus || 'contacted',
+            status: 'contacted',
             note:   log.notes,
             followUpDate: fuDate,
+            engagement:          band.key,
+            engagementScore:     band.score,
+            lastCallEngagement:  band.key,
+            engagementUpdatedAt: log.timestamp,
           });
           await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
           phoneToLead[log.contactNumber] = newLead; // so later logs in this batch link to it too
@@ -498,7 +592,10 @@ router.post('/sync', protect, async (req, res) => {
           // lead created by the other request will be picked up by phoneToLead next sync.
         }
       }
-      // No number in system and never submitted via the app — call log saved, nothing else to do.
+      // No number in system and auto-create is off (or this call didn't qualify) — call log
+      // saved, nothing else to do. `wasSubmitted`/submittedMap are still parsed above for
+      // backwards compatibility with app builds that send them, but no longer gate anything —
+      // see lib/engagement.js.
     }
 
     const pusher = getPusher();
@@ -543,13 +640,14 @@ router.get('/', protect, isManager, async (req, res) => {
   try {
     const {
       employeeId, callType, startDate, endDate, search, unsynced,
-      tlName, durationMin, durationMax, connectedOnly,
+      tlName, durationMin, durationMax, connectedOnly, engagement,
       page = 1, limit = 20,
     } = req.query;
     const filter = {};
     if (employeeId) filter.employeeId = employeeId;
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
+    if (engagement) filter.engagement = engagement;
     // "Unsynced" here means "no matching lead was auto-linked" (leadId is null),
     // not the CallLog.synced device-sync flag — matches the page's own copy.
     if (unsynced === 'true') filter.leadId = null;
@@ -605,55 +703,62 @@ router.get('/stats', protect, isManager, async (req, res) => {
     const { range = 'today', startDate, endDate, employee } = req.query;
     const employeeId = employee && mongoose.Types.ObjectId.isValid(employee) ? employee : null;
 
-    const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
-    const { start: ystStart,   end: ystEnd   } = getISTDateBounds(-1);
-    const lw7Start = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
-    const lw7End   = new Date(ystEnd);
-    const lm30Start = new Date(ystEnd); lm30Start.setDate(lm30Start.getDate() - 30);
-    const lm30End   = new Date(ystEnd);
+    // Not scoped to the requesting manager — every manager sees the same numbers for a given
+    // range/employee, so the cache key only needs the query inputs, not req.user.
+    const data = await cache.cached(
+      ['calls', 'stats', range, startDate || '', endDate || '', employeeId || ''],
+      30,
+      async () => {
+        const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
+        const { start: ystStart,   end: ystEnd   } = getISTDateBounds(-1);
+        const lw7Start = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
+        const lw7End   = new Date(ystEnd);
+        const lm30Start = new Date(ystEnd); lm30Start.setDate(lm30Start.getDate() - 30);
+        const lm30End   = new Date(ystEnd);
 
-    const isToday = range === 'today';
-    const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate);
+        const isToday = range === 'today';
+        const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate);
 
-    const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
-      computePeriodStats(todayStart, todayEnd, employeeId),
-      computePeriodStats(ystStart, ystEnd, employeeId),
-      computePeriodStats(lw7Start, lw7End, employeeId),
-      computePeriodStats(lm30Start, lm30End, employeeId),
-      isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId)
-    ]);
+        const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
+          computePeriodStats(todayStart, todayEnd, employeeId),
+          computePeriodStats(ystStart, ystEnd, employeeId),
+          computePeriodStats(lw7Start, lw7End, employeeId),
+          computePeriodStats(lm30Start, lm30End, employeeId),
+          isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId)
+        ]);
 
-    const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
-    lastWeekStats.period  = `${fmtDate(lw7Start)} to ${fmtDate(new Date(lw7End.getTime() - 86400000))}`;
-    lastMonthStats.period = `${fmtDate(lm30Start)} to ${fmtDate(new Date(lm30End.getTime() - 86400000))}`;
+        const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+        lastWeekStats.period  = `${fmtDate(lw7Start)} to ${fmtDate(new Date(lw7End.getTime() - 86400000))}`;
+        lastMonthStats.period = `${fmtDate(lm30Start)} to ${fmtDate(new Date(lm30End.getTime() - 86400000))}`;
 
-    const selected = isToday ? todayStats : selectedStats;
-    selected.date = range === 'custom'
-      ? `${fmtDate(selStart)} to ${fmtDate(new Date(selEnd.getTime() - 86400000))}`
-      : fmtDate(selStart);
+        const selected = isToday ? todayStats : selectedStats;
+        selected.date = range === 'custom'
+          ? `${fmtDate(selStart)} to ${fmtDate(new Date(selEnd.getTime() - 86400000))}`
+          : fmtDate(selStart);
 
-    return res.json({
-      success: true,
-      data: {
-        today:     { ...todayStats,     date: fmtDate(todayStart) },
-        yesterday: { ...yesterdayStats, date: fmtDate(ystStart) },
-        lastWeek:  lastWeekStats,
-        lastMonth: lastMonthStats,
-        selected,
-        range,
-        employee: employeeId,
-        totalToday:     todayStats.totalCalls,
-        missedToday:    todayStats.missed,
-        incomingToday:  todayStats.incoming,
-        outgoingToday:  todayStats.outgoing,
-        rejectedToday:  todayStats.rejected,
-        avgDuration:    todayStats.avgDuration,
-        activeEmployees: todayStats.activeEmployees,
-        topDialers:     todayStats.topDialers,
-        employeeStats:  todayStats.employeeStats,
-        callsPerHour:   todayStats.callsPerHour
+        return {
+          today:     { ...todayStats,     date: fmtDate(todayStart) },
+          yesterday: { ...yesterdayStats, date: fmtDate(ystStart) },
+          lastWeek:  lastWeekStats,
+          lastMonth: lastMonthStats,
+          selected,
+          range,
+          employee: employeeId,
+          totalToday:     todayStats.totalCalls,
+          missedToday:    todayStats.missed,
+          incomingToday:  todayStats.incoming,
+          outgoingToday:  todayStats.outgoing,
+          rejectedToday:  todayStats.rejected,
+          avgDuration:    todayStats.avgDuration,
+          activeEmployees: todayStats.activeEmployees,
+          topDialers:     todayStats.topDialers,
+          employeeStats:  todayStats.employeeStats,
+          callsPerHour:   todayStats.callsPerHour
+        };
       }
-    });
+    );
+
+    return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -667,50 +772,52 @@ router.get('/stats', protect, isManager, async (req, res) => {
 // endpoint only reports call counts, it makes no claim about presence.
 router.get('/daily-by-employee', protect, isManager, async (req, res) => {
   try {
-    const { startDate, endDate, employeeId } = req.query;
-    const { start, end } = getISTCustomBounds(startDate, endDate);
-    const match = { timestamp: { $gte: start, $lt: end } };
-    if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-      match.employeeId = new mongoose.Types.ObjectId(employeeId);
-    }
+    const records = await cache.cached(['calls', 'daily-by-employee', req.query], 60, async () => {
+      const { startDate, endDate, employeeId } = req.query;
+      const { start, end } = getISTCustomBounds(startDate, endDate);
+      const match = { timestamp: { $gte: start, $lt: end } };
+      if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
+        match.employeeId = new mongoose.Types.ObjectId(employeeId);
+      }
 
-    const rows = await CallLog.aggregate([
-      { $match: match },
-      { $group: {
-        _id: {
-          employeeId: '$employeeId',
-          day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: 'Asia/Kolkata' } },
-        },
-        count:          { $sum: 1 },
-        connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
-        first:          { $min: '$timestamp' },
-        last:           { $max: '$timestamp' }
-      }},
-      { $lookup: { from: 'users', localField: '_id.employeeId', foreignField: '_id', as: 'userInfo' } },
-      { $addFields: {
-        name:        { $arrayElemAt: ['$userInfo.name', 0] },
-        tlName:      { $arrayElemAt: ['$userInfo.tlName', 0] },
-        dailyTarget: { $arrayElemAt: ['$userInfo.dailyTarget', 0] }
-      }},
-      { $project: { userInfo: 0 } },
-      { $sort: { '_id.day': 1 } }
-    ]);
+      const rows = await CallLog.aggregate([
+        { $match: match },
+        { $group: {
+          _id: {
+            employeeId: '$employeeId',
+            day: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: 'Asia/Kolkata' } },
+          },
+          count:          { $sum: 1 },
+          connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+          first:          { $min: '$timestamp' },
+          last:           { $max: '$timestamp' }
+        }},
+        { $lookup: { from: 'users', localField: '_id.employeeId', foreignField: '_id', as: 'userInfo' } },
+        { $addFields: {
+          name:        { $arrayElemAt: ['$userInfo.name', 0] },
+          tlName:      { $arrayElemAt: ['$userInfo.tlName', 0] },
+          dailyTarget: { $arrayElemAt: ['$userInfo.dailyTarget', 0] }
+        }},
+        { $project: { userInfo: 0 } },
+        { $sort: { '_id.day': 1 } }
+      ]);
 
-    const records = rows.map((r) => {
-      const target = r.dailyTarget || 0;
-      return {
-        employeeId:        r._id.employeeId ? r._id.employeeId.toString() : '',
-        date:              r._id.day,
-        name:              r.name || 'Unknown',
-        tlName:            r.tlName || '',
-        totalCalls:        r.count,
-        connectedCalls:    r.connectedCalls,
-        connRate:          r.count > 0 ? Math.round((r.connectedCalls / r.count) * 100) : 0,
-        dailyTarget:       target,
-        targetAchievement: target > 0 ? Math.round((r.count / target) * 100) : null,
-        firstCallAt:       r.first || null,
-        lastCallAt:        r.last || null
-      };
+      return rows.map((r) => {
+        const target = r.dailyTarget || 0;
+        return {
+          employeeId:        r._id.employeeId ? r._id.employeeId.toString() : '',
+          date:              r._id.day,
+          name:              r.name || 'Unknown',
+          tlName:            r.tlName || '',
+          totalCalls:        r.count,
+          connectedCalls:    r.connectedCalls,
+          connRate:          r.count > 0 ? Math.round((r.connectedCalls / r.count) * 100) : 0,
+          dailyTarget:       target,
+          targetAchievement: target > 0 ? Math.round((r.count / target) * 100) : null,
+          firstCallAt:       r.first || null,
+          lastCallAt:        r.last || null
+        };
+      });
     });
 
     return res.json({ success: true, data: { records } });

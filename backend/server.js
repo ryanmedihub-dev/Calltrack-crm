@@ -4,13 +4,16 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+const { RedisStore } = require('rate-limit-redis');
 const jwt = require('jsonwebtoken');
+const redis = require('./lib/redis');
 
 const authRoutes      = require('./routes/auth');
 const callLogRoutes   = require('./routes/callLogs');
 const leadFunnelRoutes = require('./routes/leadFunnel');
 const workforceSummaryRoutes = require('./routes/workforceSummary');
 const agentDetailRoutes      = require('./routes/agentDetail');
+const phoneMatchRoutes       = require('./routes/phoneMatch');
 const retryQueueRoutes       = require('./routes/retryQueue');
 const leadRoutes      = require('./routes/leads');
 const leadPoolRoutes  = require('./routes/leadPool');
@@ -19,6 +22,7 @@ const auditRoutes     = require('./routes/auditLog');
 const scriptRoutes    = require('./routes/scripts');
 const employeeRoutes  = require('./routes/employees');
 const downloadRoutes  = require('./routes/downloads');
+const { FEATURES }    = require('./config/features');
 
 const app = express();
 
@@ -76,23 +80,56 @@ function apiKeyGenerator(req) {
 // '/api/lead-pool', but full-path for the global '/api/' mount, so both are checked.
 const skipWebhook = (req) => req.path === '/meta-webhook' || req.originalUrl.startsWith('/api/lead-pool/meta-webhook');
 
+// PM2 runs this API in cluster mode, so express-rate-limit's default in-memory store gives each
+// worker its own counter — the effective limit is really `max * workerCount`, and a worker
+// restart (deploy, crash, PM2 reload) silently resets everyone's counter to zero. A Redis store
+// shares one counter across every worker and survives a single worker restarting.
+//
+// Gated on `redis.client` existing (REDIS_URL configured at all), NOT on `redis.isEnabled()`
+// (connected right now) — a limiter is built once at startup, before ioredis has necessarily
+// finished connecting, so gating on "ready" here would permanently freeze every limiter onto
+// the in-memory fallback for the process's whole lifetime the moment REDIS_URL is set. Instead
+// every limiter below also sets `passOnStoreError: true`, so a store call made before the
+// connection is up (or during a later outage) logs and lets the request through unlimited
+// rather than 500ing — same fail-open posture as everything else in lib/redis.js.
+function store(prefix) {
+  if (!redis.client) return undefined;
+  const s = new RedisStore({
+    sendCommand: (...args) => redis.client.call(...args),
+    prefix: `${redis.PREFIX}rl:${prefix}:`,
+  });
+  // RedisStore's constructor fires off two SCRIPT LOAD commands immediately (not lazily on
+  // first increment()) and stashes the bare, unawaited promises on the instance. Built here at
+  // process startup, before ioredis has necessarily finished connecting, that first attempt can
+  // reject — and an unhandled rejection on a promise nothing ever awaits crashes the whole
+  // process. It's not a lost cause: RedisStore's own retryableIncrement() already catches a
+  // failed first attempt and reloads the script on the very next real increment() call, by
+  // which point Redis has almost always finished connecting — so this only needs to survive the
+  // narrow startup window, not stay broken forever.
+  s.incrementScriptSha?.catch(() => {});
+  s.getScriptSha?.catch(() => {});
+  return s;
+}
+
 const limiter        = rateLimit({
   windowMs: 15 * 60 * 1000, max: 500, standardHeaders: true, legacyHeaders: false,
   keyGenerator: apiKeyGenerator,
   skip: skipWebhook,
+  store: store('api'), passOnStoreError: true,
   message: { success: false, error: 'Too many requests. Please wait a moment and try again.' },
 });
 const authLimiter    = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
   keyGenerator: apiKeyGenerator,
+  store: store('auth'), passOnStoreError: true,
   message: { success: false, error: 'Too many login attempts. Please wait a few minutes and try again.' },
 });
 // 5 registrations per hour — prevents bulk account creation via the protected route
-const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, keyGenerator: apiKeyGenerator });
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, keyGenerator: apiKeyGenerator, store: store('register'), passOnStoreError: true });
 // Reports run heavy aggregations; cap at 30 per 5 minutes
-const reportsLimiter  = rateLimit({ windowMs:  5 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+const reportsLimiter  = rateLimit({ windowMs:  5 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, store: store('reports'), passOnStoreError: true });
 // File generation/registration; cap at 60 per 5 minutes
-const downloadsLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+const downloadsLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false, store: store('downloads'), passOnStoreError: true });
 // The Live Data tab polls this pair every 12s per phone, so it needs its own budget rather
 // than eating into the general /api/ allowance shared with sync, reports and exports.
 // These two handlers are a single indexed find and a small aggregate — cheap enough that a
@@ -101,6 +138,7 @@ const leadPoolLimiter = rateLimit({
   windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
   keyGenerator: apiKeyGenerator,
   skip: skipWebhook,
+  store: store('leadpool'), passOnStoreError: true,
 });
 
 app.use('/api/', limiter);
@@ -148,6 +186,7 @@ app.use('/api/calls',      callLogRoutes);
 app.use('/api/leads',      leadFunnelRoutes);
 app.use('/api/leads',      workforceSummaryRoutes);
 app.use('/api/leads',      agentDetailRoutes);
+app.use('/api/leads',      phoneMatchRoutes);
 app.use('/api/leads',      retryQueueRoutes);
 app.use('/api/leads',      leadRoutes);
 app.use('/api/lead-pool',  leadPoolRoutes);
@@ -157,7 +196,11 @@ app.use('/api/scripts',    scriptRoutes);
 app.use('/api/employees',  employeeRoutes);
 app.use('/api/downloads',  downloadRoutes);
 
-app.get('/api/health', (_req, res) => res.json({ success: true, message: 'CallTrack API running' }));
+app.get('/api/health', (_req, res) => res.json({
+  success: true,
+  message: 'CallTrack API running',
+  redis: redis.isEnabled() ? 'connected' : 'disabled',
+}));
 
 app.use((_req, res) => res.status(404).json({ success: false, error: 'Route not found' }));
 app.use((err, _req, res, _next) => {
@@ -174,21 +217,26 @@ const RECYCLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 const RECYCLE_SWEEP_STARTUP_DELAY_MS = 60 * 1000;
 
 async function runRecycleSweepSafely() {
-  try {
-    await connectDB();
-    const result = await leadPoolRoutes.runRecycleSweep();
-    if (result.recycled) console.log(`[recycle-sweep] recycled ${result.recycled} of ${result.candidates} candidate(s)`);
-  } catch (err) {
-    // An unhandled rejection inside a setInterval callback would take down the process — this
-    // sweep runs forever, so a bad tick must just get logged and retried next interval.
-    console.error('[recycle-sweep] failed:', err.message);
+  if (FEATURES.LEAD_POOL_RECYCLE_SWEEP) {
+    try {
+      await connectDB();
+      const result = await leadPoolRoutes.runRecycleSweep();
+      if (result.recycled) console.log(`[recycle-sweep] recycled ${result.recycled} of ${result.candidates} candidate(s)`);
+    } catch (err) {
+      // An unhandled rejection inside a setInterval callback would take down the process — this
+      // sweep runs forever, so a bad tick must just get logged and retried next interval.
+      console.error('[recycle-sweep] failed:', err.message);
+    }
   }
 
-  // Runs after the recycle sweep, on the same tick and the same single-worker guard: recycling
+  // Auto-assign stays on regardless of the pool flag — see config/features.js. Runs after the
+  // recycle sweep (when it runs), on the same tick and the same single-worker guard: recycling
   // can leave a lead unassigned, and this is what stops one that is past the attempt limit from
   // sitting there with no owner. Its own try/catch so a failure here cannot take the recycle
-  // sweep's interval down with it.
+  // sweep's interval down with it. connectDB() is called here too since it can no longer rely
+  // on the recycle branch above having run it.
   try {
+    await connectDB();
     const result = await leadPoolRoutes.runAutoAssignSweep();
     if (result.assigned) console.log(`[auto-assign] assigned ${result.assigned} over-attempted lead(s) to their last caller`);
   } catch (err) {

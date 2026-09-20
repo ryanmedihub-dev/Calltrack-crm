@@ -33,10 +33,20 @@ const { protect, isManager } = require('../middleware/auth');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
+const cache = require('../lib/cache');
 
 router.get('/workforce-summary', protect, isManager, async (req, res) => {
   try {
-    const { dateFrom, dateTo, teams } = req.query;
+    const data = await cache.cached(['leads', 'workforce-summary', req.query], 60, () => buildWorkforceSummary(req.query));
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Not scoped to the requesting manager — every manager sees the same rollup, so unlike
+// scripts.js/my-stats there's no identity dimension that needs to be in the cache key.
+async function buildWorkforceSummary({ dateFrom, dateTo, teams }) {
 
     // Every employee, not just active ones — `isActive` rides along on each agent row so the
     // Owner panel can decide whether to hide inactive agents, rather than this endpoint
@@ -82,8 +92,11 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
       const bucket = teamBuckets[key];
       bucket.agentCount += 1;
       Object.keys(bucket.calls).forEach((k) => {
-        if (k === 'connectRate') return; // recomputed after summing, not itself summed
+        if (k === 'connectRate' || k === 'byEngagement') return; // handled separately
         bucket.calls[k] += a.calls[k];
+      });
+      Object.keys(bucket.calls.byEngagement).forEach((b) => {
+        bucket.calls.byEngagement[b] += a.calls.byEngagement[b] || 0;
       });
       bucket.leads.assigned += a.leads.assigned;
       Object.keys(bucket.leads.byStatus).forEach((s) => { bucket.leads.byStatus[s] += a.leads.byStatus[s]; });
@@ -100,18 +113,12 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
     // no-param request would render as an unbounded "all time" range beside 30-day numbers.
     const range = resolveCallStatsRange(dateFrom, dateTo);
 
-    return res.json({
-      success: true,
-      data: {
-        generatedAt: new Date(),
-        range: { from: range.from, to: range.to, defaulted: range.defaulted },
-        agents,
-        teamTotals,
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
+    return {
+      generatedAt: new Date(),
+      range: { from: range.from, to: range.to, defaulted: range.defaulted },
+      agents,
+      teamTotals,
+    };
+}
 
 module.exports = router;

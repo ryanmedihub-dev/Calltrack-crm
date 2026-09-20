@@ -10,7 +10,7 @@ import { saveNote } from '../utils/callNotes';
 import { Colors } from '../theme/colors';
 import ContactAvatar from '../components/ContactAvatar';
 import MiniCalendar from '../components/MiniCalendar';
-import { AUTO_SKIP_MS } from '../constants';
+import { AUTO_SKIP_MS, FEATURES, deriveEngagementLocal } from '../constants';
 
 // Status keys match backend enum exactly
 const STATUSES = [
@@ -195,6 +195,9 @@ export default function PostCallScreen({ call, onDone }) {
 
   const typeConf = TYPE_CONFIG[call.callType] || { color: '#64748B', bg: '#F1F5F9', label: call.callType, icon: '↕' };
   const activeStatus = STATUSES.find((s) => s.key === status);
+  // Read-only preview of the band the server will derive at sync time (see
+  // backend/lib/engagement.js) — the agent sees it immediately instead of waiting for a sync.
+  const engagementBand = deriveEngagementLocal(call.callType, call.duration);
 
   return (
     <View style={s.root}>
@@ -216,10 +219,16 @@ export default function PostCallScreen({ call, onDone }) {
           </View>
         </View>
 
-        {/* Active status preview in header */}
-        {activeStatus && (
+        {/* Active status preview in header (only when the manual picker is on) */}
+        {FEATURES.MANUAL_STATUS_PICKER && activeStatus && (
           <View style={[s.headerStatusPill, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
             <Text style={s.headerStatusText}>{activeStatus.icon} {activeStatus.label}</Text>
+          </View>
+        )}
+        {/* Read-only engagement band preview — what the server will derive at sync time */}
+        {!FEATURES.MANUAL_STATUS_PICKER && (
+          <View style={[s.headerStatusPill, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
+            <Text style={s.headerStatusText}>{engagementBand.label} · {fmtDur(call.duration)}</Text>
           </View>
         )}
       </View>
@@ -231,33 +240,37 @@ export default function PostCallScreen({ call, onDone }) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={s.sectionLabel}>Call Outcome</Text>
-        <View style={s.chipGrid}>
-          {STATUSES.map((item) => {
-            const active = status === item.key;
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={[
-                  s.chip,
-                  active && { backgroundColor: item.bg, borderColor: item.color, borderWidth: 2 },
-                ]}
-                onPress={() => setStatus(active ? null : item.key)}
-                activeOpacity={0.75}
-              >
-                <Text style={s.chipIcon}>{item.icon}</Text>
-                <Text style={[s.chipLabel, active && { color: item.color, fontWeight: '700' }]}>
-                  {item.label}
-                </Text>
-                {active && (
-                  <View style={[s.checkDot, { backgroundColor: item.color }]}>
-                    <Text style={{ color: '#fff', fontSize: 8, fontWeight: '900' }}>✓</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {FEATURES.MANUAL_STATUS_PICKER && (
+          <>
+            <Text style={s.sectionLabel}>Call Outcome</Text>
+            <View style={s.chipGrid}>
+              {STATUSES.map((item) => {
+                const active = status === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[
+                      s.chip,
+                      active && { backgroundColor: item.bg, borderColor: item.color, borderWidth: 2 },
+                    ]}
+                    onPress={() => setStatus(active ? null : item.key)}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={s.chipIcon}>{item.icon}</Text>
+                    <Text style={[s.chipLabel, active && { color: item.color, fontWeight: '700' }]}>
+                      {item.label}
+                    </Text>
+                    {active && (
+                      <View style={[s.checkDot, { backgroundColor: item.color }]}>
+                        <Text style={{ color: '#fff', fontSize: 8, fontWeight: '900' }}>✓</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         <Text style={s.sectionLabel}>Remarks</Text>
         <TextInput

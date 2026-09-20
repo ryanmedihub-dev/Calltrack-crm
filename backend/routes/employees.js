@@ -3,24 +3,33 @@ const router = express.Router();
 const User = require('../models/User');
 const Lead = require('../models/Lead');
 const { protect, isManager } = require('../middleware/auth');
+const cache = require('../lib/cache');
+
+// Every write handler below calls this after its DB write resolves — cheaper than picking
+// apart which write touched what, and this route module's writes are infrequent enough that
+// over-invalidating both cached reads together costs nothing measurable.
+const invalidateEmployees = () => cache.invalidate(['employees']);
 
 // GET /api/employees
 router.get('/', protect, isManager, async (req, res) => {
   try {
     const { search, page = 1, limit = 200 } = req.query;
-    const filter = { role: 'employee' };
-    if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { ryanEmployeeCode: { $regex: search, $options: 'i' } },
-      ];
-    }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [employees, total] = await Promise.all([
-      User.find(filter).sort({ name: 1 }).skip(skip).limit(parseInt(limit)),
-      User.countDocuments(filter),
-    ]);
-    return res.json({ success: true, data: employees, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+    const data = await cache.cached(['employees', 'list', search || '', page, limit], 120, async () => {
+      const filter = { role: 'employee' };
+      if (search) {
+        filter.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { ryanEmployeeCode: { $regex: search, $options: 'i' } },
+        ];
+      }
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const [employees, total] = await Promise.all([
+        User.find(filter).sort({ name: 1 }).skip(skip).limit(parseInt(limit)).lean(),
+        User.countDocuments(filter),
+      ]);
+      return { employees, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) };
+    });
+    return res.json({ success: true, data: data.employees, total: data.total, page: data.page, pages: data.pages });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -30,8 +39,11 @@ router.get('/', protect, isManager, async (req, res) => {
 // Must be declared before GET /:id so it isn't swallowed by the param route.
 router.get('/tl-names', protect, isManager, async (req, res) => {
   try {
-    const names = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' } });
-    return res.json({ success: true, data: names.sort((a, b) => a.localeCompare(b)) });
+    const names = await cache.cached(['employees', 'tl-names'], 300, async () => {
+      const distinct = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' } });
+      return distinct.sort((a, b) => a.localeCompare(b));
+    });
+    return res.json({ success: true, data: names });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -48,6 +60,7 @@ router.post('/', protect, isManager, async (req, res) => {
       if (dupe) return res.status(400).json({ success: false, error: 'Employee ID already in use' });
     }
     const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName, ryanEmployeeCode: ryanEmployeeCode || null });
+    await invalidateEmployees();
     return res.status(201).json({ success: true, data: user, message: 'Employee created' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -74,6 +87,7 @@ router.patch('/:id/status', protect, isManager, async (req, res) => {
     }
     const employee = await User.findByIdAndUpdate(req.params.id, { isActive }, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    await invalidateEmployees();
     return res.json({ success: true, data: employee });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -89,6 +103,7 @@ router.patch('/:id/target', protect, isManager, async (req, res) => {
     }
     const employee = await User.findByIdAndUpdate(req.params.id, { dailyTarget }, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    await invalidateEmployees();
     return res.json({ success: true, data: employee });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -107,6 +122,7 @@ router.put('/:id', protect, isManager, async (req, res) => {
     if (ryanEmployeeCode !== undefined) update.ryanEmployeeCode = ryanEmployeeCode || null;
     const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
+    await invalidateEmployees();
     return res.json({ success: true, data: employee });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -140,6 +156,7 @@ router.delete('/:id', protect, isManager, async (req, res) => {
     }
 
     await User.deleteOne({ _id: employee._id });
+    await invalidateEmployees();
     return res.json({ success: true, message: 'Employee deleted' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });

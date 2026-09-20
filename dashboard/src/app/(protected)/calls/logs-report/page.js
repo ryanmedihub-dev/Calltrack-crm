@@ -8,6 +8,19 @@ import {
   StatCard, DataTable, Field, ActiveFilterChips, Ico,
   CalendarIco, DownloadIco, ChevronIco,
 } from '../../../../components/report-shared';
+import EngagementBadge from '../../../../components/EngagementBadge';
+
+const ENGAGEMENT_OPTIONS = [
+  ['', 'All Bands'],
+  ['NOT_CONNECTED', 'Not Connected'],
+  ['LOW', 'Low'],
+  ['CONTACTED', 'Contacted'],
+  ['ENGAGED', 'Engaged'],
+  ['INTERESTED', 'Interested'],
+  ['WARM', 'Warm'],
+  ['HOT', 'Hot'],
+  ['HIGH_ENGAGEMENT', 'High Engagement'],
+];
 
 const PrintIco = () => <Ico size={14}><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></Ico>;
 
@@ -48,12 +61,14 @@ export default function LogsReportPage() {
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [callType, setCallType] = useState('');
+  const [engagement, setEngagement] = useState('');
 
-  const fetchData = async (p = page, sd = startDate, ed = endDate, ct = callType) => {
+  const fetchData = async (p = page, sd = startDate, ed = endDate, ct = callType, eng = engagement) => {
     setLoading(true);
     try {
       const params = { page: p, limit: 25, startDate: sd, endDate: ed };
       if (ct) params.callType = ct;
+      if (eng) params.engagement = eng;
       const [callsRes, statsRes] = await Promise.all([
         api.get('/api/calls', { params }),
         api.get('/api/calls/stats'),
@@ -68,11 +83,15 @@ export default function LogsReportPage() {
 
   useEffect(() => { fetchData(); }, [page]);
 
-  const applyFilter = () => { setPage(1); fetchData(1, startDate, endDate, callType); };
-  const resetFilter = () => { setStartDate(today); setEndDate(today); setCallType(''); setPage(1); fetchData(1, today, today, ''); };
-  const clearCallType = () => { setCallType(''); setPage(1); fetchData(1, startDate, endDate, ''); };
+  const applyFilter = () => { setPage(1); fetchData(1, startDate, endDate, callType, engagement); };
+  const resetFilter = () => { setStartDate(today); setEndDate(today); setCallType(''); setEngagement(''); setPage(1); fetchData(1, today, today, '', ''); };
+  const clearCallType = () => { setCallType(''); setPage(1); fetchData(1, startDate, endDate, '', engagement); };
+  const clearEngagement = () => { setEngagement(''); setPage(1); fetchData(1, startDate, endDate, callType, ''); };
 
   const handleExport = () => {
+    // /api/calls/export doesn't parse `engagement` — B7 only wired the filter into the list
+    // endpoint (GET /api/calls), so the export intentionally stays unfiltered by band rather
+    // than silently ignoring a param the table implies it's honouring.
     const params = { startDate, endDate };
     if (callType) params.callType = callType;
     return triggerServerExport({ endpoint: '/api/calls/export', params, filename: `logs_report_${startDate}_${endDate}.csv` });
@@ -155,6 +174,12 @@ export default function LogsReportPage() {
                     <option value="rejected">Rejected</option>
                   </select>
                 </Field>
+                <Field label="Engagement">
+                  <select value={engagement} onChange={(e) => setEngagement(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-white">
+                    {ENGAGEMENT_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                  </select>
+                </Field>
               </div>
 
               <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-gray-100">
@@ -172,10 +197,10 @@ export default function LogsReportPage() {
         </div>
 
         <ActiveFilterChips
-          filters={{ callType }}
-          labels={{ callType: 'Type' }}
-          onClear={() => clearCallType()}
-          onClearAll={() => clearCallType()}
+          filters={{ callType, engagement }}
+          labels={{ callType: 'Type', engagement: 'Engagement' }}
+          onClear={(key) => (key === 'engagement' ? clearEngagement() : clearCallType())}
+          onClearAll={() => { clearCallType(); clearEngagement(); }}
         />
 
         {/* ── Report table ── */}
@@ -218,6 +243,7 @@ export default function LogsReportPage() {
                 ),
               },
               { key: 'duration', label: 'Duration', align: 'right', searchable: false, render: (r) => <span className={r.duration ? 'text-gray-900' : 'text-gray-300'}>{formatDur(r.duration)}</span> },
+              { key: 'engagement', label: 'Engagement', searchable: false, render: (r) => <EngagementBadge engagement={r.engagement} /> },
               { key: 'notes', label: 'Notes', searchable: false, render: (r) => <p className={`truncate max-w-[160px] ${r.notes ? 'text-gray-600' : 'text-gray-300'}`}>{r.notes || '—'}</p> },
             ]}
             rows={rows}

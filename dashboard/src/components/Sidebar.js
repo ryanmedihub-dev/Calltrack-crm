@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { FEATURES } from "../lib/features";
 
 function Icon({ children, size = 15 }) {
   return (
@@ -277,7 +278,7 @@ const NAV = [
     label: "Leads",
     Ic: ic.Leads,
     children: [
-      { href: "/leads/live-data", label: "Live Data", Ic: ic.Live, live: true },
+      { href: "/leads/live-data", label: "Live Data", Ic: ic.Live, live: true, feature: "LEAD_POOL" },
       { href: "/leads/overview", label: "Overview", Ic: ic.Overview },
       { href: "/leads/pipeline", label: "Pipeline", Ic: ic.Pipeline },
       { href: "/leads/follow-ups", label: "Follow-ups", Ic: ic.Reports },
@@ -321,6 +322,14 @@ const NAV = [
   { href: "/activity", label: "Activity", Ic: ic.Activity },
   { href: "/settings", label: "Settings", Ic: ic.Settings },
 ];
+
+// A child is hidden when it names a feature flag that is currently off. Centralised here so
+// the active-check, the flyout height calc and the flyout item list can never disagree about
+// which children are visible.
+function visibleChildren(item) {
+  if (!item?.children) return [];
+  return item.children.filter((c) => !c.feature || FEATURES[c.feature]);
+}
 
 export default function Sidebar({
   collapsed,
@@ -389,7 +398,7 @@ export default function Sidebar({
     const POPUP_HEADER = 52;
     const POPUP_PAD = 16;
     const totalH =
-      POPUP_HEADER + popup.item.children.length * POPUP_ITEM_H + POPUP_PAD;
+      POPUP_HEADER + visibleChildren(popup.item).length * POPUP_ITEM_H + POPUP_PAD;
     const vh = typeof window !== "undefined" ? window.innerHeight : 800;
     let top = popup.anchorTop;
     if (top + totalH > vh - 12) top = Math.max(12, vh - totalH - 12);
@@ -462,9 +471,11 @@ export default function Sidebar({
             }
 
             if (item.children) {
+              const kids = visibleChildren(item);
+              if (kids.length === 0) return null;
               const parentActive =
                 isActive(item.href) ||
-                item.children.some((c) => isActive(c.href));
+                kids.some((c) => isActive(c.href));
               const isOpen = popup?.item.href === item.href;
 
               return (
@@ -718,7 +729,7 @@ export default function Sidebar({
 
               {/* Items */}
               <div>
-                {popup.item.children.map((child, idx) => {
+                {visibleChildren(popup.item).map((child, idx, arr) => {
                   const active = isActive(child.href);
                   return (
                     <Link
@@ -731,7 +742,7 @@ export default function Sidebar({
                       className="flex items-center gap-3 px-4 py-2.5 transition-colors"
                       style={{
                         borderBottom:
-                          idx < popup.item.children.length - 1
+                          idx < arr.length - 1
                             ? "1px solid #F8FAFC"
                             : "none",
                         background: active ? "#EFF6FF" : "transparent",

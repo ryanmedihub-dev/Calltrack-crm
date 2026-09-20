@@ -28,7 +28,7 @@ import { getPendingFollowUps } from './src/utils/callNotes';
 import { syncCallLogs, processPendingQueue, getPendingCount, flushPendingNoteUpdates } from './src/services/callLogService';
 import api, { setLogoutCallback } from './src/lib/api';
 import { setItem as mmkvSetItem } from './src/lib/storage';
-import { AUTO_SKIP_MS } from './src/constants';
+import { AUTO_SKIP_MS, FEATURES } from './src/constants';
 
 const { CallLogModule } = NativeModules;
 
@@ -311,11 +311,15 @@ function App() {
     setFollowUpBadge(list.length);
     scheduleFollowUpNotifications();
     // Piggyback the pool count on the same triggers (foreground, mount, post-call) so agents
-    // see leads waiting without having to open the tab to find out.
-    try {
-      const res = await api.get('/api/lead-pool/stats');
-      setLiveBadge(res.data?.data?.available || 0);
-    } catch {}
+    // see leads waiting without having to open the tab to find out. Skipped while the pool is
+    // paused — the route 404s now, and polling a dead endpoint on every trigger just burns
+    // battery and fills logs.
+    if (FEATURES.LEAD_POOL) {
+      try {
+        const res = await api.get('/api/lead-pool/stats');
+        setLiveBadge(res.data?.data?.available || 0);
+      } catch {}
+    }
   };
 
   const dismissPostCall = async () => {
