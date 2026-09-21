@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../../lib/api';
 import { parseUTC } from '../../../../lib/timezone';
+import { X } from 'lucide-react';
 import { STATUSES, STATUS_LABELS, statusStyle } from '../../../../lib/leadStatus';
 
 function LeadCard({ lead, onClick, index }) {
@@ -56,8 +57,8 @@ function LeadModal({ lead, onClose, onUpdate }) {
             <h3 className="font-bold text-lg leading-none text-gray-900">{lead.name}</h3>
             <p className="text-sm mt-1 text-gray-400">{lead.phone}{lead.company ? ` · ${lead.company}` : ''}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
-            ✕
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+            <X size={18} />
           </button>
         </div>
 

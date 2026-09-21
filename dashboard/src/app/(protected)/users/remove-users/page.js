@@ -16,6 +16,8 @@ const SpinnerIco = ({s=15}) => <Ico size={s} className="animate-spin"><line x1="
 const ROLE_COLORS = {
   admin:{ color:'#7C3AED', bg:'#F5F3FF' },
   manager:{ color:'#2563EB', bg:'#EFF6FF' },
+  tl:{ color:'#D97706', bg:'#FFFBEB' },
+  employee:{ color:'#16A34A', bg:'#F0FDF4' },
   agent:{ color:'#16A34A', bg:'#F0FDF4' },
   supervisor:{ color:'#D97706', bg:'#FFFBEB' },
 };

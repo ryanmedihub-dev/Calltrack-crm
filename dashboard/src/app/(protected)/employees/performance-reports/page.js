@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import api from '../../../../lib/api';
+import { Trophy } from 'lucide-react';
 import { StatCard, DataTable, ChartTip, Ico, UsersIco, PhoneIco, TrophyIco } from '../../../../components/report-shared';
 
 const ChevronRightIco = ({ s = 13 }) => <Ico size={s}><polyline points="9 18 15 12 9 6" /></Ico>;
@@ -10,7 +11,6 @@ const ChevronRightIco = ({ s = 13 }) => <Ico size={s}><polyline points="9 18 15 
 const PERIODS = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }];
 const RANK_COLORS = ['#F59E0B', '#94A3B8', '#B45309'];
 const RANK_BG = ['rgba(245,158,11,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
-const MEDALS = ['🥇', '🥈', '🥉'];
 const GRADIENT_COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE'].reverse();
 
 export default function PerformanceReportsPage() {
@@ -147,7 +147,15 @@ export default function PerformanceReportsPage() {
               {
                 key: 'rank', label: 'Rank', sortable: false, searchable: false,
                 render: (r) => r.rank <= 3
-                  ? <span className="text-lg">{MEDALS[r.rank - 1]}</span>
+                  ? (
+                    <span
+                      className="inline-flex items-center justify-center w-6 h-6 rounded-full"
+                      style={{ background: RANK_BG[r.rank - 1], color: RANK_COLORS[r.rank - 1] }}
+                      title={`Rank ${r.rank}`}
+                    >
+                      <Trophy size={14} />
+                    </span>
+                  )
                   : <span className="font-bold text-xs text-gray-400">#{r.rank}</span>,
               },
               {

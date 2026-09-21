@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../lib/api';
 import { fmtDateTime } from '../lib/timezone';
+import { TrendingUp, TrendingDown } from 'lucide-react';
 
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
@@ -132,8 +133,8 @@ export function StatCard({ label, value, sub, color, icon, delta, loading = fals
           {icon}
         </div>
         {delta != null && (
-          <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${delta >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
-            {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}%
+          <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${delta >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
+            {delta >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />} {Math.abs(delta)}%
           </span>
         )}
       </div>

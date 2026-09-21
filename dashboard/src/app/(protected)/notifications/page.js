@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import { parseUTC } from '../../../lib/timezone';
+import { AlertCircle, Calendar, PhoneMissed, RefreshCw, Target, BarChart3 } from 'lucide-react';
 
 const READ_KEY  = 'calltrack_notif_read';
 const PREF_KEY  = 'ct_notif_prefs';
@@ -40,7 +41,7 @@ function buildNotifications(calls, leads) {
         title:`Follow-up ${overdue?'overdue':'today'}: ${l.name}`,
         body:`${l.phone}${l.lastCallNote?` · "${l.lastCallNote}"` : ''}`,
         time:new Date(l.followUpDate).toISOString(),
-        icon:overdue?'🔴':'📅',
+        icon: overdue ? <AlertCircle size={18} /> : <Calendar size={18} />,
       });
     });
 
@@ -50,7 +51,7 @@ function buildNotifications(calls, leads) {
     .forEach(c=>{
       list.push({
         id:`missed_${c._id}`, type:'missed',
-        color:'#EF4444', bg:'rgba(220,38,38,0.08)', icon:'📵',
+        color:'#EF4444', bg:'rgba(220,38,38,0.08)', icon: <PhoneMissed size={18} />,
         title:`Missed call from ${c.contactName||c.contactNumber}`,
         body:`${c.employeeName} · ${parseUTC(c.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}`,
         time:c.timestamp,
@@ -61,7 +62,7 @@ function buildNotifications(calls, leads) {
   if (recentSync.length > 0) {
     list.push({
       id:`sync_${Date.now()}`, type:'callSync',
-      color:'#2563EB', bg:'rgba(37,99,235,0.08)', icon:'🔄',
+      color:'#2563EB', bg:'rgba(37,99,235,0.08)', icon: <RefreshCw size={18} />,
       title:`${recentSync.length} call${recentSync.length!==1?'s':''} synced in the last hour`,
       body:'Call logs are up to date.',
       time:new Date().toISOString(),
@@ -217,15 +218,15 @@ export default function NotificationsPage() {
           </div>
           <div style={{ borderBottom:'1px solid #E2E8F0' }}>
             {[
-              { key:'newLead',      label:'New Lead Assigned',   desc:'When a lead is assigned to you', icon:'🎯' },
-              { key:'followUp',     label:'Follow-up Reminders', desc:'Upcoming or overdue follow-ups',  icon:'📅' },
-              { key:'missed',       label:'Missed Call Alerts',  desc:'Missed calls in the last 24h',   icon:'📵' },
-              { key:'callSync',     label:'Call Sync Events',    desc:'When call logs sync from mobile', icon:'🔄' },
-              { key:'weeklyReport', label:'Weekly Report',       desc:'Performance summary every week',  icon:'📊' },
+              { key:'newLead',      label:'New Lead Assigned',   desc:'When a lead is assigned to you', icon: <Target size={18} className="text-blue-600" /> },
+              { key:'followUp',     label:'Follow-up Reminders', desc:'Upcoming or overdue follow-ups',  icon: <Calendar size={18} className="text-amber-600" /> },
+              { key:'missed',       label:'Missed Call Alerts',  desc:'Missed calls in the last 24h',   icon: <PhoneMissed size={18} className="text-red-500" /> },
+              { key:'callSync',     label:'Call Sync Events',    desc:'When call logs sync from mobile', icon: <RefreshCw size={18} className="text-blue-600" /> },
+              { key:'weeklyReport', label:'Weekly Report',       desc:'Performance summary every week',  icon: <BarChart3 size={18} className="text-indigo-600" /> },
             ].map(({ key, label, desc, icon }) => (
               <div key={key} className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom:'1px solid #F1F5F9' }}>
                 <div className="flex items-start gap-3 mr-3 min-w-0">
-                  <span className="text-lg flex-shrink-0 mt-0.5">{icon}</span>
+                  <span className="flex-shrink-0 mt-0.5">{icon}</span>
                   <div className="min-w-0">
                     <p className="text-sm font-medium leading-none" style={{ color:'#0F172A' }}>{label}</p>
                     <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>{desc}</p>

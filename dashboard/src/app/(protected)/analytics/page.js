@@ -11,6 +11,7 @@ import { utcHourToISTLabel } from '../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DataTable, Truncate, TLFilter } from '../../../components/report-shared';
 import DateRangeFilter, { formatRangeLabel } from '../../../components/DateRangeFilter';
+import { BarChart3 } from 'lucide-react';
 
 /* ── Icons ───────────────────────────────────────── */
 const Ico = ({ size = 16, children, className = '' }) => (
@@ -415,7 +416,7 @@ export default function AnalyticsPage() {
                 <p className="text-xs text-gray-500 mt-0.5">Today vs Yesterday vs Last Week</p>
               </div>
               <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-full border border-blue-100">
-                <span className="text-xs font-semibold text-blue-600">📊 Bar</span>
+                <span className="text-xs font-semibold text-blue-600 flex items-center gap-1.5"><BarChart3 size={13} /> Bar</span>
               </div>
             </div>
             <ResponsiveContainer width="100%" height={240}>
@@ -860,14 +861,15 @@ export default function AnalyticsPage() {
                 {
                   key: 'isActive', label: 'Status', searchable: false,
                   render: (emp) => (
-                    <span
-                      className={`text-xs font-medium px-2.5 py-1 rounded-full ${emp.isActive
-                          ? 'bg-green-50 text-green-600 border border-green-100'
-                          : 'bg-gray-100 text-gray-500 border border-gray-200'
-                        }`}
-                    >
-                      {emp.isActive ? '🟢 Active' : '⚪ Inactive'}
-                    </span>
+                      <span
+                        className={`text-xs font-medium px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 ${emp.isActive
+                            ? 'bg-green-50 text-green-600 border border-green-100'
+                            : 'bg-gray-100 text-gray-500 border border-gray-200'
+                          }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${emp.isActive ? 'bg-green-500' : 'bg-gray-400'}`} />
+                        {emp.isActive ? 'Active' : 'Inactive'}
+                      </span>
                   ),
                 },
               ]}

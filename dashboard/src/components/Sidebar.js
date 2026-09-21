@@ -221,29 +221,29 @@ const ic = {
   ),
 };
 
+// ── Role-aware navigation ─────────────────────────────────────────────────────
+// Each item may carry `roles: ['admin', 'manager', ...]` to restrict visibility.
+// Items without a `roles` field are visible to all roles.
+// `null` separators are filtered automatically after role-based pruning.
+const ADMIN_ROLES = ['admin'];
+const MGMT_ROLES  = ['admin', 'manager'];
+
 const NAV = [
   { href: "/dashboard", label: "Dashboard", Ic: ic.Dashboard },
-  { href: "/analytics", label: "Analytics", Ic: ic.Analytics },
+  { href: "/analytics", label: "Analytics", Ic: ic.Analytics, roles: ADMIN_ROLES },
+  null,
+  // ── Team Leaders — Manager-only dedicated page ───────────────────────────────
+  { href: "/team-leads", label: "Team Leaders", Ic: ic.Employees, roles: ['manager'] },
   null,
   {
     href: "/calls",
     label: "Calls",
     Ic: ic.CallLogs,
     children: [
-      { href: "/calls/overview", label: "Overview", Ic: ic.Overview },
-      { href: "/calls/live", label: "Live Monitor", Ic: ic.Live, live: true },
-      {
-        href: "/calls/unsynced",
-        label: "Not Synced Calls",
-        Ic: ic.AlertCircle,
-      },
-      {
-        href: "/reports/Employess",
-        label: "Agents Report",
-        Ic: ic.AgentReport,
-      },
-      { href: "/reports/calllogs", label: "Calls Report", Ic: ic.LogsReport },
-      { href: "/reports/client", label: "Client Report", Ic: ic.Client },
+      { href: "/calls/overview",     label: "Overview",         Ic: ic.Overview },
+      { href: "/calls/live",         label: "Live Monitor",     Ic: ic.Live,        live: true },
+      { href: "/calls/unsynced",     label: "Not Synced Calls", Ic: ic.AlertCircle, roles: ADMIN_ROLES },
+      { href: "/calls/agent-report", label: "Agent Report",     Ic: ic.AgentReport },
     ],
   },
   null,
@@ -252,24 +252,12 @@ const NAV = [
     label: "Employees",
     Ic: ic.Employees,
     children: [
-      { href: "/employees/overview", label: "Overview", Ic: ic.Overview },
-      {
-        href: "/employees/leaderboard",
-        label: "Leaderboard",
-        Ic: ic.Leaderboard,
-      },
-      { href: "/calls/targets", label: "Daily Targets", Ic: ic.Targets },
-      { href: "/reports/lead", label: "Leads Report", Ic: ic.Leads },
-      {
-        href: "/employees/performance-report",
-        label: "Performance Report",
-        Ic: ic.AttemptReport,
-      },
-      {
-        href: "/reports/Employess",
-        label: "Workload Report",
-        Ic: ic.Activity,
-      },
+      { href: "/employees/overview",          label: "Overview",            Ic: ic.Overview },
+      { href: "/employees/leaderboard",        label: "Leaderboard",         Ic: ic.Leaderboard },
+      { href: "/calls/targets",               label: "Daily Targets",       Ic: ic.Targets,      roles: ADMIN_ROLES },
+      { href: "/reports/lead",                label: "Leads Report",        Ic: ic.Leads },
+      { href: "/employees/performance-report",label: "Performance Report",  Ic: ic.AttemptReport },
+      { href: "/reports/Employess",           label: "Workload Report",     Ic: ic.Activity },
     ],
   },
   null,
@@ -292,36 +280,73 @@ const NAV = [
     href: "/users",
     label: "Users",
     Ic: ic.AgentReport,
+    roles: ADMIN_ROLES,
     children: [
-      { href: "/users/overview", label: "Overview", Ic: ic.Overview },
-      { href: "/users/active", label: "Active Users", Ic: ic.UserCheck },
+      { href: "/users/overview",     label: "Overview",     Ic: ic.Overview },
+      { href: "/users/hierarchy",    label: "Hierarchy",    Ic: ic.Employees },
+      { href: "/users/active",       label: "Active Users", Ic: ic.UserCheck },
       { href: "/users/update-users", label: "Update Users", Ic: ic.UserEdit },
       { href: "/users/remove-users", label: "Remove Users", Ic: ic.UserMinus },
     ],
   },
-
   null,
   {
     href: "/reports",
     label: "Reports",
     Ic: ic.Reports,
     children: [
-      { href: "/reports/client", label: "Client", Ic: ic.Client },
-      { href: "/reports/lead", label: "Lead", Ic: ic.Leads },
-      { href: "/reports/Employess", label: "Employees", Ic: ic.Employees },
-      { href: "/reports/calllogs", label: "Call Logs", Ic: ic.CallLogs },
-      { href: "/reports/users", label: "Users", Ic: ic.AgentReport },
-      { href: "/reports/export", label: "Export Center", Ic: ic.Export },
+      { href: "/reports/client",  label: "Client",       Ic: ic.Client },
+      { href: "/reports/lead",    label: "Lead",         Ic: ic.Leads },
+      { href: "/reports/Employess",label: "Employees",   Ic: ic.Employees },
+      { href: "/reports/calllogs",label: "Call Logs",    Ic: ic.CallLogs },
+      { href: "/reports/users",   label: "Users",        Ic: ic.AgentReport, roles: ADMIN_ROLES },
+      { href: "/reports/export",  label: "Export Center",Ic: ic.Export },
     ],
   },
   null,
-  { href: "/downloads", label: "Downloads", Ic: ic.Export },
+  { href: "/downloads",     label: "Downloads",     Ic: ic.Export },
   { href: "/notifications", label: "Notifications", Ic: ic.Bell },
-  { href: "/scripts", label: "Scripts", Ic: ic.Scripts },
+  { href: "/scripts",       label: "Scripts",       Ic: ic.Scripts, roles: ADMIN_ROLES },
   null,
-  { href: "/activity", label: "Activity", Ic: ic.Activity },
+  { href: "/activity", label: "Activity", Ic: ic.Activity, roles: ADMIN_ROLES },
   { href: "/settings", label: "Settings", Ic: ic.Settings },
 ];
+
+// Returns NAV items filtered for the given role, stripping orphaned null separators.
+function getNavForRole(role) {
+  const isVisible = (item) => {
+    if (!item.roles) return true;
+    return item.roles.includes(role);
+  };
+
+  // Filter items; for parent items also filter their children
+  const filtered = NAV.map((item) => {
+    if (item === null) return null;
+    if (!isVisible(item)) return null;
+    if (item.children) {
+      const visibleChildren = item.children.filter(isVisible);
+      if (visibleChildren.length === 0) return null;
+      return { ...item, children: visibleChildren };
+    }
+    return item;
+  });
+
+  // Remove consecutive/leading/trailing null separators
+  const cleaned = [];
+  let lastWasNull = true; // treat start as if null so leading separators are stripped
+  for (const item of filtered) {
+    if (item === null) {
+      if (!lastWasNull) cleaned.push(null);
+      lastWasNull = true;
+    } else {
+      cleaned.push(item);
+      lastWasNull = false;
+    }
+  }
+  // Strip trailing null
+  while (cleaned.length && cleaned[cleaned.length - 1] === null) cleaned.pop();
+  return cleaned;
+}
 
 // A child is hidden when it names a feature flag that is currently off. Centralised here so
 // the active-check, the flyout height calc and the flyout item list can never disagree about
@@ -407,6 +432,16 @@ export default function Sidebar({
 
   const sidebarW = collapsed ? 56 : 196;
 
+  const navRole = (user?.role === 'admin' || user?.isSuperAdmin)
+    ? 'admin'
+    : user?.role === 'manager'
+    ? 'manager'
+    : user?.role === 'tl'
+    ? 'tl'
+    : user?.role === 'employee'
+    ? 'employee'
+    : (user?.role || 'admin');
+
   return (
     <>
       <aside
@@ -442,7 +477,7 @@ export default function Sidebar({
               CallTrack
             </p>
             <p className="text-[10px] mt-[3px]" style={{ color: "#94A3B8" }}>
-              Manager Panel
+              {(user?.role === 'admin' || user?.isSuperAdmin) ? 'Admin Panel' : user?.role === 'manager' ? 'Manager Panel' : user?.role === 'tl' ? 'TL Panel' : 'Operations'}
             </p>
           </div>
           <button
@@ -459,7 +494,7 @@ export default function Sidebar({
           className="flex-1 mt-5 overflow-y-auto py-2 px-2"
           style={{ scrollbarWidth: "none" }}
         >
-          {NAV.map((item, i) => {
+          {getNavForRole(navRole).map((item, i) => {
             if (item === null) {
               return (
                 <div

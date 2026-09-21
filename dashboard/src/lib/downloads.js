@@ -1,4 +1,6 @@
+import React from 'react';
 import toast from 'react-hot-toast';
+import { Download } from 'lucide-react';
 import api from './api';
 
 const STARTED_MSG = 'Your download has started in the background — check the Downloads page for your file.';
@@ -31,7 +33,7 @@ async function extractErrorMessage(err) {
 
 // For endpoints that stream a file directly (e.g. /api/calls/export, /api/leads/export).
 export async function triggerServerExport({ endpoint, params, filename }) {
-  toast(STARTED_MSG, { icon: '⬇️', duration: 4000 });
+  toast(STARTED_MSG, { icon: <Download size={18} className="text-blue-600" />, duration: 4000 });
   try {
     const res = await api.get(endpoint, { params, responseType: 'blob' });
     saveBlob(res.data, filename);
@@ -44,7 +46,7 @@ export async function triggerServerExport({ endpoint, params, filename }) {
 // For CSVs already built client-side from data the page already fetched —
 // saves it immediately (unchanged UX) and also logs it into the Downloads Center.
 export async function triggerLocalExport({ label, filename, csv, mimeType = 'text/csv' }) {
-  toast(STARTED_MSG, { icon: '⬇️', duration: 4000 });
+  toast(STARTED_MSG, { icon: <Download size={18} className="text-blue-600" />, duration: 4000 });
   saveBlob(new Blob([csv], { type: mimeType }), filename);
   try {
     await api.post('/api/downloads/register', { label, filename, mimeType, content: csv });

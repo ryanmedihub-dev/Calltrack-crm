@@ -1,6 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import api from '../../../lib/api';
 
 function Ico({ size=16, children }) {
@@ -14,11 +15,12 @@ const TrashIco   = ({s=22}) => <Ico size={s}><polyline points="3 6 5 6 21 6"/><p
 const ReportIco  = ({s=22}) => <Ico size={s}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Ico>;
 
 const NAV_CARDS = [
-  { href:'/users/overview',      label:'Overview',      desc:'See all system users at a glance', Icon:UsersIco,    color:'#2563EB', bg:'#EFF6FF' },
-  { href:'/users/active',        label:'Active Users',  desc:'View currently active and online users', Icon:ActivityIco, color:'#16A34A', bg:'#F0FDF4' },
-  { href:'/users/update-users',  label:'Update Users',  desc:'Edit user profiles, roles, and details', Icon:EditIco,     color:'#D97706', bg:'#FFFBEB' },
-  { href:'/users/remove-users',  label:'Remove Users',  desc:'Deactivate or permanently remove users', Icon:TrashIco,    color:'#DC2626', bg:'#FFF1F2' },
-  { href:'/reports/users',       label:'Users Report',  desc:'Detailed report on user accounts and roles', Icon:ReportIco,   color:'#7C3AED', bg:'#F5F3FF' },
+  { href:'/users/overview',      label:'Overview',             desc:'See all system users at a glance', Icon:UsersIco,    color:'#2563EB', bg:'#EFF6FF' },
+  { href:'/users/hierarchy',     label:'Hierarchy Management', desc:'Assign and organize Managers, TLs, and Agents', Icon:UsersIco, color:'#0D9488', bg:'#F0FDFA' },
+  { href:'/users/active',        label:'Active Users',         desc:'View currently active and online users', Icon:ActivityIco, color:'#16A34A', bg:'#F0FDF4' },
+  { href:'/users/update-users',  label:'Update Users',         desc:'Edit user profiles, roles, and details', Icon:EditIco,     color:'#D97706', bg:'#FFFBEB' },
+  { href:'/users/remove-users',  label:'Remove Users',         desc:'Deactivate or permanently remove users', Icon:TrashIco,    color:'#DC2626', bg:'#FFF1F2' },
+  { href:'/reports/users',       label:'Users Report',         desc:'Detailed report on user accounts and roles', Icon:ReportIco,   color:'#7C3AED', bg:'#F5F3FF' },
 ];
 
 export default function UsersPage() {
@@ -72,7 +74,7 @@ export default function UsersPage() {
               <p className="font-bold text-sm" style={{ color:'#0F172A' }}>{card.label}</p>
               <p className="text-xs mt-0.5 leading-relaxed" style={{ color:'#94A3B8' }}>{card.desc}</p>
             </div>
-            <span className="text-lg flex-shrink-0 mt-0.5 transition-transform group-hover:translate-x-0.5" style={{ color:'#CBD5E1' }}>›</span>
+            <ChevronRight size={18} className="flex-shrink-0 mt-0.5 transition-transform group-hover:translate-x-0.5" style={{ color:'#CBD5E1' }} />
           </Link>
         ))}
       </div>

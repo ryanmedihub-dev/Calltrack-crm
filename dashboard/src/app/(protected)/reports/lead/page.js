@@ -1598,7 +1598,7 @@ function LeadReportsPageContent() {
                 <DataTable
                   loading={loading}
                   showRowNumber
-                  emptyTitle="Everyone's been contacted 🎉"
+                  emptyTitle="Everyone's been contacted"
                   capNotice={
                     report?.total > uncontactedRows.length
                       ? `Showing ${uncontactedRows.length.toLocaleString()} of ${report.total.toLocaleString()} — narrow the date range or filters to see the rest.`

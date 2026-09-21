@@ -4,13 +4,15 @@ const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isAdmin, requireManagement, isSystemAdmin } = require('../middleware/auth');
+const { getScopedEmployeeIds, validateEmployeeInScope, resolveEmployeeFilter } = require('../lib/scope');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
+const generateClientCallId = require('../lib/generateClientCallId');
 const { FEATURES } = require('../config/features');
 const { BANDS, deriveEngagement } = require('../lib/engagement');
 const cache = require('../lib/cache');
@@ -83,9 +85,15 @@ function resolveStatsRange(range, startDate, endDate) {
 }
 
 // Aggregation-based period stats — no full doc loads
-async function computePeriodStats(start, end, employeeId) {
+async function computePeriodStats(start, end, employeeScope) {
   const match = { timestamp: { $gte: start, $lt: end } };
-  if (employeeId) match.employeeId = new mongoose.Types.ObjectId(employeeId);
+  if (employeeScope) {
+    if (Array.isArray(employeeScope)) {
+      match.employeeId = { $in: employeeScope.map((id) => new mongoose.Types.ObjectId(id)) };
+    } else {
+      match.employeeId = new mongoose.Types.ObjectId(employeeScope);
+    }
+  }
 
   const [summary, perHour, employees, notPickupRes, neverAttRes] = await Promise.all([
     CallLog.aggregate([
@@ -267,7 +275,21 @@ router.post('/sync', protect, async (req, res) => {
 
     const docs = calls
       .map((c) => {
+        const rawPhone = typeof c.contactNumber === 'string' ? c.contactNumber.trim() : (c.contactNumber ? String(c.contactNumber).trim() : '');
         const ts = new Date(c.timestamp);
+        const tsMs = ts.getTime();
+        const isValidTs = typeof tsMs === 'number' && Number.isFinite(tsMs);
+
+        // clientCallId semantics:
+        // - Non-empty string: trim and preserve
+        // - Null / undefined / empty: generate deterministic fallback from raw incoming phone + timestampMs
+        let effectiveClientCallId = null;
+        if (typeof c.clientCallId === 'string' && c.clientCallId.trim()) {
+          effectiveClientCallId = c.clientCallId.trim();
+        } else if (rawPhone && isValidTs) {
+          effectiveClientCallId = generateClientCallId(rawPhone, tsMs);
+        }
+
         // `hasRemark` lets an empty string through as a real edit (the user cleared the
         // remark) while still distinguishing it from "this sync carries no remark for this
         // call". Older app builds send neither flag, so fall back to notes being present.
@@ -278,7 +300,7 @@ router.post('/sync', protect, async (req, res) => {
         const editedAt = c.notesUpdatedAt ? new Date(c.notesUpdatedAt) : ts;
         const band = deriveEngagement({ callType: c.callType, duration: c.duration });
         return {
-          contactNumber: normalizePhone(c.contactNumber) || c.contactNumber,
+          contactNumber: normalizePhone(rawPhone) || rawPhone,
           contactName:   c.contactName,
           callType:      c.callType,
           duration:      c.duration,
@@ -287,7 +309,7 @@ router.post('/sync', protect, async (req, res) => {
           hasRemark,
           callStatus:    c.callStatus,
           notesEditedAt: Number.isNaN(editedAt.getTime()) ? ts : editedAt,
-          clientCallId:  c.clientCallId || null,
+          clientCallId:  effectiveClientCallId,
           submittedViaPostCall: !!c.submittedViaPostCall,
           employeeId:    req.user._id,
           synced:        true,
@@ -630,22 +652,29 @@ router.post('/sync', protect, async (req, res) => {
   }
 });
 
-// GET /api/calls — all call logs with filters (manager)
+// GET /api/calls — all call logs with filters (scoped by hierarchy)
 //
 // tlName/durationMin/durationMax/connectedOnly and the leadId populate were
 // added for ryan-crm's Owner Panel call report (/owner/calls/report), which
 // needs the same shape as this route already returns plus team-level
 // filtering and a "linked lead" column — additive, nothing existing changes.
-router.get('/', protect, isManager, async (req, res) => {
+router.get('/', protect, requireManagement, async (req, res) => {
   try {
     const {
       employeeId, callType, startDate, endDate, search, unsynced,
       tlName, durationMin, durationMax, connectedOnly, engagement,
       page = 1, limit = 20,
     } = req.query;
-    const filter = {};
-    if (employeeId) filter.employeeId = employeeId;
-    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, employeeId, 'employeeId');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    const filter = { ...scopeFilter };
+    // If a specific tlName is requested AND no employeeId was already set by
+    // scopeFilter (i.e. the requesting user is admin/manager viewing a TL's team),
+    // narrow the scope to that TL's direct reports.
+    if (tlName && !filter.employeeId) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
     if (engagement) filter.engagement = engagement;
     // "Unsynced" here means "no matching lead was auto-linked" (leadId is null),
@@ -698,7 +727,7 @@ router.get('/', protect, isManager, async (req, res) => {
 // GET /api/calls/stats — full dashboard stats (today/yesterday/lastWeek + a
 // filterable `selected` bucket driven by ?range=today|tomorrow|thisWeek|custom
 // (custom also takes ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD, IST calendar dates)
-router.get('/stats', protect, isManager, async (req, res) => {
+router.get('/stats', protect, requireManagement, async (req, res) => {
   try {
     const { range = 'today', startDate, endDate, employee } = req.query;
     const employeeId = employee && mongoose.Types.ObjectId.isValid(employee) ? employee : null;
@@ -827,9 +856,14 @@ router.get('/daily-by-employee', protect, isManager, async (req, res) => {
 });
 
 // GET /api/calls/realtime — latest 50 calls
-router.get('/realtime', protect, isManager, async (req, res) => {
+router.get('/realtime', protect, requireManagement, async (req, res) => {
   try {
-    const callsRaw = await CallLog.find().populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
+    const filter = {};
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    if (scopedEmpIds !== null) {
+      filter.employeeId = { $in: scopedEmpIds };
+    }
+    const callsRaw = await CallLog.find(filter).populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
     return res.json({ success: true, data: callsRaw.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -910,18 +944,30 @@ router.get('/my-stats', protect, async (req, res) => {
 
 function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
 
-// GET /api/calls/export — CSV export (manager); also registered in the Downloads Center.
+// GET /api/calls/export — CSV export (scoped by hierarchy); also registered in the Downloads Center.
 // Streams the response (res.write per row) instead of buffering the whole file in
 // memory, so large exports start downloading immediately and don't hold the full
 // CSV in Node memory. A capped copy is also accumulated to register with the
 // Downloads Center for re-download, matching the existing 8MB job-content limit.
-router.get('/export', protect, isManager, async (req, res) => {
+router.get('/export', protect, requireManagement, async (req, res) => {
   let job = null;
   try {
     const { employeeId, callType, startDate, endDate, tlName, source } = req.query;
-    const filter = {};
-    if (employeeId) filter.employeeId = employeeId;
-    else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, employeeId, 'employeeId');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    const filter = { ...scopeFilter };
+    if (tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (filter.employeeId && filter.employeeId.$in) {
+        const scopedStrs = new Set(filter.employeeId.$in.map((id) => id.toString()));
+        filter.employeeId = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())) };
+      } else {
+        filter.employeeId = { $in: tlEmpIds };
+      }
+    }
     if (callType)   filter.callType   = callType;
     if (startDate || endDate) {
       filter.timestamp = {};
@@ -974,10 +1020,10 @@ router.get('/export', protect, isManager, async (req, res) => {
     const cursor = CallLog.find(filter).sort({ timestamp: -1, _id: -1 }).lean().cursor();
     for await (const doc of cursor) {
       const employee = employeeMap.get(String(doc.employeeId));
-      const d = new Date(doc.timestamp);
+      const sourceVal = doc.leadId ? leadSourceMap.get(String(doc.leadId)) || '' : '';
       const line = [
-        d.toLocaleDateString('en-IN'),
-        d.toLocaleTimeString('en-IN'),
+        csvEsc(doc.timestamp ? new Date(doc.timestamp).toLocaleDateString('en-IN') : ''),
+        csvEsc(doc.timestamp ? new Date(doc.timestamp).toLocaleTimeString('en-IN') : ''),
         csvEsc(employee?.name),
         csvEsc(employee?.tlName),
         csvEsc(doc.contactName),
@@ -986,13 +1032,11 @@ router.get('/export', protect, isManager, async (req, res) => {
         csvEsc(doc.callStatus),
         fmtDuration(doc.duration),
         csvEsc(doc.notes),
-        doc.notesUpdatedAt
-          ? csvEsc(new Date(doc.notesUpdatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))
-          : '',
+        doc.notesUpdatedAt ? new Date(doc.notesUpdatedAt).toISOString() : '',
         csvEsc(doc.notesUpdatedByName),
-        csvEsc(doc.leadId ? leadSourceMap.get(String(doc.leadId)) : ''),
+        csvEsc(sourceVal),
         doc.leadId ? 'Yes' : 'No',
-        doc.synced ? 'Yes' : 'No',
+        doc.synced ? 'Yes' : 'No'
       ].join(',') + '\n';
 
       outBuf += line;
@@ -1044,15 +1088,16 @@ router.get('/pending-followups', protect, async (req, res) => {
   }
 });
 
-// PATCH /api/calls/:id/notes — add notes or status to a call log
+// PATCH /api/calls/:id/notes — add notes or status to a call log (write operation)
 router.patch('/:id/notes', protect, async (req, res) => {
   try {
     const { notes, callStatus, followUpDate, notesUpdatedAt } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    const inScope = isOwner || (await validateEmployeeInScope(req.user, call.employeeId));
+    if (!inScope) {
+      return res.status(403).json({ success: false, error: 'Access denied: call outside your hierarchy' });
     }
 
     // Last-write-wins, same rule as POST /sync. The offline note queue can retry a PATCH
@@ -1110,7 +1155,7 @@ router.delete('/:id', protect, async (req, res) => {
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
     const isOwner = call.employeeId.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
+    if (req.user.role !== 'admin' && !isOwner) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
     await call.deleteOne();
@@ -1127,7 +1172,12 @@ router.get('/history/:phoneNumber', protect, async (req, res) => {
   try {
     const number = normalizePhone(req.params.phoneNumber) || req.params.phoneNumber;
     const filter = { contactNumber: number };
-    if (req.user.role !== 'manager') filter.employeeId = req.user._id;
+    if (req.user.role === 'employee') {
+      filter.employeeId = req.user._id;
+    } else if (req.user.role === 'manager' || req.user.role === 'tl') {
+      const scopedEmpIds = await getScopedEmployeeIds(req.user);
+      filter.employeeId = { $in: scopedEmpIds };
+    }
     const calls = await CallLog.find(filter)
       .populate('employeeId', 'name phone tlName')
       .sort({ timestamp: -1 })
@@ -1140,10 +1190,10 @@ router.get('/history/:phoneNumber', protect, async (req, res) => {
 
 // GET /api/calls/employee/:id
 router.get('/employee/:id', protect, async (req, res) => {
-  const isManagerRole = req.user.role === 'manager';
   const isSelf = req.user._id.toString() === req.params.id;
-  if (!isManagerRole && !isSelf) {
-    return res.status(403).json({ success: false, error: 'Access denied' });
+  const inScope = isSelf || (await validateEmployeeInScope(req.user, req.params.id));
+  if (!inScope) {
+    return res.status(403).json({ success: false, error: 'Access denied: employee outside your hierarchy' });
   }
   try {
     const { callType, startDate, endDate, page = 1, limit = 20 } = req.query;

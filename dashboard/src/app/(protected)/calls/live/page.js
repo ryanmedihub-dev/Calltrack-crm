@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import Pusher from 'pusher-js';
 import {
   BarChart,
@@ -18,6 +18,7 @@ import {
 import api from '../../../../lib/api';
 import { parseUTC } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
+import { PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff, Phone, TrendingUp } from 'lucide-react';
 
 function formatDur(sec) {
   if (!sec) return '0s';
@@ -67,11 +68,26 @@ const TYPE_BG = {
   rejected: 'rgba(139,92,246,0.10)',
 };
 const TYPE_ICON = {
-  incoming: '📥',
-  outgoing: '📤',
-  missed: '❌',
-  rejected: '🚫',
+  incoming: PhoneIncoming,
+  outgoing: PhoneOutgoing,
+  missed: PhoneMissed,
+  rejected: PhoneOff,
 };
+
+function LiveCallTypeBadge({ callType }) {
+  const IconComponent = TYPE_ICON[callType] || Phone;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
+      style={{
+        background: TYPE_BG[callType] || '#F1F5F9',
+        color: TYPE_COLOR[callType] || '#64748B',
+      }}
+    >
+      <IconComponent size={11} /> {callType}
+    </span>
+  );
+}
 const AVATAR_COLORS = [
   '#2563EB',
   '#16A34A',
@@ -101,34 +117,144 @@ function Ico({ size = 16, children, className = '' }) {
   );
 }
 
-const KpiCard = ({ label, value, sub, color = '#2563EB', bg = '#EFF6FF', icon, delay = 0 }) => {
+const KPI_THEMES = {
+  'Calls Today': {
+    topBar: 'bg-gradient-to-r from-blue-600 to-indigo-600',
+    bgGrad: 'bg-gradient-to-br from-blue-50/40 via-white to-white',
+    borderColor: 'border-blue-100 hover:border-blue-300',
+    iconBg: 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/25',
+    shadowHover: 'hover:shadow-blue-500/10',
+    accentColor: '#2563EB',
+    defaultSub: 'Total call activity',
+  },
+  'Connected': {
+    topBar: 'bg-gradient-to-r from-emerald-500 to-teal-500',
+    bgGrad: 'bg-gradient-to-br from-emerald-50/40 via-white to-white',
+    borderColor: 'border-emerald-100 hover:border-emerald-300',
+    iconBg: 'bg-gradient-to-br from-emerald-600 to-teal-600 shadow-emerald-500/25',
+    shadowHover: 'hover:shadow-emerald-500/10',
+    accentColor: '#16A34A',
+    barColor: 'bg-emerald-500',
+  },
+  'Incoming': {
+    topBar: 'bg-gradient-to-r from-teal-500 to-cyan-600',
+    bgGrad: 'bg-gradient-to-br from-teal-50/40 via-white to-white',
+    borderColor: 'border-teal-100 hover:border-teal-300',
+    iconBg: 'bg-gradient-to-br from-teal-600 to-cyan-600 shadow-teal-500/25',
+    shadowHover: 'hover:shadow-teal-500/10',
+    accentColor: '#0D9488',
+    defaultSub: 'Inbound calls received',
+  },
+  'Outgoing': {
+    topBar: 'bg-gradient-to-r from-amber-500 to-orange-500',
+    bgGrad: 'bg-gradient-to-br from-amber-50/40 via-white to-white',
+    borderColor: 'border-amber-100 hover:border-amber-300',
+    iconBg: 'bg-gradient-to-br from-amber-500 to-orange-500 shadow-amber-500/25',
+    shadowHover: 'hover:shadow-amber-500/10',
+    accentColor: '#D97706',
+    defaultSub: 'Outbound dialed calls',
+  },
+  'Missed': {
+    topBar: 'bg-gradient-to-r from-rose-500 to-red-600',
+    bgGrad: 'bg-gradient-to-br from-rose-50/40 via-white to-white',
+    borderColor: 'border-rose-100 hover:border-rose-300',
+    iconBg: 'bg-gradient-to-br from-rose-600 to-red-600 shadow-rose-500/25',
+    shadowHover: 'hover:shadow-rose-500/10',
+    accentColor: '#DC2626',
+    barColor: 'bg-rose-500',
+  },
+  'Rejected': {
+    topBar: 'bg-gradient-to-r from-purple-500 to-violet-600',
+    bgGrad: 'bg-gradient-to-br from-purple-50/40 via-white to-white',
+    borderColor: 'border-purple-100 hover:border-purple-300',
+    iconBg: 'bg-gradient-to-br from-purple-600 to-violet-600 shadow-purple-500/25',
+    shadowHover: 'hover:shadow-purple-500/10',
+    accentColor: '#7C3AED',
+    defaultSub: 'Declined or busy',
+  },
+  'Active Agents': {
+    topBar: 'bg-gradient-to-r from-sky-500 to-blue-600',
+    bgGrad: 'bg-gradient-to-br from-sky-50/40 via-white to-white',
+    borderColor: 'border-sky-100 hover:border-sky-300',
+    iconBg: 'bg-gradient-to-br from-sky-600 to-blue-600 shadow-sky-500/25',
+    shadowHover: 'hover:shadow-sky-500/10',
+    accentColor: '#0891B2',
+    barColor: 'bg-sky-500',
+  },
+  'Avg Duration': {
+    topBar: 'bg-gradient-to-r from-amber-500 to-yellow-600',
+    bgGrad: 'bg-gradient-to-br from-amber-50/40 via-white to-white',
+    borderColor: 'border-amber-100 hover:border-amber-300',
+    iconBg: 'bg-gradient-to-br from-amber-600 to-yellow-600 shadow-amber-500/25',
+    shadowHover: 'hover:shadow-amber-500/10',
+    accentColor: '#D97706',
+    defaultSub: 'Average call length',
+  },
+};
+
+const KpiCard = ({ label, value, sub, color = '#2563EB', icon, delay = 0 }) => {
+  const theme = KPI_THEMES[label] || {
+    topBar: 'bg-gradient-to-r from-blue-600 to-indigo-600',
+    bgGrad: 'bg-gradient-to-br from-blue-50/40 via-white to-white',
+    borderColor: 'border-blue-100 hover:border-blue-300',
+    iconBg: 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/25',
+    shadowHover: 'hover:shadow-blue-500/10',
+    accentColor: color,
+  };
+
+  const pctMatch = sub && typeof sub === 'string' ? sub.match(/(\d+)%/) : null;
+  const pct = pctMatch ? parseInt(pctMatch[1], 10) : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.4 }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="bg-white rounded-2xl p-5 border border-gray-100 hover:border-blue-200 hover:shadow-xl transition-all duration-300"
+      transition={{ delay, duration: 0.35 }}
+      whileHover={{ y: -3 }}
+      className={`relative bg-white rounded-2xl p-5 border ${theme.borderColor} ${theme.bgGrad} shadow-sm hover:shadow-xl ${theme.shadowHover} transition-all duration-300 overflow-hidden flex flex-col justify-between`}
     >
-      <div className="flex items-center justify-between mb-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
-          style={{ background: bg, color }}
-        >
-          {icon}
+      {/* Highlighting Top Accent Strip */}
+      <div className={`absolute top-0 left-0 right-0 h-1.5 ${theme.topBar}`} />
+
+      <div>
+        <div className="flex items-center justify-between mb-3.5">
+          <div
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-md ${theme.iconBg}`}
+          >
+            {icon}
+          </div>
+          <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-emerald-500" />
+            Live
+          </span>
         </div>
-        <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-50 text-green-600 border border-green-100">
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-green-500" />
-          Live
-        </span>
+
+        <p className="text-3xl font-extrabold text-gray-900 tracking-tight tabular-nums">
+          {typeof value === 'number' ? value.toLocaleString() : (value ?? '—')}
+        </p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mt-1">
+          {label}
+        </p>
       </div>
-      <p className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums">
-        {value ?? '—'}
-      </p>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mt-1.5">
-        {label}
-      </p>
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+
+      {pct !== null ? (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${theme.barColor || 'bg-blue-500'}`}
+              style={{ width: `${Math.min(100, pct)}%` }}
+            />
+          </div>
+          <div className="flex justify-between items-center text-[11px] text-gray-400 mt-1.5">
+            <span>Progress</span>
+            <span className="font-semibold" style={{ color: theme.accentColor }}>{sub}</span>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+          <span>{sub || theme.defaultSub || 'Live metric'}</span>
+        </div>
+      )}
     </motion.div>
   );
 };
@@ -231,6 +357,11 @@ export default function LiveMonitorPage() {
     } catch {}
   };
 
+  const employeesRef = useRef(employees);
+  useEffect(() => {
+    employeesRef.current = employees;
+  }, [employees]);
+
   useEffect(() => {
     (async () => {
       await Promise.all([
@@ -255,6 +386,12 @@ export default function LiveMonitorPage() {
     });
     const channel = pusher.subscribe('managers');
     channel.bind('new_call_log', (data) => {
+      // Additional safeguard: verify call belongs to scoped employees if list is loaded
+      const scopedList = employeesRef.current;
+      if (scopedList.length > 0 && data?.employeeId) {
+        const inScope = scopedList.some((e) => e._id?.toString() === data.employeeId?.toString());
+        if (!inScope) return;
+      }
       setLiveFeed((prev) => [data, ...prev].slice(0, 30));
       fetchStats();
     });
@@ -552,15 +689,7 @@ export default function LiveMonitorPage() {
                           <span className="text-sm font-medium text-gray-900 truncate">
                             {call.contactName || call.contactNumber}
                           </span>
-                          <span
-                            className="text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
-                            style={{
-                              background: TYPE_BG[call.callType] || '#F1F5F9',
-                              color: TYPE_COLOR[call.callType] || '#64748B',
-                            }}
-                          >
-                            {TYPE_ICON[call.callType] || '📞'} {call.callType}
-                          </span>
+                          <LiveCallTypeBadge callType={call.callType} />
                         </div>
                         <p className="text-xs text-gray-400 mt-0.5">
                           {call.employeeName} · {formatDur(call.duration)}
@@ -746,7 +875,7 @@ export default function LiveMonitorPage() {
                 <p className="text-xs text-gray-500 mt-0.5">Today · This Week · This Month</p>
               </div>
               <span className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-full border border-blue-100">
-                <span className="text-xs font-semibold text-blue-600">📊 Trends</span>
+                <span className="text-xs font-semibold text-blue-600 inline-flex items-center gap-1"><TrendingUp size={13} /> Trends</span>
               </span>
             </div>
           </div>

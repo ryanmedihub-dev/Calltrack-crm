@@ -1,0 +1,217 @@
+{
+  "metadata": {
+    "phase": "Phase 12.6C Post-Cleanup Verification",
+    "executionStartTime": "2026-09-11T12:48:46.814Z",
+    "executionEndTime": "2026-09-11T12:49:15.450Z",
+    "durationMs": 28636,
+    "database": "test",
+    "collection": "calllogs",
+    "verdict": "PHASE 12.6C PASSED"
+  },
+  "countsReconciliation": {
+    "phase12_6b_pre_cleanup": 393409,
+    "phase12_6b_deleted": 1480,
+    "phase12_6b_concurrent": 54,
+    "phase12_6b_final_reported": 391983,
+    "currentLiveCount": 392166,
+    "currentDeltaFromPhase12_6B": 183
+  },
+  "protectionSets": {
+    "keepDocuments": {
+      "expected": 1465,
+      "live": 1465,
+      "status": "INTACT"
+    },
+    "redDocuments": {
+      "expected": 158,
+      "live": 158,
+      "status": "INTACT"
+    },
+    "yellowDocuments": {
+      "expected": 4023,
+      "live": 4023,
+      "status": "INTACT"
+    },
+    "manualReviewDocuments": {
+      "expected": 234,
+      "live": 234,
+      "status": "INTACT"
+    },
+    "greenDuplicateResolution": {
+      "expectedGroups": 1465,
+      "verifiedSingleDoc": 1465,
+      "remainingDuplicates": 0
+    }
+  },
+  "candidateAbsence": {
+    "totalCandidatesChecked": 1480,
+    "lingeringInLiveDB": 0,
+    "status": "ALL_DELETED"
+  },
+  "immutability": {
+    "candidateAuditFile": "backend/reports/cleanup-audit-candidates-12.6a.json",
+    "expectedSha256": "1d4d8c13ecf3c80e21451a8e97cd3e8c056e4d111829173ab2bcaf50586ed7ab",
+    "actualSha256": "1d4d8c13ecf3c80e21451a8e97cd3e8c056e4d111829173ab2bcaf50586ed7ab",
+    "preserved": true
+  },
+  "nancyCase": {
+    "employeeId": "6a59d3a3491b326cc7a60e77",
+    "phone": "8233337653",
+    "timestamp": "2026-08-01T08:57:01.307Z",
+    "keepId": "6a6db508648809be1418112a",
+    "keepExists": true,
+    "removeId": "6a6db508648809be14181129",
+    "removeAbsent": true,
+    "survivingDocCount": 1,
+    "fieldsIntact": true
+  },
+  "indexes": [
+    "_id_",
+    "employeeId_1_timestamp_-1",
+    "timestamp_-1",
+    "contactNumber_1",
+    "leadId_1",
+    "contactNumber_1_timestamp_1",
+    "employeeId_1_clientCallId_1"
+  ],
+  "gates": [
+    {
+      "gateNumber": 1,
+      "gateName": "Target Database & Collection",
+      "passed": true,
+      "detail": "Database: \"test\" (expected: \"test\"), Collection: \"calllogs\" (expected: \"calllogs\")"
+    },
+    {
+      "gateNumber": 2,
+      "gateName": "Phase 12.6B Baseline Reconciliation",
+      "passed": true,
+      "detail": "393,409 - 1,480 + 54 = 3,91,983 (matches reported final: 3,91,983). Current live count: 3,92,166 (Delta: +183 live calls since cleanup)"
+    },
+    {
+      "gateNumber": 3,
+      "gateName": "Execution Audit Internal Consistency",
+      "passed": true,
+      "detail": "Verdict: \"PHASE 12.6B PASSED\", 20 batches (sum: 1480, deleted: 1480), unique IDs: 1480/1480, 0 failed batches, all 20 transactions committed."
+    },
+    {
+      "gateNumber": 4,
+      "gateName": "Candidate Audit File Immutability",
+      "passed": true,
+      "detail": "SHA-256: 1d4d8c13ecf3c80e21451a8e97cd3e8c056e4d111829173ab2bcaf50586ed7ab (expected: 1d4d8c13ecf3c80e21451a8e97cd3e8c056e4d111829173ab2bcaf50586ed7ab). File size: 1612.8 KB"
+    },
+    {
+      "gateNumber": 5,
+      "gateName": "Deleted Candidates Total Absence",
+      "passed": true,
+      "detail": "Queried all 1,480 approved candidate IDs against live MongoDB. Found: 0 (expected 0)"
+    },
+    {
+      "gateNumber": 6,
+      "gateName": "KEEP Document Set Preservation",
+      "passed": true,
+      "detail": "Expected: 1,465, Found in live DB: 1465 (0 missing)"
+    },
+    {
+      "gateNumber": 7,
+      "gateName": "RED Protected Set Preservation",
+      "passed": true,
+      "detail": "79 RED groups, Expected: 158 docs, Found in live DB: 158 (0 missing)"
+    },
+    {
+      "gateNumber": 8,
+      "gateName": "YELLOW Protected Set Preservation",
+      "passed": true,
+      "detail": "2,005 YELLOW groups, Expected: 4,023 docs, Found in live DB: 4023 (0 missing)"
+    },
+    {
+      "gateNumber": 9,
+      "gateName": "Manual-Review Protected Set Preservation",
+      "passed": true,
+      "detail": "117 Manual-Review groups, Expected: 234 docs, Found in live DB: 234 (0 missing)"
+    },
+    {
+      "gateNumber": 10,
+      "gateName": "Independent GREEN Duplicate Scan",
+      "passed": true,
+      "detail": "Scanned 1,465 GREEN groups. Groups with >1 document: 0. All 1,465 groups contain exactly 1 document (the KEEP document)."
+    },
+    {
+      "gateNumber": 11,
+      "gateName": "Duplicate Category Integrity",
+      "passed": true,
+      "detail": "Preserved duplicate groups: 2084 (79 RED + 2,005 YELLOW). 0 new duplicate categories created by cleanup. GREEN duplicate count eliminated from 1,465 to 0."
+    },
+    {
+      "gateNumber": 12,
+      "gateName": "Protected Documents Lead References Immutability",
+      "passed": true,
+      "detail": "Checked 392 high-sensitivity protected documents (RED + Manual). Lead mismatches: 0 (0 lead mutations)."
+    },
+    {
+      "gateNumber": 13,
+      "gateName": "Important CallLog Fields Immutability",
+      "passed": true,
+      "detail": "Checked duration, callType, callStatus, notes across 392 protected documents. Field mismatches: 0."
+    },
+    {
+      "gateNumber": 14,
+      "gateName": "Nancy Historical Case Verification",
+      "passed": true,
+      "detail": "KEEP doc (6a6db508648809be1418112a): EXISTS, REMOVE doc (6a6db508648809be14181129): ABSENT, Surviving natural-key docs: 1/1, Fields intact: YES"
+    },
+    {
+      "gateNumber": 15,
+      "gateName": "MongoDB Indexes Immutability",
+      "passed": true,
+      "detail": "Found 7 indexes (expected: 7). Crucial index \"employeeId_1_clientCallId_1\" confirmed intact. 0 index modifications."
+    },
+    {
+      "gateNumber": 16,
+      "gateName": "CallLog Model Schema Integrity",
+      "passed": true,
+      "detail": "CallLog schema paths verified (17 fields). Zero unauthorized schema changes or migrations."
+    },
+    {
+      "gateNumber": 17,
+      "gateName": "All 8 Report Surfaces Verification",
+      "passed": true,
+      "detail": "All 8 surfaces returned HTTP 200 with valid data structures and zero 500 exceptions."
+    },
+    {
+      "gateNumber": 18,
+      "gateName": "Report Numerical Reconciliation with Direct DB",
+      "passed": true,
+      "detail": "Direct DB Count: 50,710 === Summary total.calls: 50,710 === CallHistory total: 50,710"
+    },
+    {
+      "gateNumber": 19,
+      "gateName": "Hierarchy Scoping Verification",
+      "passed": true,
+      "detail": "Manager (Bharat Goswami), TL (Phase8 Test TL), and Employee (Nancy) hierarchy isolation verified."
+    },
+    {
+      "gateNumber": 20,
+      "gateName": "Call History Pagination & Ordering",
+      "passed": true,
+      "detail": "Page 1: 10 calls, Page 2: 10 calls. Total: 50,710 across 5071 pages. Reverse chronological sorting confirmed."
+    },
+    {
+      "gateNumber": 21,
+      "gateName": "Ingestion Protection & Idempotency",
+      "passed": true,
+      "detail": "Deterministic hashing, strict mobile identity, and invalid input null-guards verified."
+    },
+    {
+      "gateNumber": 22,
+      "gateName": "Current Duplicate State Summary",
+      "passed": true,
+      "detail": "GREEN excess eliminated: 1,480 → 0. Remaining excess in DB is strictly protected YELLOW (2,018) and RED (79)."
+    },
+    {
+      "gateNumber": 23,
+      "gateName": "Zero Mutations in Phase 12.6C",
+      "passed": true,
+      "detail": "Phase 12.6C execution script is strictly read-only. Zero writes, zero deletes, zero updates performed."
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import api from '../../../../lib/api';
 import { fmtDateTime } from '../../../../lib/timezone';
+import { Check } from 'lucide-react';
 import { SearchIco, EmptyState, Ico } from '../../../../components/report-shared';
 
 const LogIco = ({ s = 20 }) => <Ico size={s}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></Ico>;
@@ -130,7 +131,7 @@ export default function LeadsLogsPage() {
                       transition={{ delay: Math.min(i*0.03, 0.3) }}
                       className="relative flex gap-4 pb-4 pl-10">
                       <div className={`absolute left-2 w-5 h-5 rounded-full flex items-center justify-center z-10 border-2 border-white top-0.5 ${am.dot}`}>
-                        <span className="text-white text-[8px] font-extrabold">✓</span>
+                        <Check size={10} className="text-white" strokeWidth={3} />
                       </div>
                       <div className="flex-1 bg-white rounded-xl border border-gray-200 p-3 hover:shadow-sm transition-shadow">
                         <div className="flex items-start justify-between gap-2 flex-wrap">

@@ -11,22 +11,28 @@ export default function StatCard({ title, value, sub, icon, color = 'blue' }) {
   const p = palette[color] || palette.blue;
   return (
     <div
-      className="bg-white rounded-2xl p-5 flex items-center gap-4 card-hover"
-      style={{ border: '1px solid #E2E8F4', boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 2px 8px rgba(99,102,241,0.06)' }}>
-      <div
-        className="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-xl flex-shrink-0"
-        style={{ background: p.grad, boxShadow: `0 4px 12px ${p.glow}` }}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-semibold uppercase tracking-wider truncate" style={{ color: '#94A3B8' }}>
+      className="bg-white rounded-2xl p-4 flex flex-col justify-between card-hover min-h-[112px]"
+      style={{ border: '1px solid #E2E8F4', boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 2px 8px rgba(99,102,241,0.04)' }}>
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider leading-tight" style={{ color: '#64748B' }}>
           {title}
-        </p>
-        <p className="text-2xl font-extrabold mt-0.5 leading-none tabular-nums"
+        </span>
+        <div
+          className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm flex-shrink-0"
+          style={{ background: p.grad, boxShadow: `0 2px 8px ${p.glow}` }}>
+          {icon}
+        </div>
+      </div>
+      <div className="mt-2">
+        <p className="text-2xl font-extrabold leading-none tabular-nums"
           style={{ color: '#0F172A', letterSpacing: '-0.03em' }}>
-          {value ?? '—'}
+          {typeof value === 'number' ? value.toLocaleString() : (value ?? '—')}
         </p>
-        {sub && <p className="text-xs mt-1 truncate" style={{ color: '#94A3B8' }}>{sub}</p>}
+        {sub && (
+          <p className="text-xs mt-1.5 leading-tight" style={{ color: '#94A3B8' }}>
+            {sub}
+          </p>
+        )}
       </div>
     </div>
   );

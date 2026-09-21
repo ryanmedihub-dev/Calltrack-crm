@@ -28,18 +28,24 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireManagement } = require('../middleware/auth');
+const { validateEmployeeInScope } = require('../lib/scope');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
 const cache = require('../lib/cache');
 
-router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => {
+router.get('/agent-detail/:employeeId', protect, requireManagement, async (req, res) => {
   try {
     const { employeeId } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(employeeId)) {
       return res.status(404).json({ success: false, message: 'Employee not found' });
+    }
+
+    const inScope = await validateEmployeeInScope(req.user, employeeId);
+    if (!inScope) {
+      return res.status(403).json({ success: false, message: 'Access denied: employee is outside your hierarchy' });
     }
 
     // A plain object sentinel, not a Symbol — this value may round-trip through Redis as JSON,
@@ -59,7 +65,7 @@ router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => 
 // Not scoped to the requesting manager — every manager sees the same drill-down for a given
 // employeeId, so unlike scripts.js/my-stats there's no identity dimension needed in the key.
 async function buildAgentDetail(employeeId, { dateFrom, dateTo }) {
-    const employee = await User.findOne({ _id: employeeId, role: 'employee' })
+  const employee = await User.findOne({ _id: employeeId, role: 'employee' })
       .select('name tlName isActive dailyTarget ryanEmployeeCode')
       .lean();
     if (!employee) return null;

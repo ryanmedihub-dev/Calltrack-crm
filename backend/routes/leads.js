@@ -4,7 +4,8 @@ const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isAdmin, requireManagement } = require('../middleware/auth');
+const { getScopedEmployeeIds, validateEmployeeInScope, resolveEmployeeFilter } = require('../lib/scope');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
@@ -153,19 +154,43 @@ router.post('/', protect, async (req, res) => {
 
 // GET /api/leads — all leads with filters + search
 //
-// tlName/source/attemptsMin/attemptsMax were added for ryan-crm's Owner Panel
-// leads report (/owner/leads/report and the status-preset pages) — additive,
-// same pattern as the existing filters on this route and on GET /api/calls.
-router.get('/', protect, isManager, async (req, res) => {
+// tlName/source/attemptsMin/attemptsMax/engagement were added for ryan-crm's Owner Panel
+// leads report — additive, same pattern as the existing filters on this route and GET /api/calls.
+router.get('/', protect, requireManagement, async (req, res) => {
   try {
     const {
       status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax, engagement,
       page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate,
     } = req.query;
-    const filter = {};
+
+    // Resolve RBAC scope — builds the base filter keyed to the requesting user's
+    // authorized hierarchy. User-supplied filters below can only NARROW this scope.
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, assignedTo, 'assignedTo');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    const filter = { ...scopeFilter };
+
+    // status: main-branch supports comma-separated multi-status (e.g. "new,contacted")
     if (status) filter.status = { $in: status.split(',') };
-    if (assignedTo) filter.assignedTo = assignedTo;
-    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
+
+    // tlName: narrow the authorized scope further to a specific TL's employees.
+    // The intersection with any existing assignedTo/$in from scopeFilter ensures
+    // tlName can never expand the authorized scope beyond what resolveEmployeeFilter granted.
+    if (tlName && !filter.assignedTo) {
+      // No prior assignedTo constraint from scope — apply TL filter directly
+      filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
+    } else if (tlName && filter.assignedTo) {
+      // scopeFilter already restricted assignedTo — intersect to keep tlName within scope
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      const scopedStrs = new Set(
+        (Array.isArray(filter.assignedTo.$in) ? filter.assignedTo.$in : [filter.assignedTo])
+          .map((id) => id.toString())
+      );
+      filter.assignedTo = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())) };
+    }
+
     if (tags) filter.tags = { $in: tags.split(',') };
     if (engagement) filter.engagement = { $in: engagement.split(',') };
     if (source) filter.source = { $regex: source, $options: 'i' };
@@ -185,6 +210,7 @@ router.get('/', protect, isManager, async (req, res) => {
       const { start, end } = resolveDateRange(range, startDate, endDate);
       filter.createdAt = { $gte: start, $lt: end };
     }
+
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sort = { [sortBy]: parseInt(sortDir) };
     const [leads, total] = await Promise.all([
@@ -197,13 +223,20 @@ router.get('/', protect, isManager, async (req, res) => {
   }
 });
 
-// GET /api/leads/tags — unique tags (must be before /:id)
-router.get('/tags', protect, isManager, async (req, res) => {
+// GET /api/leads/tags — unique tags within the requesting user's hierarchy
+// (must be declared before GET /:id so it isn't swallowed by the param route).
+router.get('/tags', protect, requireManagement, async (req, res) => {
   try {
-    const tags = await cache.cached(['leads', 'tags'], 300, async () => {
-      const distinct = await Lead.distinct('tags');
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+
+    // Cache tags per scope so one user's tag list cannot be served to another.
+    const scopeKey = scopedEmpIds === null ? 'all' : req.user._id.toString();
+    const tags = await cache.cached(['leads', 'tags', scopeKey], 300, async () => {
+      const tagFilter = scopedEmpIds !== null ? { assignedTo: { $in: scopedEmpIds } } : {};
+      const distinct = await Lead.distinct('tags', tagFilter);
       return distinct.filter(Boolean);
     });
+
     return res.json({ success: true, data: tags });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -225,8 +258,8 @@ router.get('/assigned', protect, async (req, res) => {
   }
 });
 
-// GET /api/leads/logs — activity/audit trail across all leads' changelogs (must be before /:id)
-router.get('/logs', protect, isManager, async (req, res) => {
+// GET /api/leads/logs — activity/audit trail across hierarchy leads' changelogs (must be before /:id)
+router.get('/logs', protect, requireManagement, async (req, res) => {
   try {
     const { search, action, employee, page = 1, limit = 40 } = req.query;
     const pageNum  = Math.max(1, parseInt(page) || 1);
@@ -234,6 +267,11 @@ router.get('/logs', protect, isManager, async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const leadMatch = {};
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    if (scopedEmpIds !== null) {
+      leadMatch.assignedTo = { $in: scopedEmpIds };
+    }
+
     if (search) {
       leadMatch.$or = [
         { name:  { $regex: search, $options: 'i' } },
@@ -244,6 +282,10 @@ router.get('/logs', protect, isManager, async (req, res) => {
     const changelogMatch = {};
     if (action) changelogMatch['changelog.action'] = action;
     if (employee && mongoose.Types.ObjectId.isValid(employee)) {
+      const inScope = await validateEmployeeInScope(req.user, employee);
+      if (!inScope) {
+        return res.status(403).json({ success: false, error: 'Access denied: employee outside your hierarchy' });
+      }
       changelogMatch['changelog.changedBy'] = new mongoose.Types.ObjectId(employee);
     }
 
@@ -445,7 +487,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
 });
 
 // POST /api/leads/bulk-assign (must be before /:id routes)
-router.post('/bulk-assign', protect, isManager, async (req, res) => {
+router.post('/bulk-assign', protect, isAdmin, async (req, res) => {
   try {
     const { leadIds, employeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -457,7 +499,7 @@ router.post('/bulk-assign', protect, isManager, async (req, res) => {
 });
 
 // POST /api/leads/bulk-transfer (must be before /:id routes)
-router.post('/bulk-transfer', protect, isManager, async (req, res) => {
+router.post('/bulk-transfer', protect, isAdmin, async (req, res) => {
   try {
     const { leadIds, toEmployeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -469,7 +511,7 @@ router.post('/bulk-transfer', protect, isManager, async (req, res) => {
 });
 
 // DELETE /api/leads/bulk-delete (must be before /:id routes)
-router.delete('/bulk-delete', protect, isManager, async (req, res) => {
+router.delete('/bulk-delete', protect, isAdmin, async (req, res) => {
   try {
     const { leadIds } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -554,17 +596,29 @@ router.post('/from-call', protect, async (req, res) => {
 
 function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
 
-// GET /api/leads/export — CSV export (manager); also registered in the Downloads Center.
+// GET /api/leads/export — CSV export (scoped by hierarchy); also registered in the Downloads Center.
 // Streams the response row-by-row instead of buffering the whole file in memory —
 // see the matching comment on GET /api/calls/export for the same rationale.
-router.get('/export', protect, isManager, async (req, res) => {
+router.get('/export', protect, requireManagement, async (req, res) => {
   let job = null;
   try {
     const { status, assignedTo, startDate, endDate, search, tags, tlName } = req.query;
-    const filter = {};
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, assignedTo, 'assignedTo');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    const filter = { ...scopeFilter };
     if (status)     filter.status     = status;
-    if (assignedTo) filter.assignedTo = assignedTo;
-    else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
+    if (tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (filter.assignedTo && filter.assignedTo.$in) {
+        const scopedStrs = new Set(filter.assignedTo.$in.map((id) => id.toString()));
+        filter.assignedTo = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())) };
+      } else {
+        filter.assignedTo = { $in: tlEmpIds };
+      }
+    }
     if (tags)       filter.tags = { $in: tags.split(',') };
     if (search) {
       filter.$or = [
@@ -679,6 +733,16 @@ router.get('/:id', protect, async (req, res) => {
       });
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
 
+    // Hierarchy access check
+    if (req.user.role !== 'admin') {
+      if (lead.assignedTo) {
+        const inScope = await validateEmployeeInScope(req.user, lead.assignedTo._id);
+        if (!inScope) return res.status(403).json({ success: false, error: 'Access denied: lead outside your hierarchy' });
+      } else if (req.user.role === 'manager' || req.user.role === 'tl') {
+        return res.status(403).json({ success: false, error: 'Access denied: unassigned lead' });
+      }
+    }
+
     // Also fetch any calls by phone not yet linked (for backwards compatibility)
     const linkedIds = new Set((lead.callLogs || []).map((c) => c._id.toString()));
     const callsByNumber = await CallLog.find({ contactNumber: lead.phone })
@@ -711,13 +775,17 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// PUT /api/leads/:id — update lead
+// PUT /api/leads/:id — update lead (write operation with hierarchy & target validation)
 router.put('/:id', protect, async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
     const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) return res.status(403).json({ success: false, error: 'Access denied' });
+    const inScope = isOwner || (lead.assignedTo && (await validateEmployeeInScope(req.user, lead.assignedTo)));
+    if (req.user.role !== 'admin' && !inScope) {
+      return res.status(403).json({ success: false, error: 'Access denied: lead outside your hierarchy' });
+    }
 
     const {
       name, phone, email,
@@ -725,7 +793,17 @@ router.put('/:id', protect, async (req, res) => {
       lastCallNote, lastCallSummary
     } = req.body;
 
-    const payload = req.user.role === 'manager'
+    // Validate target assignedTo employee if ownership is being changed
+    if (assignedTo && assignedTo !== lead.assignedTo?.toString()) {
+      if (req.user.role !== 'admin') {
+        const targetInScope = await validateEmployeeInScope(req.user, assignedTo);
+        if (!targetInScope) {
+          return res.status(403).json({ success: false, error: 'Access denied: target assignee is outside your hierarchy' });
+        }
+      }
+    }
+
+    const payload = (req.user.role === 'admin' || req.user.role === 'manager' || req.user.role === 'tl')
       ? { name, phone, email, source, tags, status, assignedTo, followUpDate, lastCallNote, lastCallSummary }
       : { status, followUpDate, lastCallNote, lastCallSummary };
 
@@ -758,8 +836,8 @@ router.put('/:id', protect, async (req, res) => {
   }
 });
 
-// DELETE /api/leads/:id
-router.delete('/:id', protect, isManager, async (req, res) => {
+// DELETE /api/leads/:id (Admin-only)
+router.delete('/:id', protect, isAdmin, async (req, res) => {
   try {
     const lead = await Lead.findByIdAndDelete(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
@@ -770,15 +848,20 @@ router.delete('/:id', protect, isManager, async (req, res) => {
   }
 });
 
-// POST /api/leads/:id/note — add a note entry to the lead's changelog
+// POST /api/leads/:id/note — add a note entry to the lead's changelog (write operation)
 router.post('/:id/note', protect, async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ success: false, error: 'Note text required' });
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
     const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) return res.status(403).json({ success: false, error: 'Access denied' });
+    const inScope = isOwner || (lead.assignedTo && (await validateEmployeeInScope(req.user, lead.assignedTo)));
+    if (req.user.role !== 'admin' && !inScope) {
+      return res.status(403).json({ success: false, error: 'Access denied: lead outside your hierarchy' });
+    }
+
     lead.changelog.push({
       changedBy:     req.user._id,
       changedByName: req.user.name,
@@ -792,16 +875,27 @@ router.post('/:id/note', protect, async (req, res) => {
   }
 });
 
-// PATCH /api/leads/:id/link-call
-router.patch('/:id/link-call', protect, isManager, async (req, res) => {
+// PATCH /api/leads/:id/link-call — link call to lead (write operation)
+router.patch('/:id/link-call', protect, requireManagement, async (req, res) => {
   try {
     const { callId } = req.body;
     if (!callId) return res.status(400).json({ success: false, error: 'callId required' });
-    const call = await CallLog.findById(callId).populate('employeeId', 'name phone');
+    const [call, lead] = await Promise.all([
+      CallLog.findById(callId).populate('employeeId', 'name phone'),
+      Lead.findById(req.params.id)
+    ]);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+
+    if (req.user.role !== 'admin') {
+      const callInScope = await validateEmployeeInScope(req.user, call.employeeId?._id || call.employeeId);
+      const leadInScope = lead.assignedTo ? (await validateEmployeeInScope(req.user, lead.assignedTo)) : false;
+      if (!callInScope || !leadInScope) {
+        return res.status(403).json({ success: false, error: 'Access denied: call or lead outside your hierarchy' });
+      }
+    }
+
     // A call already carrying a leadId was counted toward some lead when it was first linked.
-    // Re-linking it (or re-running this route on the same call) must move it, not mint a second
-    // attempt out of one real phone call — this used to inflate `attempts` on every re-link.
     const alreadyCounted = !!call.leadId;
     await CallLog.findByIdAndUpdate(callId, { leadId: req.params.id });
     await Lead.findByIdAndUpdate(req.params.id, {

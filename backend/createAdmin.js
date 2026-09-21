@@ -12,7 +12,7 @@ async function run() {
   if (existing) {
     console.log('User already exists — updating password and role...');
     existing.password = 'Dashzer@1503';
-    existing.role     = 'manager';
+    existing.role     = 'admin';
     existing.isActive = true;
     await existing.save();
     console.log('Updated:', existing.email, '| role:', existing.role, '| id:', existing._id);
@@ -21,7 +21,7 @@ async function run() {
       name:     'Ryan Admin',
       email:    EMAIL,
       password: 'Dashzer@1503',
-      role:     'manager',
+      role:     'admin',
       isActive: true,
     });
     console.log('Admin created:');

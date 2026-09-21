@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isAdmin, requireManagement } = require('../middleware/auth');
+const { getScopedEmployeeIds, validateEmployeeInScope } = require('../lib/scope');
 const normalizePhone = require('../lib/normalizePhone');
 const getPusher = require('../lib/pusher');
 const { logAction } = require('../lib/audit');
@@ -250,17 +251,19 @@ router.get('/stats', protect, async (req, res) => {
   }
 });
 
-// GET /api/lead-pool/attempts-by-employee — who has been calling pool leads without claiming
-// them. A lead stays in the pool (assignedTo: null) until someone taps "Attend", but the call
-// sync auto-links any call to a matching lead by phone number regardless of assignment — so an
-// employee can dial a pool number straight from their phone and rack up attempts on a lead that
-// never shows as theirs. Managers use this to see who's actually working the pool.
-router.get('/attempts-by-employee', protect, isManager, async (req, res) => {
+// GET /api/lead-pool/attempts-by-employee — who has been calling pool leads without claiming them (scoped by hierarchy)
+router.get('/attempts-by-employee', protect, requireManagement, async (req, res) => {
   try {
+    const matchChangelog = { 'changelog.action': 'call_linked' };
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    if (scopedEmpIds !== null) {
+      matchChangelog['changelog.changedBy'] = { $in: scopedEmpIds };
+    }
+
     const rows = await Lead.aggregate([
       { $match: { ...UNASSIGNED_FILTER, attempts: { $gt: 0 } } },
       { $unwind: '$changelog' },
-      { $match: { 'changelog.action': 'call_linked' } },
+      { $match: matchChangelog },
       {
         $group: {
           _id:           '$changelog.changedBy',
@@ -367,7 +370,7 @@ router.post('/:id/claim', protect, async (req, res) => {
   }
 });
 
-// POST /api/lead-pool/:id/release — put a lead back. Manager, or the current owner.
+// POST /api/lead-pool/:id/release — put a lead back. Admin, Manager, TL, or the current owner.
 router.post('/:id/release', protect, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -377,8 +380,9 @@ router.post('/:id/release', protect, async (req, res) => {
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
 
     const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
-      return res.status(403).json({ success: false, error: 'Access denied' });
+    const inScope = isOwner || (lead.assignedTo && (await validateEmployeeInScope(req.user, lead.assignedTo)));
+    if (req.user.role !== 'admin' && !inScope) {
+      return res.status(403).json({ success: false, error: 'Access denied: lead outside your hierarchy' });
     }
 
     lead.assignedTo = null;
@@ -404,8 +408,8 @@ router.post('/:id/release', protect, async (req, res) => {
   }
 });
 
-// POST /api/lead-pool/push — manager pushes existing leads back into the pool in bulk.
-router.post('/push', protect, isManager, async (req, res) => {
+// POST /api/lead-pool/push — admin pushes existing leads back into the pool in bulk.
+router.post('/push', protect, isAdmin, async (req, res) => {
   try {
     const { leadIds } = req.body;
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
@@ -442,9 +446,9 @@ router.post('/push', protect, isManager, async (req, res) => {
   }
 });
 
-// POST /api/lead-pool/:id/lock — manager stops a lead from ever auto-recycling again, without
+// POST /api/lead-pool/:id/lock — admin stops a lead from ever auto-recycling again, without
 // waiting for it to hit MAX_RECYCLES.
-router.post('/:id/lock', protect, isManager, async (req, res) => {
+router.post('/:id/lock', protect, isAdmin, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
@@ -471,8 +475,8 @@ router.post('/:id/lock', protect, isManager, async (req, res) => {
   }
 });
 
-// POST /api/lead-pool/:id/unlock — manager lets a capped-out or manually-pinned lead recycle again.
-router.post('/:id/unlock', protect, isManager, async (req, res) => {
+// POST /api/lead-pool/:id/unlock — admin lets a capped-out or manually-pinned lead recycle again.
+router.post('/:id/unlock', protect, isAdmin, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });

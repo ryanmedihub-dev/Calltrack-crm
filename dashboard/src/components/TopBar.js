@@ -12,28 +12,32 @@ const PAGE_TITLES = {
   '/leads/pipeline':        'Pipeline',
   '/calls/live':            'Live Monitor',
   '/calls/targets':         'Daily Targets',
+  '/calls/agent-report':    'Agent Report',
   '/reports':               'Periodic Reports',
   '/reports/client':        'Client Reports',
   '/reports/export':        'Export Center',
   '/notifications':         'Notifications',
   '/scripts':               'Call Scripts',
-  '/activity':              'Activity Log',
   '/settings':              'Settings',
+  '/team-leads':            'Team Leads',
+  '/users/hierarchy':       'Hierarchy Management',
 };
 
 const PAGE_SUBTITLES = {
-  '/dashboard':    'Real-time operations overview',
-  '/analytics':    'Trends and performance insights',
-  '/calls/live':   'Monitor active calls in real time',
-  '/reports':      'Generate and export reports',
-  '/settings':     'Configure your workspace',
+  '/dashboard':       'Real-time operations overview',
+  '/analytics':       'Trends and performance insights',
+  '/calls/live':      'Monitor active calls in real time',
+  '/reports':         'Generate and export reports',
+  '/settings':        'Configure your workspace',
+  '/team-leads':      'Overview of your assigned team leaders',
+  '/users/hierarchy': 'Manage organizational structure and assignments',
 };
 
 const PARENTS = {
   analytics: { label: 'Analytics', href: '/analytics' },
   employees: { label: 'Employees', href: '/reports/Employess' },
   leads:     { label: 'Leads',     href: '/reports/lead'       },
-  calls:     { label: 'Call Logs', href: '/reports/calllogs'   },
+  calls:     { label: 'Calls',     href: '/calls/overview'   },
   reports:   { label: 'Reports',   href: '/reports'            },
 };
 

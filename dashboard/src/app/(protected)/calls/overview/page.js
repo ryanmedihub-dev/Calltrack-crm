@@ -14,12 +14,11 @@ import {
   Cell,
   LineChart,
   Line,
-  ComposedChart,
   Area,
   LabelList,
 } from 'recharts';
 import api from '../../../../lib/api';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import DateRangeFilter, { formatRangeLabel } from '../../../../components/DateRangeFilter';
 
 /* ── Icons ───────────────────────────────────────── */
@@ -191,6 +190,156 @@ const PAGES = [
     icon: <TargetIco />,
   },
 ];
+
+/* ── Highlighted Stat Card Component ────────────── */
+const HighlightedStatCard = ({ stat, i, isTodayRange, trends, today, rangeLabel }) => {
+  const configs = [
+    {
+      topBar: 'bg-gradient-to-r from-blue-500 to-indigo-600',
+      bgGrad: 'bg-gradient-to-br from-blue-50/40 via-white to-white',
+      borderColor: 'border-blue-100 hover:border-blue-300',
+      iconBg: 'bg-gradient-to-br from-blue-600 to-indigo-600 shadow-blue-500/25',
+      shadowHover: 'hover:shadow-blue-500/10',
+      badgeText: isTodayRange && trends.total !== null ? `${trends.total >= 0 ? '+' : ''}${trends.total}% vs yest` : 'Total Volume',
+      badgeColor: isTodayRange && trends.total !== null
+        ? (trends.total >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200')
+        : 'bg-blue-50 text-blue-700 border-blue-200',
+    },
+    {
+      topBar: 'bg-gradient-to-r from-emerald-500 to-teal-500',
+      bgGrad: 'bg-gradient-to-br from-emerald-50/40 via-white to-white',
+      borderColor: 'border-emerald-100 hover:border-emerald-300',
+      iconBg: 'bg-gradient-to-br from-emerald-600 to-teal-600 shadow-emerald-500/25',
+      shadowHover: 'hover:shadow-emerald-500/10',
+      badgeText: `${today?.connectedCalls || 0} connected`,
+      badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    },
+    {
+      topBar: 'bg-gradient-to-r from-rose-500 to-red-500',
+      bgGrad: 'bg-gradient-to-br from-rose-50/40 via-white to-white',
+      borderColor: 'border-rose-100 hover:border-rose-300',
+      iconBg: 'bg-gradient-to-br from-rose-600 to-red-600 shadow-rose-500/25',
+      shadowHover: 'hover:shadow-rose-500/10',
+      badgeText: `${today?.missed || 0} missed`,
+      badgeColor: 'bg-rose-50 text-rose-700 border-rose-200',
+    },
+    {
+      topBar: 'bg-gradient-to-r from-amber-500 to-orange-500',
+      bgGrad: 'bg-gradient-to-br from-amber-50/40 via-white to-white',
+      borderColor: 'border-amber-100 hover:border-amber-300',
+      iconBg: 'bg-gradient-to-br from-amber-500 to-orange-500 shadow-amber-500/25',
+      shadowHover: 'hover:shadow-amber-500/10',
+      badgeText: `In: ${today?.incoming || 0} · Out: ${today?.outgoing || 0}`,
+      badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
+    },
+  ];
+
+  const cfg = configs[i] || configs[0];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: i * 0.05, duration: 0.35 }}
+      whileHover={{ y: -3 }}
+      className={`relative bg-white rounded-2xl p-5 border ${cfg.borderColor} ${cfg.bgGrad} shadow-sm hover:shadow-xl ${cfg.shadowHover} transition-all duration-300 overflow-hidden flex flex-col justify-between`}
+    >
+      {/* Highlighting Top Accent Strip */}
+      <div className={`absolute top-0 left-0 right-0 h-1.5 ${cfg.topBar}`} />
+
+      <div>
+        <div className="flex items-center justify-between mb-3.5">
+          <div
+            className={`w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-md ${cfg.iconBg}`}
+          >
+            {stat.icon}
+          </div>
+          {stat.change !== null && stat.change !== undefined ? (
+            <span
+              className={`flex items-center gap-0.5 text-xs font-bold px-2.5 py-1 rounded-full border ${
+                stat.change >= 0
+                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                  : 'text-rose-700 bg-rose-50 border-rose-200'
+              }`}
+            >
+              {stat.change >= 0 ? <TrendUpIco /> : <TrendDnIco />}
+              {Math.abs(stat.change)}%
+            </span>
+          ) : (
+            <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${cfg.badgeColor}`}>
+              {cfg.badgeText}
+            </span>
+          )}
+        </div>
+
+        <p className="text-3xl font-extrabold text-gray-900 tracking-tight tabular-nums">
+          {stat.value}
+        </p>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-1">
+          {stat.label}
+        </p>
+      </div>
+
+      {/* Highlights & progress indicators matching card theme */}
+      {i === 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+          <span>Active Period</span>
+          <span className="font-semibold text-blue-600">{rangeLabel}</span>
+        </div>
+      )}
+
+      {i === 1 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+              style={{
+                width: today?.totalCalls
+                  ? `${Math.min(100, Math.round(((today?.connectedCalls || 0) / today.totalCalls) * 100))}%`
+                  : '0%',
+              }}
+            />
+          </div>
+          <div className="flex justify-between items-center text-[11px] text-gray-400 mt-1.5">
+            <span>Connection Efficiency</span>
+            <span className="font-semibold text-emerald-600">
+              {today?.connectedCalls || 0} / {today?.totalCalls || 0}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {i === 2 && (
+        <div className="mt-3 pt-3 border-t border-gray-100">
+          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-rose-500 rounded-full transition-all duration-500"
+              style={{
+                width: today?.totalCalls
+                  ? `${Math.min(100, Math.round(((today?.missed || 0) / today.totalCalls) * 100))}%`
+                  : '0%',
+              }}
+            />
+          </div>
+          <div className="flex justify-between items-center text-[11px] text-gray-400 mt-1.5">
+            <span>Unanswered Rate</span>
+            <span className="font-semibold text-rose-600">
+              {today?.missed || 0} / {today?.totalCalls || 0}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {i === 3 && (
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
+          <span className="text-gray-500">In: <strong className="text-gray-800 font-bold">{today?.incoming || 0}</strong></span>
+          <span className="text-gray-300">·</span>
+          <span className="text-gray-500">Out: <strong className="text-gray-800 font-bold">{today?.outgoing || 0}</strong></span>
+        </div>
+      )}
+    </motion.div>
+  );
+};
 
 export default function CallsOverviewPage() {
   const [stats, setStats] = useState(null);
@@ -365,7 +514,7 @@ export default function CallsOverviewPage() {
   }
 
   return (
-    <div className="min-h-screen ">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto space-y-6 lg:space-y-4">
         {/* Header */}
         <motion.div
@@ -387,39 +536,18 @@ export default function CallsOverviewPage() {
           <DateRangeFilter value={dateRange} onChange={setDateRange} />
         </motion.div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Highlighted Quick Stats Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {quickStats.map((stat, i) => (
-            <motion.div
+            <HighlightedStatCard
               key={stat.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-              className="bg-white rounded-2xl p-5 border border-gray-100 hover:border-blue-200 hover:shadow-lg transition-all duration-300"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center"
-                  style={{ background: `${stat.color}15`, color: stat.color }}
-                >
-                  {stat.icon}
-                </div>
-                {stat.change !== null && stat.change !== undefined && (
-                  <span
-                    className={`flex items-center gap-0.5 text-xs font-bold px-2 py-0.5 rounded-full ${
-                      stat.change >= 0 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'
-                    }`}
-                  >
-                    {stat.change >= 0 ? <TrendUpIco /> : <TrendDnIco />}
-                    {Math.abs(stat.change)}%
-                  </span>
-                )}
-              </div>
-              <p className="text-2xl font-bold text-gray-900 tracking-tight">{stat.value}</p>
-              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-1">
-                {stat.label}
-              </p>
-            </motion.div>
+              stat={stat}
+              i={i}
+              isTodayRange={isTodayRange}
+              trends={trends}
+              today={today}
+              rangeLabel={rangeLabel}
+            />
           ))}
         </div>
 
@@ -756,7 +884,7 @@ export default function CallsOverviewPage() {
                 <p className="text-xs text-blue-200">Connection Rate</p>
                 <p className="text-lg font-bold">
                   {today?.totalCalls
-                    ? `${Math.round((today?.connectedCalls || 0) / today?.totalCalls * 100)}%`
+                    ? `${Math.round(((today?.connectedCalls || 0) / today?.totalCalls) * 100)}%`
                     : '0%'}
                 </p>
               </div>

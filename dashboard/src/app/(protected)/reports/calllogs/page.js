@@ -1583,7 +1583,7 @@ function PeriodicReportsPageContent() {
                 <DataTable
                   loading={loading}
                   showRowNumber
-                  emptyTitle="Nothing slipped through 🎉"
+                  emptyTitle="Nothing slipped through"
                   capNotice={
                     report?.total > neverAttendedRows.length
                       ? `Showing ${neverAttendedRows.length.toLocaleString()} of ${report.total.toLocaleString()} — narrow the date range or filters to see the rest.`

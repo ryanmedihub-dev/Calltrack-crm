@@ -34,6 +34,25 @@ function LoadingScreen() {
   );
 }
 
+// Pages that only the admin role may access via direct URL.
+// If a non-admin navigates to any of these prefixes, they are
+// redirected to /dashboard. The backend remains the real authority.
+const ADMIN_ONLY_PREFIXES = [
+  '/users',
+  '/analytics',
+  '/scripts',
+  '/activity',
+  '/calls/targets',
+  '/calls/unsynced',
+  '/leads/live-data',
+  '/leads/leads-uploads',
+  '/reports/users',
+];
+
+const MANAGER_ONLY_PREFIXES = [
+  '/team-leads',
+];
+
 export default function ProtectedLayout({ children }) {
   const router = useRouter();
   const [ready,      setReady]      = useState(false);
@@ -45,9 +64,29 @@ export default function ProtectedLayout({ children }) {
     if (!isAuthenticated()) { router.push('/login'); return; }
     const saved = localStorage.getItem('sidebarCollapsed');
     if (saved === 'true') setCollapsed(true);
-    api.get('/api/auth/me').then(r => setUser(r.data.data)).catch(() => {});
+    api.get('/api/auth/me').then(r => {
+      const fetchedUser = r.data.data;
+      setUser(fetchedUser);
+
+      // Client-side route guard: redirect non-admin / non-manager users away from restricted pages.
+      // This is a UX safeguard only — the backend enforces real authorization.
+      const isSysAdmin = fetchedUser?.role === 'admin' || !!fetchedUser?.isSuperAdmin;
+      if (fetchedUser && !isSysAdmin) {
+        const currentPath = window.location.pathname;
+        const isAdminOnly = ADMIN_ONLY_PREFIXES.some(prefix =>
+          currentPath === prefix || currentPath.startsWith(prefix + '/')
+        );
+        const isManagerOnly = fetchedUser.role !== 'manager' && MANAGER_ONLY_PREFIXES.some(prefix =>
+          currentPath === prefix || currentPath.startsWith(prefix + '/')
+        );
+        if (isAdminOnly || isManagerOnly) {
+          router.replace('/dashboard');
+        }
+      }
+    }).catch(() => {});
     setReady(true);
-  }, [router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleSidebar = () => {
     setCollapsed(prev => {

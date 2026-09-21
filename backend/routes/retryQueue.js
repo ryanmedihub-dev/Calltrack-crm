@@ -27,7 +27,8 @@ const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireManagement } = require('../middleware/auth');
+const { getScopedEmployeeIds } = require('../lib/scope');
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
@@ -136,7 +137,7 @@ const PROJECTION = {
   followUpDate: 1, connectedCallCount: 1, createdAt: 1, assignedTo: 1,
 };
 
-router.get('/retry-queue', protect, isManager, async (req, res) => {
+router.get('/retry-queue', protect, requireManagement, async (req, res) => {
   try {
     const { dateFrom, dateTo, teams } = req.query;
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit) || DEFAULT_LIMIT));
@@ -152,7 +153,17 @@ router.get('/retry-queue', protect, isManager, async (req, res) => {
       if (dateFrom) base.createdAt.$gte = new Date(dateFrom);
       if (dateTo) base.createdAt.$lte = new Date(dateTo);
     }
-    if (teams) {
+
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    if (scopedEmpIds !== null) {
+      if (teams) {
+        const teamList = teams.split(',').filter(Boolean);
+        const teamEmployeeIds = await User.distinct('_id', { tlName: { $in: teamList }, _id: { $in: scopedEmpIds } });
+        base.assignedTo = { $in: teamEmployeeIds };
+      } else {
+        base.assignedTo = { $in: scopedEmpIds };
+      }
+    } else if (teams) {
       const teamList = teams.split(',').filter(Boolean);
       const teamEmployeeIds = await User.distinct('_id', { tlName: { $in: teamList } });
       base.assignedTo = { $in: teamEmployeeIds };

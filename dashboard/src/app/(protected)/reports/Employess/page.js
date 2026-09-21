@@ -1,17 +1,20 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { Suspense, useEffect, useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import {
   BarChart, Bar, ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell,
+  PieChart, Pie, Cell, LabelList,
 } from 'recharts';
 import api from '../../../../lib/api';
 import { triggerServerExport } from '../../../../lib/downloads';
+import Pagination from '../../../../components/Pagination';
 import {
   DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton, TLFilter, Truncate,
   PhoneIco, UsersIco, CheckIco, GaugeIco, TrophyIco, ClockIco, DownloadIco,
   GridIco, BarChartTabIco, CalendarTabIco, ClockTabIco, NoEntryIco, ClipboardIco,
 } from '../../../../components/report-shared';
+import { Phone, CheckCircle, PhoneOff, TrendingUp, Search, ArrowRight, Users } from 'lucide-react';
 
 const TABS = [
   { key: 'summary',  label: 'Summary',           icon: <GridIco /> },
@@ -45,7 +48,7 @@ function StatusPill({ active }) {
   );
 }
 
-/* Inline-editable Daily Target cell, backed by the real PATCH /api/employees/:id/target endpoint */
+/* Inline-editable Daily Target cell, backed by PATCH /api/employees/:id/target */
 function TargetCell({ employeeId, initial, onSaved }) {
   const [value, setValue] = useState(initial ?? 0);
   const [editing, setEditing] = useState(false);
@@ -109,13 +112,50 @@ function StatusToggle({ employeeId, active, onSaved }) {
   );
 }
 
-export default function EmployeeReportsPage() {
+// Tooltip for Calls Agent Report Bar Chart
+function AgentBarTip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+  return (
+    <div className="bg-gray-900 text-white rounded-xl px-4 py-3 text-xs shadow-2xl border border-gray-700">
+      <p className="font-bold text-sm text-white mb-1">{data.employeeName}</p>
+      {data.tlName && <p className="text-gray-400 text-[11px] mb-2">TL: {data.tlName}</p>}
+      <div className="space-y-1">
+        <p className="flex items-center justify-between gap-4">
+          <span className="text-gray-400">Total Calls:</span>
+          <span className="font-bold tabular-nums text-white">{data.totalCalls}</span>
+        </p>
+        <p className="flex items-center justify-between gap-4">
+          <span className="text-emerald-400">Connected:</span>
+          <span className="font-bold tabular-nums text-emerald-400">{data.connectedCalls}</span>
+        </p>
+        <p className="flex items-center justify-between gap-4">
+          <span className="text-rose-400">Not Connected:</span>
+          <span className="font-bold tabular-nums text-rose-400">{data.notConnectedCalls}</span>
+        </p>
+        <p className="flex items-center justify-between gap-4 pt-1 border-t border-gray-700">
+          <span className="text-blue-400">Connect Rate:</span>
+          <span className="font-bold tabular-nums text-blue-400">{data.connectRate}%</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeReportsPageContent() {
+  const searchParams = useSearchParams();
+  const isCallsView = searchParams.get('view') === 'calls';
+
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('summary');
   const [chartMode, setChartMode] = useState('composed');
+  const [chartMetric, setChartMetric] = useState('total'); // 'total' | 'connected' for calls bar chart
+  const [callsTablePage, setCallsTablePage] = useState(1);
+  const [callsTableSearch, setCallsTableSearch] = useState('');
   const [employees, setEmployees] = useState([]);
   const [report, setReport] = useState(null);
-  const [rowOverrides, setRowOverrides] = useState({}); // optimistic edits for directory tab
+  const [rowOverrides, setRowOverrides] = useState({});
 
   const [filters, setFilters] = useState({ fromDate: '', toDate: '', employee: '', status: '', tl: '' });
 
@@ -130,7 +170,8 @@ export default function EmployeeReportsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get('/api/reports/employees-periodic', { params: { ...buildParams(), tab: activeTab, limit: 500 } });
+      const tabToFetch = isCallsView ? 'summary' : activeTab;
+      const res = await api.get('/api/reports/employees-periodic', { params: { ...buildParams(), tab: tabToFetch, limit: 500 } });
       setReport(res.data?.data || null);
       setRowOverrides({});
     } catch {
@@ -138,14 +179,11 @@ export default function EmployeeReportsPage() {
       toast.error('Failed to load report');
     }
     setLoading(false);
-  }, [buildParams, activeTab]);
+  }, [buildParams, activeTab, isCallsView]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/api/employees').then((r) => setEmployees(r.data.data || [])).catch(() => {}); }, []);
 
-  // Full-schema server-side export (every User field + performance aggregates,
-  // including total talktime) — replaces the old client-side CSV that only
-  // covered whatever columns happened to be on screen.
   const exportCSV = () => triggerServerExport({
     endpoint: '/api/reports/employees/export',
     params: buildParams(),
@@ -154,7 +192,21 @@ export default function EmployeeReportsPage() {
 
   const applyOverride = (id, patch) => setRowOverrides((o) => ({ ...o, [id]: { ...o[id], ...patch } }));
 
-  const performanceRows = (report?.employeePerformance || []).map((r) => ({ ...r, ...rowOverrides[r.employeeId] }));
+  const performanceRows = useMemo(() => {
+    return (report?.employeePerformance || []).map((r) => {
+      const merged = { ...r, ...rowOverrides[r.employeeId] };
+      const tot = merged.totalCalls || 0;
+      const conn = merged.connectedCalls || 0;
+      const notConn = Math.max(0, tot - conn);
+      const rate = tot ? Math.round((conn / tot) * 100) : 0;
+      return {
+        ...merged,
+        notConnectedCalls: notConn,
+        connectRate: rate
+      };
+    });
+  }, [report, rowOverrides]);
+
   const directoryRows = (report?.employees || []).map((r) => ({ ...r, ...rowOverrides[r.employeeId] }));
   const targetRows = (report?.records || []);
   const attentionRows = (report?.records || []);
@@ -164,6 +216,315 @@ export default function EmployeeReportsPage() {
 
   const employeeName = employees.find((e) => e._id === filters.employee)?.name;
 
+  // ── CALLS-SPECIFIC AGENT PERFORMANCE VIEW ─────────────────────────────────
+  if (isCallsView) {
+    const totalTeamCalls = performanceRows.reduce((s, r) => s + (r.totalCalls || 0), 0);
+    const totalTeamConnected = performanceRows.reduce((s, r) => s + (r.connectedCalls || 0), 0);
+    const totalTeamNotConnected = Math.max(0, totalTeamCalls - totalTeamConnected);
+    const teamConnectRate = totalTeamCalls ? Math.round((totalTeamConnected / totalTeamCalls) * 100) : 0;
+
+    // Filter agents for table & bar chart
+    const filteredAgents = performanceRows.filter((r) => {
+      if (!callsTableSearch.trim()) return true;
+      const q = callsTableSearch.toLowerCase();
+      const matchName = (r.employeeName || '').toLowerCase().includes(q);
+      const matchTL = (r.tlName || '').toLowerCase().includes(q);
+      return matchName || matchTL;
+    });
+
+    const sortedForChart = [...filteredAgents].sort((a, b) => {
+      return chartMetric === 'total'
+        ? (b.totalCalls || 0) - (a.totalCalls || 0)
+        : (b.connectedCalls || 0) - (a.connectedCalls || 0);
+    }).slice(0, 30); // Top 30 agents for clean bar comparison
+
+    const PAGE_SIZE = 10;
+    const totalPages = Math.max(1, Math.ceil(filteredAgents.length / PAGE_SIZE));
+    const currentPage = Math.min(callsTablePage, totalPages);
+    const paginatedAgents = filteredAgents.slice(
+      (currentPage - 1) * PAGE_SIZE,
+      currentPage * PAGE_SIZE
+    );
+
+    return (
+      <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+          <div>
+            <p className="text-xs text-gray-400 flex items-center gap-1.5 font-medium">
+              Calls <span className="text-gray-300">/</span> <span className="text-gray-600">Agents Report</span>
+            </p>
+            <h1 className="text-2xl font-bold text-gray-900 mt-1 tracking-tight">Agent Performance Report</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Comparative agent metrics across total calls, connected calls, and connection rates</p>
+          </div>
+          <button
+            onClick={exportCSV}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm self-start sm:self-auto"
+          >
+            <DownloadIco /> Export CSV
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+            <Field label="From Date">
+              <input type="date" className="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100"
+                value={filters.fromDate} onChange={(e) => setFilters({ ...filters, fromDate: e.target.value })} />
+            </Field>
+            <Field label="To Date">
+              <input type="date" className="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-100"
+                value={filters.toDate} onChange={(e) => setFilters({ ...filters, toDate: e.target.value })} />
+            </Field>
+            <Field label="Team Leader">
+              <TLFilter value={filters.tl} onChange={(v) => setFilters({ ...filters, tl: v })} className="w-full text-xs rounded-xl" />
+            </Field>
+            <Field label="Status">
+              <select className="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-blue-500 bg-white"
+                value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+                <option value="">All statuses</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </Field>
+            <button onClick={load} className="flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold h-[38px] transition-colors shadow-sm">
+              Apply Filter
+            </button>
+          </div>
+        </div>
+
+        {/* KPI Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white mb-3" style={{ background: 'linear-gradient(135deg,#6366F1,#818CF8)' }}>
+              <Users size={16} />
+            </div>
+            <p className="text-2xl font-bold text-gray-900 tabular-nums">{performanceRows.length}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">Total Agents</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white mb-3" style={{ background: 'linear-gradient(135deg,#2563EB,#3B82F6)' }}>
+              <Phone size={16} />
+            </div>
+            <p className="text-2xl font-bold text-gray-900 tabular-nums">{totalTeamCalls}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">Total Calls</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white mb-3" style={{ background: 'linear-gradient(135deg,#0D9488,#14B8A6)' }}>
+              <CheckCircle size={16} />
+            </div>
+            <p className="text-2xl font-bold text-emerald-600 tabular-nums">{totalTeamConnected}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">Connected Calls</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white mb-3" style={{ background: 'linear-gradient(135deg,#DC2626,#EF4444)' }}>
+              <PhoneOff size={16} />
+            </div>
+            <p className="text-2xl font-bold text-rose-600 tabular-nums">{totalTeamNotConnected}</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">Not Connected</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm col-span-2 sm:col-span-1">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white mb-3" style={{ background: 'linear-gradient(135deg,#16A34A,#22C55E)' }}>
+              <TrendingUp size={16} />
+            </div>
+            <p className="text-2xl font-bold text-blue-600 tabular-nums">{teamConnectRate}%</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">Connect Rate</p>
+          </div>
+        </div>
+
+        {/* ── COMPARATIVE BAR GRAPH SECTION ── */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h3 className="font-bold text-base text-gray-900">Agent Performance Comparison</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Hover over any bar to view full breakdown: Total, Connected, Not Connected, and Rate
+              </p>
+            </div>
+            {/* Toggle metric */}
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl self-start sm:self-auto">
+              <button
+                onClick={() => setChartMetric('total')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  chartMetric === 'total' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Total Calls
+              </button>
+              <button
+                onClick={() => setChartMetric('connected')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  chartMetric === 'connected' ? 'bg-white text-emerald-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Connected Calls
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <Skeleton className="h-72 w-full rounded-xl" />
+          ) : sortedForChart.length === 0 ? (
+            <div className="py-14 text-center text-gray-400 text-sm">
+              No agent performance data available for this range.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <div style={{ minWidth: Math.max(600, sortedForChart.length * 36) }}>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={sortedForChart} margin={{ top: 20, right: 10, left: -10, bottom: 40 }}>
+                    <defs>
+                      <linearGradient id="agentBarTotal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#2563EB" stopOpacity={0.9} />
+                        <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.4} />
+                      </linearGradient>
+                      <linearGradient id="agentBarConn" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0D9488" stopOpacity={0.9} />
+                        <stop offset="100%" stopColor="#14B8A6" stopOpacity={0.4} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                    <XAxis
+                      dataKey="employeeName"
+                      tick={{ fill: '#64748B', fontSize: 10 }}
+                      interval={0}
+                      angle={-35}
+                      textAnchor="end"
+                      height={50}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: '#94A3B8', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={32}
+                      allowDecimals={false}
+                    />
+                    <Tooltip content={<AgentBarTip />} cursor={{ fill: 'rgba(37,99,235,0.05)', radius: 6 }} />
+                    <Bar
+                      dataKey={chartMetric === 'total' ? 'totalCalls' : 'connectedCalls'}
+                      name={chartMetric === 'total' ? 'Total Calls' : 'Connected Calls'}
+                      fill={chartMetric === 'total' ? 'url(#agentBarTotal)' : 'url(#agentBarConn)'}
+                      radius={[6, 6, 0, 0]}
+                    >
+                      <LabelList
+                        dataKey={chartMetric === 'total' ? 'totalCalls' : 'connectedCalls'}
+                        position="top"
+                        style={{ fontSize: 9, fill: '#64748B', fontWeight: 600 }}
+                        formatter={(v) => (v > 0 ? v : '')}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── PAGINATED AGENTS TABLE ── */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+            <div>
+              <h3 className="font-bold text-sm text-gray-900">Agent Performance Table</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Paginated roster with complete metrics ({filteredAgents.length} total agents)</p>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search agent or TL..."
+                value={callsTableSearch}
+                onChange={(e) => { setCallsTableSearch(e.target.value); setCallsTablePage(1); }}
+                className="w-full pl-9 pr-7 py-1.5 text-xs bg-white border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 text-gray-800 placeholder-gray-400 transition-colors"
+              />
+              {callsTableSearch && (
+                <button
+                  onClick={() => { setCallsTableSearch(''); setCallsTablePage(1); }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50/75 border-b border-gray-100">
+                  {['Agent', 'Team Leader', 'Calls', 'Connected', 'Not Connected', 'Connect Rate', 'Target Achievement', 'Status'].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={i}>
+                      <td colSpan={8} className="px-5 py-3"><div className="h-6 bg-gray-100 rounded animate-pulse" /></td>
+                    </tr>
+                  ))
+                ) : paginatedAgents.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-10 text-center text-sm text-gray-400">
+                      No agents match your filter criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedAgents.map((r) => (
+                    <tr key={r.employeeId} className="hover:bg-blue-50/20 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" style={{ background: '#64748B' }}>
+                            {(r.employeeName || '?')[0].toUpperCase()}
+                          </div>
+                          <span className="font-semibold text-gray-900 text-xs">{r.employeeName}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-gray-600 font-medium">{r.tlName || '—'}</td>
+                      <td className="px-5 py-3.5 tabular-nums font-bold text-gray-900 text-xs">{r.totalCalls}</td>
+                      <td className="px-5 py-3.5 tabular-nums font-semibold text-emerald-600 text-xs">{r.connectedCalls}</td>
+                      <td className="px-5 py-3.5 tabular-nums text-gray-500 text-xs">{r.notConnectedCalls}</td>
+                      <td className="px-5 py-3.5">
+                        <span className="tabular-nums text-xs font-semibold" style={{ color: r.connectRate >= 50 ? '#16A34A' : r.connectRate > 0 ? '#D97706' : '#94A3B8' }}>
+                          {r.connectRate}%
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <AchievementBar pct={r.targetAchievement} />
+                      </td>
+                      <td className="px-5 py-3.5"><StatusPill active={r.isActive} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Footer */}
+          {filteredAgents.length > PAGE_SIZE && (
+            <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 border-t border-gray-100 gap-3 bg-white">
+              <p className="text-xs text-gray-500 font-medium">
+                Showing <span className="font-semibold text-gray-700">{(currentPage - 1) * PAGE_SIZE + 1}</span>–
+                <span className="font-semibold text-gray-700">{Math.min(currentPage * PAGE_SIZE, filteredAgents.length)}</span> of{' '}
+                <span className="font-semibold text-gray-700">{filteredAgents.length}</span> agents
+              </p>
+              <Pagination page={currentPage} pages={totalPages} onPage={setCallsTablePage} />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── DEFAULT / LEGACY TABS FOR EMPLOYEES & REPORTS PAGES ────────────────────
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
@@ -430,7 +791,7 @@ export default function EmployeeReportsPage() {
           <p className="text-xs text-gray-400 mb-4">Inactive accounts, employees below 50% of target, or no activity this period</p>
           <DataTable
             loading={loading}
-            emptyTitle="Nobody needs attention 🎉"
+            emptyTitle="Nobody needs attention"
             columns={[
               { key: 'employeeName', label: 'Employee' },
               {
@@ -490,5 +851,13 @@ export default function EmployeeReportsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function EmployeeReportsPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmployeeReportsPageContent />
+    </Suspense>
   );
 }

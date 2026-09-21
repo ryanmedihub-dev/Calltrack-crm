@@ -147,7 +147,7 @@ export default function SettingsPage() {
 
       {/* Tab strip */}
       <div className="flex gap-0.5 rounded-xl p-1 flex-wrap" style={{ background:'#fff', border:'1px solid #E2E8F0', width:'fit-content' }}>
-        {TABS.map(t => (
+        {TABS.filter(t => t !== 'Team' || user?.role === 'admin' || user?.role === 'manager').map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
             style={tab === t
@@ -252,7 +252,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── TEAM ── */}
-      {tab === 'Team' && user?.role === 'manager' && (
+      {tab === 'Team' && (user?.role === 'admin' || user?.role === 'manager') && (
         <div className="space-y-4">
           <Section title="Team Members" desc="Manage employee accounts">
             <div className="-mx-1">
@@ -341,15 +341,15 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {tab === 'Team' && user?.role !== 'manager' && (
+      {tab === 'Team' && user?.role !== 'admin' && user?.role !== 'manager' && (
         <div className="page-card p-10 text-center">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background:'#EFF6FF', color:'#2563EB' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
           </div>
-          <p className="font-medium" style={{ color:'#0F172A' }}>Manager access required</p>
-          <p className="text-sm mt-1" style={{ color:'#94A3B8' }}>Team management is available to managers only.</p>
+          <p className="font-medium" style={{ color:'#0F172A' }}>Admin access required</p>
+          <p className="text-sm mt-1" style={{ color:'#94A3B8' }}>Team management is available to administrators only.</p>
         </div>
       )}
 

@@ -29,13 +29,14 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireManagement } = require('../middleware/auth');
+const { getScopedEmployeeIds } = require('../lib/scope');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
 const cache = require('../lib/cache');
 
-router.get('/workforce-summary', protect, isManager, async (req, res) => {
+router.get('/workforce-summary', protect, requireManagement, async (req, res) => {
   try {
     const data = await cache.cached(['leads', 'workforce-summary', req.query], 60, () => buildWorkforceSummary(req.query));
     return res.json({ success: true, data });
@@ -48,10 +49,14 @@ router.get('/workforce-summary', protect, isManager, async (req, res) => {
 // scripts.js/my-stats there's no identity dimension that needs to be in the cache key.
 async function buildWorkforceSummary({ dateFrom, dateTo, teams }) {
 
-    // Every employee, not just active ones — `isActive` rides along on each agent row so the
-    // Owner panel can decide whether to hide inactive agents, rather than this endpoint
-    // silently deciding that for every consumer.
+    // Every employee in the user's hierarchy, not just active ones — `isActive` rides along on each agent row
     const employeeFilter = { role: 'employee' };
+
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    if (scopedEmpIds !== null) {
+      employeeFilter._id = { $in: scopedEmpIds };
+    }
+
     if (teams) {
       const teamList = teams.split(',').filter(Boolean);
       employeeFilter.tlName = { $in: teamList };

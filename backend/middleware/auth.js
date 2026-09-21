@@ -20,18 +20,43 @@ const protect = async (req, res, next) => {
   }
 };
 
-const isManager = (req, res, next) => {
-  if (req.user.role !== 'manager') {
-    return res.status(403).json({ success: false, error: 'Manager access required' });
+const requireRole = (...roles) => {
+  const allowedRoles = roles.flat();
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'Access denied: insufficient permissions' });
+    }
+    next();
+  };
+};
+
+const isSystemAdmin = (user) => Boolean(user && (user.role === 'admin' || user.isSuperAdmin === true));
+
+const isAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  if (!isSystemAdmin(req.user)) {
+    return res.status(403).json({ success: false, error: 'Access denied: insufficient permissions' });
   }
   next();
 };
 
-const isEmployee = (req, res, next) => {
-  if (req.user.role !== 'employee') {
-    return res.status(403).json({ success: false, error: 'Employee access required' });
+const isManager = requireRole('manager');
+const isTL = requireRole('tl');
+const isEmployee = requireRole('employee');
+const requireManagement = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
-  next();
+  if (isSystemAdmin(req.user) || ['manager', 'tl'].includes(req.user.role)) {
+    return next();
+  }
+  return res.status(403).json({ success: false, error: 'Access denied: insufficient permissions' });
 };
 
-module.exports = { protect, isManager, isEmployee };
+module.exports = { protect, requireRole, isSystemAdmin, isAdmin, isManager, isTL, isEmployee, requireManagement };
+

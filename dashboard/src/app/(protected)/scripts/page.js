@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import { X } from 'lucide-react';
 import api from '../../../lib/api';
 
 const CATEGORIES = ['All', 'Intro', 'Follow-Up', 'Objection', 'Closing', 'Custom'];
@@ -22,11 +23,11 @@ function Modal({ title, onClose, children }) {
         <div className="flex items-center justify-between p-5 flex-shrink-0" style={{ borderBottom:'1px solid #E2E8F0' }}>
           <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>{title}</h3>
           <button onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-lg"
+            className="w-8 h-8 flex items-center justify-center rounded-lg"
             style={{ color:'#94A3B8' }}
             onMouseEnter={e=>{ e.currentTarget.style.background='#FFF1F2'; e.currentTarget.style.color='#EF4444'; }}
             onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#94A3B8'; }}>
-            ✕
+            <X size={18} />
           </button>
         </div>
         <div className="overflow-y-auto flex-1">{children}</div>

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { ChevronRight } from 'lucide-react';
 import api from '../../../../lib/api';
 
 function Ico({ size=16, children }) {
@@ -18,7 +19,7 @@ const EyeOffIco = ({s=14}) => <Ico size={s}><path d="M17.94 17.94A10.07 10.07 0 
 // `status`/`workingStatus` string on the backend, so reads must derive from
 // `isActive` (not fall back to a hardcoded 'active') and writes must go
 // through PATCH /:id/status (the only route that persists it).
-const EMPTY = { name:'', email:'', phone:'', role:'agent', status:'active', password:'', confirmPassword:'', tlName:'', ryanEmployeeCode:'' };
+const EMPTY = { name:'', email:'', phone:'', role:'employee', status:'active', password:'', confirmPassword:'', tlName:'', ryanEmployeeCode:'' };
 
 export default function UpdateUsersPage() {
   const params   = useSearchParams();
@@ -37,12 +38,28 @@ export default function UpdateUsersPage() {
 
   const load = useCallback(()=>{
     setLoading(true);
-    api.get('/api/employees').then(r=>{
-      const list = r.data?.data||[];
+    // Fetch all non-admin users: employees, managers, and TLs
+    Promise.all([
+      api.get('/api/employees').catch(()=>({ data: { data: [] } })),
+      api.get('/api/users/hierarchy').catch(()=>({ data: { data: null } })),
+    ]).then(([empRes, hierRes]) => {
+      const employees = empRes.data?.data || [];
+      // Extract managers and TLs from hierarchy
+      const hier = hierRes.data?.data;
+      const managers = (hier?.managers || []).map(m => m.manager).filter(Boolean);
+      const tls = (hier?.managers || []).flatMap(m => (m.teamLeads || []).map(t => t.tl)).filter(Boolean);
+      const unassignedTLs = (hier?.unassignedTLs || []).filter(Boolean);
+      // Deduplicate by _id
+      const seen = new Set();
+      const list = [...employees, ...managers, ...tls, ...unassignedTLs].filter(u => {
+        if (!u?._id || seen.has(u._id.toString())) return false;
+        seen.add(u._id.toString());
+        return true;
+      });
       setUsers(list);
       if (editId) {
         const u = list.find(x=>x._id===editId);
-        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' }); }
+        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'employee', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' }); }
       }
     }).catch(()=>{}).finally(()=>setLoading(false));
   }, [editId]);
@@ -53,7 +70,7 @@ export default function UpdateUsersPage() {
 
   const selectUser = (u) => {
     setSelected(u); setMode('edit'); setError(''); setSuccess('');
-    setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' });
+    setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'employee', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' });
   };
 
   const startAdd = () => {
@@ -71,6 +88,9 @@ export default function UpdateUsersPage() {
       const body = { name:form.name, email:form.email, phone:form.phone, role:form.role, tlName:form.tlName, ryanEmployeeCode:form.ryanEmployeeCode };
       if (form.password) body.password = form.password;
       if (mode==='edit' && selected) {
+        // Build update body — only send fields the PUT endpoint supports
+        const body = { name:form.name, phone:form.phone, tlName:form.tlName };
+        if (form.password) body.password = form.password;
         await api.put(`/api/employees/${selected._id}`, body);
         // Status lives on a separate boolean field (isActive) and is only
         // persisted through this dedicated endpoint — PUT /:id ignores it.
@@ -80,8 +100,11 @@ export default function UpdateUsersPage() {
         }
         setSuccess('User updated successfully.');
       } else {
-        await api.post('/api/employees', body);
-        setSuccess('New user created successfully.');
+        // Create: send full payload including role
+        const body = { name:form.name, email:form.email, phone:form.phone, role:form.role, tlName:form.tlName };
+        if (form.password) body.password = form.password;
+        const roleLabel = form.role === 'tl' ? 'Team Lead' : form.role === 'employee' ? 'Agent' : form.role.charAt(0).toUpperCase()+form.role.slice(1);
+        setSuccess(`${roleLabel} account created successfully.`);
       }
       load();
     } catch(e) {
@@ -137,7 +160,7 @@ export default function UpdateUsersPage() {
                     <p className="font-semibold text-xs truncate" style={{ color:active?'#2563EB':'#0F172A' }}>{u.name||'Unknown'}</p>
                     <p className="text-[10px] truncate capitalize" style={{ color:'#94A3B8' }}>{u.role||'agent'} · {u.isActive===false?'inactive':'active'}{u.ryanEmployeeCode ? ` · ${u.ryanEmployeeCode}` : ''}</p>
                   </div>
-                  {active && <span style={{ color:'#2563EB', fontSize:18 }}>›</span>}
+                  {active && <ChevronRight size={16} className="flex-shrink-0" style={{ color:'#2563EB' }} />}
                 </button>
               );
             })}
@@ -193,8 +216,8 @@ export default function UpdateUsersPage() {
                   <select required className="form-input text-sm" value={form.role} onChange={e=>setF('role',e.target.value)}>
                     <option value="admin">Admin</option>
                     <option value="manager">Manager</option>
-                    <option value="supervisor">Supervisor</option>
-                    <option value="agent">Agent</option>
+                    <option value="tl">Team Lead</option>
+                    <option value="employee">Agent</option>
                   </select>
                 </div>
                 <div>

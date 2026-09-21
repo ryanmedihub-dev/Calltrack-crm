@@ -1,2 +1,13 @@
 # Locally-built APKs for manual/offline install — not meant to be version controlled
 offline/
+node_modules/
+.env
+.env.local
+.env.*.local
+*.log
+.next/
+.vercel/
+scratch/
+*.bak
+# Phase 12 CallLog audit reports — may contain raw phone numbers (production data)
+backend/reports/*.json

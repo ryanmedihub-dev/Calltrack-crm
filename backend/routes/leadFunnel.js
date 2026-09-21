@@ -3,21 +3,29 @@ const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireManagement } = require('../middleware/auth');
+const { getScopedEmployeeIds, validateEmployeeInScope } = require('../lib/scope');
 const normalizePhone = require('../lib/normalizePhone');
 
-router.get('/funnel-data', protect, isManager, async (req, res) => {
+router.get('/funnel-data', protect, requireManagement, async (req, res) => {
   try {
     const { agentIds, teams, dateFrom, dateTo, leadNumber } = req.query;
 
-    // Single lead-number lookup short-circuits every other filter —
-    // this is the "search one lead" case from the filter bar.
+    // Single lead-number lookup
     if (leadNumber) {
       const phone = normalizePhone(leadNumber) || leadNumber;
       const lead = await Lead.findOne({ phone })
         .populate('assignedTo', 'name tlName')
         .lean();
-      return res.json({ success: true, data: lead ? [serializeLead(lead)] : [] });
+      if (!lead) return res.json({ success: true, data: [] });
+
+      if (lead.assignedTo) {
+        const inScope = await validateEmployeeInScope(req.user, lead.assignedTo._id);
+        if (!inScope) return res.json({ success: true, data: [] });
+      } else if (req.user.role !== 'admin') {
+        return res.json({ success: true, data: [] });
+      }
+      return res.json({ success: true, data: [serializeLead(lead)] });
     }
 
     const filter = {};
@@ -27,6 +35,9 @@ router.get('/funnel-data', protect, isManager, async (req, res) => {
       if (dateFrom) filter.createdAt.$gte = new Date(dateFrom);
       if (dateTo) filter.createdAt.$lte = new Date(dateTo);
     }
+
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    const scopedIdStrings = scopedEmpIds ? new Set(scopedEmpIds.map((id) => id.toString())) : null;
 
     // Resolve team names -> employee ids, then merge with any directly
     // passed agentIds so both filters can be applied together.
@@ -41,7 +52,17 @@ router.get('/funnel-data', protect, isManager, async (req, res) => {
         : teamIdStrings;
     }
 
-    if (resolvedAgentIds) filter.assignedTo = { $in: resolvedAgentIds };
+    // Intersect or apply server-side scope
+    if (scopedIdStrings !== null) {
+      if (resolvedAgentIds) {
+        const intersected = resolvedAgentIds.filter((id) => scopedIdStrings.has(id));
+        filter.assignedTo = { $in: intersected };
+      } else {
+        filter.assignedTo = { $in: scopedEmpIds };
+      }
+    } else if (resolvedAgentIds) {
+      filter.assignedTo = { $in: resolvedAgentIds };
+    }
 
     const leads = await Lead.find(filter)
       .populate('assignedTo', 'name tlName')

@@ -2,17 +2,18 @@
 import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
 import { parseUTC } from '../../../lib/timezone';
+import { UserPlus, FileEdit, Trash2, RefreshCw, Key, Activity } from 'lucide-react';
 
 const ACTION_CONFIG = {
-  'lead.create': { label:'Lead Created',  color:'#16A34A', bg:'rgba(22,163,74,0.08)',  icon:'➕' },
-  'lead.update': { label:'Lead Updated',  color:'#D97706', bg:'rgba(217,119,6,0.08)', icon:'✎'  },
-  'lead.delete': { label:'Lead Deleted',  color:'#EF4444', bg:'rgba(220,38,38,0.08)',  icon:'🗑' },
-  'call.sync':   { label:'Calls Synced',  color:'#2563EB', bg:'rgba(37,99,235,0.08)', icon:'🔄' },
-  'auth.login':  { label:'Login',         color:'#7C3AED', bg:'rgba(124,58,237,0.08)', icon:'🔑' },
+  'lead.create': { label:'Lead Created',  color:'#16A34A', bg:'rgba(22,163,74,0.08)',  icon: <UserPlus size={15} /> },
+  'lead.update': { label:'Lead Updated',  color:'#D97706', bg:'rgba(217,119,6,0.08)', icon: <FileEdit size={15} /> },
+  'lead.delete': { label:'Lead Deleted',  color:'#EF4444', bg:'rgba(220,38,38,0.08)',  icon: <Trash2 size={15} /> },
+  'call.sync':   { label:'Calls Synced',  color:'#2563EB', bg:'rgba(37,99,235,0.08)', icon: <RefreshCw size={15} /> },
+  'auth.login':  { label:'Login',         color:'#7C3AED', bg:'rgba(124,58,237,0.08)', icon: <Key size={15} /> },
 };
 
 function getActionCfg(action) {
-  return ACTION_CONFIG[action]||{ label:action, color:'#64748B', bg:'rgba(100,116,139,0.08)', icon:'•' };
+  return ACTION_CONFIG[action]||{ label:action, color:'#64748B', bg:'rgba(100,116,139,0.08)', icon: <Activity size={15} /> };
 }
 
 function groupByDate(logs) {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { fmtDateTime } from '../../../../lib/timezone';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 import { DataTable, StatCard, Field, Truncate, Ico, UsersIco } from '../../../../components/report-shared';
 import { triggerServerExport } from '../../../../lib/downloads';
 import { FEATURES } from '../../../../lib/features';
@@ -222,7 +223,7 @@ export default function LiveDataPage() {
 
   useEffect(() => {
     api.get('/api/auth/me').then((res) => {
-      const manager = res.data?.data?.role === 'manager';
+      const manager = res.data?.data?.role === 'admin' || res.data?.data?.role === 'manager';
       setIsManager(manager);
       if (manager) loadEmployeeAttempts();
       else setEmployeeAttemptsLoading(false);
@@ -535,9 +536,9 @@ export default function LiveDataPage() {
                 key: 'extraDetails', label: 'Details', width: 100, searchable: false, sortable: false,
                 render: (r) => (r.extraDetails?.length
                   ? (
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                    <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full"
                       style={{ background: '#F5F3FF', color: '#7C3AED' }}>
-                      {r.extraDetails.length} {expandedId === r._id ? '▴' : '▾'}
+                      {r.extraDetails.length} {expandedId === r._id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                     </span>
                   )
                   : <span className="text-gray-300">—</span>),

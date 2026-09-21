@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { DataTable, TLFilter, Truncate } from '../../../../components/report-shared';
+import { Check, X } from 'lucide-react';
 
 const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
 
@@ -152,7 +153,7 @@ export default function DailyTargetsPage() {
                   <div>
                     <p className="font-semibold text-sm leading-none" style={{ color:'#0F172A' }}><Truncate text={emp.name} /></p>
                     {emp.tlName && <p className="text-[10px] mt-0.5" style={{ color:'#94A3B8' }}>TL: <Truncate text={emp.tlName} max={14} /></p>}
-                    {done&&<span className="text-[10px] font-bold tracking-wide" style={{ color:'#16A34A' }}>TARGET MET ✓</span>}
+                    {done&&<span className="text-[10px] font-bold tracking-wide flex items-center gap-1" style={{ color:'#16A34A' }}><Check size={11} className="stroke-[2.5]" /> TARGET MET</span>}
                   </div>
                 </div>
 
@@ -164,10 +165,10 @@ export default function DailyTargetsPage() {
                       className="form-input w-16 text-center py-1.5 text-sm"/>
                     <button onClick={()=>applyTarget(emp._id,editVal)}
                       className="w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center text-white"
-                      style={{ background:'#2563EB' }}>✓</button>
+                      style={{ background:'#2563EB' }}><Check size={14} /></button>
                     <button onClick={()=>setEditId(null)}
                       className="w-7 h-7 rounded-lg text-xs flex items-center justify-center"
-                      style={{ background:'#F1F5F9', color:'#64748B', border:'1px solid #E2E8F0' }}>✕</button>
+                      style={{ background:'#F1F5F9', color:'#64748B', border:'1px solid #E2E8F0' }}><X size={14} /></button>
                   </div>
                 ) : (
                   <button onClick={()=>{ setEditId(emp._id); setEditVal(String(target)); }}
@@ -207,7 +208,7 @@ export default function DailyTargetsPage() {
               { key: 'target', label: 'Target', align: 'right', render: (emp) => <span style={{ color:'#374151' }}>{emp.target}</span> },
               {
                 key: 'gap', label: 'Gap', align: 'right',
-                render: (emp) => <span style={{ fontWeight:600, color:emp.gap>0?'#EF4444':'#16A34A' }}>{emp.gap>0?`-${emp.gap}`:'✓'}</span>,
+                render: (emp) => <span className="inline-flex items-center" style={{ fontWeight:600, color:emp.gap>0?'#EF4444':'#16A34A' }}>{emp.gap>0?`-${emp.gap}`:<Check size={14} className="stroke-[2.5]" />}</span>,
               },
               {
                 key: 'done', label: 'Status', align: 'right', searchable: false,

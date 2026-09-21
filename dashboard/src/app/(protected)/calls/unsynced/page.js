@@ -6,6 +6,7 @@ import { triggerLocalExport } from '../../../../lib/downloads';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DataTable } from '../../../../components/report-shared';
+import { PhoneIncoming, PhoneOutgoing, PhoneMissed, PhoneOff, Phone, AlertCircle, Lightbulb, Download } from 'lucide-react';
 
 function Ico({ size = 16, children, className = '' }) {
   return (
@@ -83,10 +84,10 @@ const CloseIco = () => (
   </Ico>
 );
 const CALL_TYPE_STYLES = {
-  incoming: { bg: 'rgba(34,197,94,0.10)', color: '#16A34A', border: '#BBF7D0', label: 'Incoming', icon: '📥' },
-  outgoing: { bg: 'rgba(245,158,11,0.10)', color: '#D97706', border: '#FDE68A', label: 'Outgoing', icon: '📤' },
-  missed: { bg: 'rgba(239,68,68,0.10)', color: '#DC2626', border: '#FECACA', label: 'Missed', icon: '❌' },
-  rejected: { bg: 'rgba(139,92,246,0.10)', color: '#7C3AED', border: '#DDD6FE', label: 'Rejected', icon: '🚫' },
+  incoming: { bg: 'rgba(34,197,94,0.10)', color: '#16A34A', border: '#BBF7D0', label: 'Incoming', icon: PhoneIncoming },
+  outgoing: { bg: 'rgba(245,158,11,0.10)', color: '#D97706', border: '#FDE68A', label: 'Outgoing', icon: PhoneOutgoing },
+  missed: { bg: 'rgba(239,68,68,0.10)', color: '#DC2626', border: '#FECACA', label: 'Missed', icon: PhoneMissed },
+  rejected: { bg: 'rgba(139,92,246,0.10)', color: '#7C3AED', border: '#DDD6FE', label: 'Rejected', icon: PhoneOff },
 };
 
 const CALL_TYPES = [
@@ -104,14 +105,15 @@ function TypeBadge({ type }) {
       color: '#64748B',
       border: '#CBD5E1',
       label: type || '—',
-      icon: '📞',
+      icon: Phone,
     };
+  const IconComp = s.icon;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
+      className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
       style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
     >
-      {s.icon} {s.label}
+      {IconComp && <IconComp size={12} className="flex-shrink-0" />} {s.label}
     </span>
   );
 }
@@ -378,10 +380,10 @@ export default function UnsyncedCallsPage() {
             </div>
             <div className="flex-1">
               <div className="text-sm bg-white/60 backdrop-blur-sm rounded-xl px-4 py-3 text-gray-700 border border-red-100">
-                <span className="font-semibold text-red-600">⚠️ Action Required:</span>{' '}
+                <span className="font-semibold text-red-600 inline-flex items-center gap-1.5"><AlertCircle size={14} className="flex-shrink-0" /> Action Required:</span>{' '}
                 These calls were made/received but the contact number doesn't match any lead in the system.
-                <span className="block text-xs text-gray-500 mt-1">
-                  💡 Create leads from these calls to sync them with your database.
+                <span className="flex items-center gap-1.5 text-xs text-gray-500 mt-1">
+                  <Lightbulb size={13} className="text-amber-500 flex-shrink-0" /> Create leads from these calls to sync them with your database.
                 </span>
               </div>
             </div>
@@ -390,13 +392,14 @@ export default function UnsyncedCallsPage() {
                 {Object.entries(typeCounts).map(([type, count]) => {
                   const style = CALL_TYPE_STYLES[type];
                   if (!style) return null;
+                  const IconComp = style.icon;
                   return (
                     <span
                       key={type}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5"
                       style={{ background: style.bg, color: style.color }}
                     >
-                      {style.icon} {style.label}: {count}
+                      {IconComp && <IconComp size={12} className="flex-shrink-0" />} {style.label}: {count}
                     </span>
                   );
                 })}
@@ -518,9 +521,9 @@ export default function UnsyncedCallsPage() {
               </button>
               <button
                 onClick={exportList}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors duration-200 text-sm font-medium"
+                className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors duration-200 text-sm font-medium inline-flex items-center gap-2"
               >
-                📥 Export List
+                <Download size={14} /> Export List
               </button>
             </div>
           </motion.div>

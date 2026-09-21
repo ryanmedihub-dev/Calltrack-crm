@@ -4,7 +4,8 @@ const router = express.Router();
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isAdmin, requireManagement, isSystemAdmin } = require('../middleware/auth');
+const { getScopedEmployeeIds, validateEmployeeInScope, resolveEmployeeFilter } = require('../lib/scope');
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 const fmtDuration = require('../lib/formatDuration');
@@ -308,18 +309,24 @@ async function pageDetailsByNumber(pre, numbers, extraMatch) {
 }
 
 // GET /api/reports/periodic — full periodic report
-//
-// Every tab is answered by an aggregation that returns only the rows that tab renders. The
-// previous implementation loaded the entire filtered call set into Node
-// (`CallLog.find(filter).populate(...).lean()`, no limit) and grouped it in JavaScript — on a
-// month-wide range that is hundreds of thousands of documents over the wire on every single
-// request, and the callHistory tab paid for that slab only to discard it and re-query one page.
-router.get('/periodic', protect, isManager, async (req, res) => {
+router.get('/periodic', protect, requireManagement, async (req, res) => {
   try {
     const {
       startDate, endDate, employeeId, callType, duration, callTime, tlName, source, search,
       connectedOnly, tab = 'summary', page = 1, limit = 100,
     } = req.query;
+
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, employeeId, 'employeeId');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    // Helper used throughout this route to safely cast string ids coming from
+    // resolveEmployeeFilter / resolveEmployeeIdsForTL to ObjectId for $in arrays.
+    const toObjectId = (id) =>
+      typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)
+        ? new mongoose.Types.ObjectId(id)
+        : id;
 
     const start = startDate ? istDateStrStart(startDate) : istDayStart(0);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
@@ -327,24 +334,45 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     const pageSize = Math.min(1000, Math.max(1, parseInt(limit, 10) || 100));
     const skip = (pageNum - 1) * pageSize;
 
-    const filter = { timestamp: { $gte: start, $lte: end } };
-    // `aggregate()` does no schema casting the way `find()` does — an employeeId left as a
-    // string matches nothing in a $match and the report silently comes back empty.
-    if (employeeId) {
-      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
-        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+    // Start from the RBAC scope filter — this is the authoritative employee boundary.
+    // scopeFilter already contains `employeeId: <value>` when resolveEmployeeFilter
+    // validated (and accepted) the `employeeId` query param, or `employeeId: {$in: [...]}`
+    // when the user is a manager/TL whose scope is restricted.
+    const filter = { ...scopeFilter, timestamp: { $gte: start, $lte: end } };
+
+    // Ensure the employeeId field in filter uses ObjectId values, not raw strings.
+    if (filter.employeeId) {
+      if (filter.employeeId.$in) {
+        filter.employeeId = { $in: filter.employeeId.$in.map(toObjectId) };
+      } else {
+        filter.employeeId = toObjectId(filter.employeeId);
       }
-      filter.employeeId = new mongoose.Types.ObjectId(employeeId);
-    } else if (tlName) {
-      filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     }
+
+    // tlName: further narrows the authorized scope to a specific TL's employees.
+    // If the scopeFilter already restricts employeeId, intersect — never expand.
+    if (!employeeId && tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (filter.employeeId && filter.employeeId.$in) {
+        const scopedStrs = new Set(filter.employeeId.$in.map((id) => id.toString()));
+        filter.employeeId = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())).map(toObjectId) };
+      } else if (filter.employeeId) {
+        // scope was a single id — keep only if it's within the TL's team
+        const scopedStr = filter.employeeId.toString();
+        const match = tlEmpIds.find((id) => id.toString() === scopedStr);
+        filter.employeeId = match ? toObjectId(match) : { $in: [] };
+      } else {
+        filter.employeeId = { $in: tlEmpIds.map(toObjectId) };
+      }
+    }
+
     if (callType) filter.callType = callType;
     // Source lives on the linked Lead, not the call itself — resolve to the matching lead ids
     // first so every tab below (they all read off the same `filter`) narrows consistently. A
     // call with no leadId (never linked to a lead) has no source and is excluded by this filter.
     if (source) {
       const matchingLeadIds = await Lead.find({ source: { $regex: source, $options: 'i' } }).distinct('_id');
-      filter.leadId = { $in: matchingLeadIds };
+      filter.leadId = { $in: matchingLeadIds.map(toObjectId) };
     }
     // Added for ryan-crm's Owner Panel call report — "search by number" (also
     // matches contact name), same pattern as GET /api/calls's own `search`.
@@ -369,9 +397,14 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       : [{ $match: baseMatch }];
 
     const agg = (stages) => CallLog.aggregate([...pre, ...stages]).allowDiskUse(true);
-    // Cache key must cover every input that changes the answer, including the caller's TL scope.
+
+    // Cache key must cover every input that changes the answer, including the caller's authorization scope.
+    const userScopeKey = req.user && (req.user.role === 'admin' || req.user.isSuperAdmin)
+      ? 'admin'
+      : (req.user?._id?.toString() || 'anon');
+
     const cacheParts = [
-      'periodic', tab, start.getTime(), end.getTime(), employeeId || '', tlName || '',
+      'periodic', userScopeKey, tab, start.getTime(), end.getTime(), employeeId || '', tlName || '',
       callType || '', duration || '', callTime || '', source || '', search || '',
       connectedOnly || '', pageNum, pageSize,
     ];
@@ -453,7 +486,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       return res.json({ success: true, data });
     }
 
-    if (tab === 'daywise') {
+    if (tab === 'daywise' || tab === 'dayWise') {
       const data = await cached(async () => {
         const rows = await agg([
           {
@@ -662,7 +695,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
       return res.json({ success: true, data });
     }
 
-    if (tab === 'notPickupByClient') {
+    if (tab === 'notPickupByClient' || tab === 'notPickup') {
       const data = await cached(async () => {
         // "Outgoing that the client never picked up" narrows the same filter rather than
         // re-deriving it from a full in-memory list. An explicit callType filter for some
@@ -815,6 +848,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 });
 
 // Lead status keys/labels — mirrors dashboard/src/app/(protected)/reports/lead/page.js STATUS_META
+
 const LEAD_STATUS_LABELS = {
   new:            'New',
   contacted:      'Contacted',
@@ -869,30 +903,49 @@ const LEAD_EMPLOYEE_STAGES = [
 ];
 
 // GET /api/reports/leads-periodic — leads report (Lead Reports page)
-//
-// Same rewrite as /periodic above: each tab is one aggregation returning only what it renders.
-// The old version ran `Lead.find(filter).populate(...).lean()` with no limit *and no
-// projection*, so every lead dragged its entire `changelog` audit array, `callLogs` array and
-// `extraDetails` across the wire — by far the heaviest payload in the app — just to count
-// statuses in JavaScript.
-router.get('/leads-periodic', protect, isManager, async (req, res) => {
+router.get('/leads-periodic', protect, requireManagement, async (req, res) => {
   try {
     const {
       startDate, endDate, employeeId, status, source, leadTime, tlName,
       tab = 'summary', page = 1, limit = 500,
     } = req.query;
 
-    const filter = {};
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, employeeId, 'assignedTo');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
+
+    const toObjectId = (id) =>
+      typeof id === 'string' && mongoose.Types.ObjectId.isValid(id)
+        ? new mongoose.Types.ObjectId(id)
+        : id;
+
+    const filter = { ...scopeFilter };
     if (startDate) filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
     if (endDate) filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
-    if (employeeId) {
-      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
-        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+
+    if (filter.assignedTo) {
+      if (filter.assignedTo.$in) {
+        filter.assignedTo = { $in: filter.assignedTo.$in.map(toObjectId) };
+      } else {
+        filter.assignedTo = toObjectId(filter.assignedTo);
       }
-      filter.assignedTo = new mongoose.Types.ObjectId(employeeId);
-    } else if (tlName) {
-      filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     }
+
+    if (!employeeId && tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (filter.assignedTo && filter.assignedTo.$in) {
+        const scopedStrs = new Set(filter.assignedTo.$in.map((id) => id.toString()));
+        filter.assignedTo = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())).map(toObjectId) };
+      } else if (filter.assignedTo) {
+        const scopedStr = filter.assignedTo.toString();
+        const match = tlEmpIds.find((id) => id.toString() === scopedStr);
+        filter.assignedTo = match ? toObjectId(match) : { $in: [] };
+      } else {
+        filter.assignedTo = { $in: tlEmpIds.map(toObjectId) };
+      }
+    }
+
     if (status) filter.status = status;
     if (source) filter.source = { $regex: source, $options: 'i' };
     applyLeadTimeFilter(filter, leadTime);
@@ -910,8 +963,12 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
     const pageSize = Math.min(2000, Math.max(1, parseInt(limit, 10) || 500));
     const skip = (pageNum - 1) * pageSize;
 
+    const userScopeKey = req.user && (req.user.role === 'admin' || req.user.isSuperAdmin)
+      ? 'admin'
+      : (req.user?._id?.toString() || 'anon');
+
     const cacheParts = [
-      'leads-periodic', tab, startDate || '', endDate || '', employeeId || '', tlName || '',
+      'leads-periodic', userScopeKey, tab, startDate || '', endDate || '', employeeId || '', tlName || '',
       status || '', source || '', leadTime || '', pageNum, pageSize,
     ];
     // leadList carries the inline-editable note column — same reasoning as callHistory above.
@@ -1245,17 +1302,29 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
   }
 });
 
-// GET /api/reports/employees-periodic — Employee Reports page
-router.get('/employees-periodic', protect, isManager, async (req, res) => {
+// GET /api/reports/employees-periodic — Employee Reports page (scoped by hierarchy)
+router.get('/employees-periodic', protect, requireManagement, async (req, res) => {
   try {
     const { startDate, endDate, employeeId, status, tlName, tab = 'summary' } = req.query;
+
+    const { allowed, filter: scopeFilter, error } = await resolveEmployeeFilter(req.user, employeeId, '_id');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error });
+    }
 
     const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
-    const empFilter = { role: 'employee' };
-    if (employeeId) empFilter._id = employeeId;
-    if (tlName) empFilter.tlName = tlName;
+    const empFilter = { role: 'employee', ...scopeFilter };
+    if (tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (empFilter._id && empFilter._id.$in) {
+        const scopedStrs = new Set(empFilter._id.$in.map((id) => id.toString()));
+        empFilter._id = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())) };
+      } else {
+        empFilter._id = { $in: tlEmpIds };
+      }
+    }
     if (status === 'active') empFilter.isActive = true;
     else if (status === 'inactive') empFilter.isActive = false;
 
@@ -1265,10 +1334,39 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const callFilter = { timestamp: { $gte: start, $lte: end }, employeeId: { $in: employeeIds } };
     const leadFilter = { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } };
 
-    const [calls, leads] = await Promise.all([
-      CallLog.find(callFilter).select('employeeId duration').lean(),
-      Lead.find(leadFilter).select('assignedTo status').lean(),
-    ]);
+    const isBucketTab = ['analysis', 'dayWise', 'hourly'].includes(tab);
+
+    let callAgg = [];
+    let leadAgg = [];
+    let calls = [];
+    let leads = [];
+
+    if (!isBucketTab) {
+      [callAgg, leadAgg] = await Promise.all([
+        CallLog.aggregate([
+          { $match: { timestamp: { $gte: start, $lte: end }, employeeId: { $in: employeeIds } } },
+          { $group: {
+            _id: '$employeeId',
+            totalCalls: { $sum: 1 },
+            connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+            totalDuration: { $sum: { $ifNull: ['$duration', 0] } }
+          }}
+        ]),
+        Lead.aggregate([
+          { $match: { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } } },
+          { $group: {
+            _id: '$assignedTo',
+            leadsAssigned: { $sum: 1 },
+            leadsConverted: { $sum: { $cond: [{ $eq: ['$status', 'converted'] }, 1, 0] } }
+          }}
+        ])
+      ]);
+    } else {
+      [calls, leads] = await Promise.all([
+        CallLog.find(callFilter).select('employeeId duration timestamp').lean(),
+        Lead.find(leadFilter).select('assignedTo status createdAt').lean(),
+      ]);
+    }
 
     const statsMap = {};
     employeesList.forEach((e) => {
@@ -1278,19 +1376,36 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
         totalCalls: 0, connectedCalls: 0, totalDuration: 0, leadsAssigned: 0, leadsConverted: 0
       };
     });
-    calls.forEach((c) => {
-      const s = statsMap[c.employeeId?.toString()];
-      if (!s) return;
-      s.totalCalls++;
-      s.totalDuration += c.duration || 0;
-      if ((c.duration || 0) > 0) s.connectedCalls++;
-    });
-    leads.forEach((l) => {
-      const s = statsMap[l.assignedTo?.toString()];
-      if (!s) return;
-      s.leadsAssigned++;
-      if (l.status === 'converted') s.leadsConverted++;
-    });
+
+    if (!isBucketTab) {
+      callAgg.forEach((c) => {
+        const s = statsMap[c._id?.toString()];
+        if (!s) return;
+        s.totalCalls = c.totalCalls || 0;
+        s.totalDuration = c.totalDuration || 0;
+        s.connectedCalls = c.connectedCalls || 0;
+      });
+      leadAgg.forEach((l) => {
+        const s = statsMap[l._id?.toString()];
+        if (!s) return;
+        s.leadsAssigned = l.leadsAssigned || 0;
+        s.leadsConverted = l.leadsConverted || 0;
+      });
+    } else {
+      calls.forEach((c) => {
+        const s = statsMap[c.employeeId?.toString()];
+        if (!s) return;
+        s.totalCalls++;
+        s.totalDuration += c.duration || 0;
+        if ((c.duration || 0) > 0) s.connectedCalls++;
+      });
+      leads.forEach((l) => {
+        const s = statsMap[l.assignedTo?.toString()];
+        if (!s) return;
+        s.leadsAssigned++;
+        if (l.status === 'converted') s.leadsConverted++;
+      });
+    }
 
     const dayCount = Math.max(1, Math.round((end - start) / 86400000) + 1);
 
@@ -1300,6 +1415,13 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
       const targetAchievement = s.dailyTarget > 0 ? Math.round((s.totalCalls / targetTotal) * 100) : null;
       return { ...s, conversionRate, targetTotal, targetAchievement, totalTalktime: fmtDuration(s.totalDuration) };
     });
+
+    const totalAllCalls = !isBucketTab
+      ? callAgg.reduce((sum, c) => sum + (c.totalCalls || 0), 0)
+      : calls.length;
+    const totalAllLeads = !isBucketTab
+      ? leadAgg.reduce((sum, l) => sum + (l.leadsAssigned || 0), 0)
+      : leads.length;
 
     const dateLabel = start.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
       ' to ' + end.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1392,8 +1514,8 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
         kpis: {
           totalEmployees: employeesList.length,
           activeEmployees: activeCount,
-          totalCalls: calls.length,
-          totalLeadsAssigned: leads.length
+          totalCalls: totalAllCalls,
+          totalLeadsAssigned: totalAllLeads
         },
         statusPie: [
           { name: 'Active', value: activeCount, color: '#16A34A' },
@@ -1409,20 +1531,28 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
 
 function csvEsc(v) { return `"${String(v ?? '').replace(/"/g, '""')}"`; }
 
-// GET /api/reports/employees/export — full-field CSV of every employee
-// (base User fields + performance aggregates, including total talktime),
-// streamed row-by-row rather than buffered. Also registered in the
-// Downloads Center. Must be declared before any /employees-periodic-style
-// param routes, though none currently conflict with this literal path.
-router.get('/employees/export', protect, isManager, async (req, res) => {
+// GET /api/reports/employees/export — full-field CSV of every employee (scoped by hierarchy)
+router.get('/employees/export', protect, requireManagement, async (req, res) => {
   let job = null;
   try {
     const { startDate, endDate, status, tlName } = req.query;
     const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
     const empFilter = { role: 'employee' };
-    if (tlName) empFilter.tlName = tlName;
+    if (scopedEmpIds !== null) {
+      empFilter._id = { $in: scopedEmpIds };
+    }
+    if (tlName) {
+      const tlEmpIds = await resolveEmployeeIdsForTL(tlName);
+      if (empFilter._id && empFilter._id.$in) {
+        const scopedStrs = new Set(empFilter._id.$in.map((id) => id.toString()));
+        empFilter._id = { $in: tlEmpIds.filter((id) => scopedStrs.has(id.toString())) };
+      } else {
+        empFilter._id = { $in: tlEmpIds };
+      }
+    }
     if (status === 'active') empFilter.isActive = true;
     else if (status === 'inactive') empFilter.isActive = false;
 
@@ -1444,73 +1574,89 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
         { $group: {
           _id: '$assignedTo',
           leadsAssigned: { $sum: 1 },
-          leadsConverted: { $sum: { $cond: [{ $eq: ['$status', 'converted'] }, 1, 0] } }
+          leadsConverted: { $sum: { $cond: [{ $in: ['$status', ['converted', 'booking_done']] }, 1, 0] } },
+          leadsInterested: { $sum: { $cond: [{ $eq: ['$status', 'interested'] }, 1, 0] } },
+          leadsLost: { $sum: { $cond: [{ $in: ['$status', ['lost', 'not_interested']] }, 1, 0] } }
         }}
       ])
     ]);
-    const callMap = new Map(callAgg.map((c) => [c._id.toString(), c]));
-    const leadMap = new Map(leadAgg.map((l) => [l._id.toString(), l]));
-    const dayCount = Math.max(1, Math.round((end - start) / 86400000) + 1);
 
-    const filename = `employees_${startDate ? startDate.slice(0, 10) : 'all'}_${endDate ? endDate.slice(0, 10) : 'now'}.csv`;
+    const callMap = new Map(callAgg.map((c) => [String(c._id), c]));
+    const leadMap = new Map(leadAgg.map((l) => [String(l._id), l]));
+
+    const filename = `employees_${startDate || '30d'}_${endDate || 'now'}.csv`;
+
     try {
-      job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Employee Directory Export', filename });
+      job = await createPendingDownloadJob({ ownerId: req.user._id, label: 'Employee Report Export', filename });
     } catch {}
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     const header = [
-      'Employee ID', 'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
+      'Name', 'Email', 'Phone', 'Role', 'Team Lead', 'Daily Target', 'Active',
       'Total Calls', 'Connected Calls', 'Total Talktime',
       'Leads Assigned', 'Leads Converted', 'Conversion Rate (%)', 'Target Achievement (%)',
       'Joined At'
     ].join(',') + '\n';
     res.write(header);
+
     let jobBuf = [header];
     let jobBytes = Buffer.byteLength(header, 'utf8');
     let jobOverflowed = false;
 
+    const FLUSH_BYTES = 64 * 1024;
+    let outBuf = '';
+
     for (const e of employeesList) {
-      const c = callMap.get(e._id.toString()) || { totalCalls: 0, connectedCalls: 0, totalDuration: 0 };
-      const l = leadMap.get(e._id.toString()) || { leadsAssigned: 0, leadsConverted: 0 };
-      const target = e.dailyTarget || 0;
-      const targetTotal = target * dayCount;
-      const targetAchievement = target > 0 ? Math.round((c.totalCalls / targetTotal) * 100) : '';
-      const conversionRate = l.leadsAssigned ? Math.round((l.leadsConverted / l.leadsAssigned) * 100) : 0;
+      const c = callMap.get(String(e._id)) || {};
+      const l = leadMap.get(String(e._id)) || {};
+      const totalCalls     = c.totalCalls     || 0;
+      const connectedCalls = c.connectedCalls || 0;
+      const totalDuration  = c.totalDuration  || 0;
+      const leadsAssigned  = l.leadsAssigned  || 0;
+      const leadsConverted = l.leadsConverted || 0;
+      const leadsInterested= l.leadsInterested|| 0;
+      const leadsLost      = l.leadsLost      || 0;
+      const connectRate    = totalCalls > 0    ? round1((connectedCalls / totalCalls) * 100) : 0;
+      const convRate       = leadsAssigned > 0 ? round1((leadsConverted / leadsAssigned) * 100) : 0;
 
       const line = [
         csvEsc(e.ryanEmployeeCode),
         csvEsc(e.name),
-        e.email || '',
-        e.phone || '',
-        e.role || '',
+        csvEsc(e.email),
+        csvEsc(e.phone || ''),
         csvEsc(e.tlName),
-        target,
-        e.isActive ? 'Yes' : 'No',
-        c.totalCalls,
-        c.connectedCalls,
-        fmtDuration(c.totalDuration),
-        l.leadsAssigned,
-        l.leadsConverted,
-        conversionRate,
-        targetAchievement,
-        new Date(e.createdAt).toLocaleDateString('en-IN')
+        e.isActive ? 'Active' : 'Inactive',
+        e.dailyTarget || 0,
+        totalCalls,
+        connectedCalls,
+        connectRate,
+        totalDuration,
+        fmtDuration(totalDuration),
+        leadsAssigned,
+        leadsConverted,
+        leadsInterested,
+        leadsLost,
+        convRate
       ].join(',') + '\n';
-      res.write(line);
+
+      outBuf += line;
+      if (outBuf.length >= FLUSH_BYTES) { res.write(outBuf); outBuf = ''; }
 
       if (!jobOverflowed) {
         jobBytes += Buffer.byteLength(line, 'utf8');
-        if (jobBytes > 8 * 1024 * 1024) { jobOverflowed = true; jobBuf = null; }
+        if (jobBytes > MAX_CONTENT_BYTES) { jobOverflowed = true; jobBuf = null; }
         else jobBuf.push(line);
       }
     }
+    if (outBuf) res.write(outBuf);
     res.end();
 
     if (job) {
       try {
         job = jobOverflowed
-          ? await failDownloadJob(job._id, 'Export too large to store for re-download — the direct download completed successfully.')
+          ? await failDownloadJob(job._id, 'Export too large to store for re-download — direct download completed successfully.')
           : await completeDownloadJob(job._id, jobBuf.join(''));
       } catch {}
     }
@@ -1521,16 +1667,99 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
   }
 });
 
-// GET /api/reports/client — client report by phone number
-router.get('/client', protect, isManager, async (req, res) => {
+// GET /api/reports/client — per-client call report (scoped by hierarchy)
+router.get('/client', protect, requireManagement, async (req, res) => {
   try {
-    const { phone, duration = 'all', tab = 'summary', page = 1, limit = 50 } = req.query;
-    if (!phone) return res.status(400).json({ success: false, error: 'phone required' });
+    const { phone, duration = 'all', tab = 'summary', page = 1, limit = 50, search = '' } = req.query;
 
+    const scopedEmpIds = await getScopedEmployeeIds(req.user);
+    const baseEmpFilter = scopedEmpIds !== null ? { $in: scopedEmpIds } : undefined;
+
+    // ── CLIENT DIRECTORY MODE (no phone provided) ──────────────────────────
+    if (!phone || !phone.trim()) {
+      const dirFilter = { contactNumber: { $exists: true, $ne: '' } };
+      if (baseEmpFilter) dirFilter.employeeId = baseEmpFilter;
+
+      if (duration !== 'all') {
+        const now = new Date();
+        const start = new Date();
+        if (duration === 'today') { start.setHours(0, 0, 0, 0); }
+        else if (duration === 'yesterday') { start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0); now.setHours(0, 0, 0, 0); }
+        else if (duration === 'week') { start.setDate(start.getDate() - 7); }
+        else if (duration === 'month') { start.setMonth(start.getMonth() - 1); }
+        dirFilter.timestamp = { $gte: start, $lte: now };
+      }
+
+      const searchMatch = search && search.trim() ? {
+        $or: [
+          { _id: { $regex: search.trim(), $options: 'i' } },
+          { contactName: { $regex: search.trim(), $options: 'i' } }
+        ]
+      } : null;
+
+      const pageNum = Math.max(1, parseInt(page));
+      const pageSize = Math.min(100, Math.max(1, parseInt(limit)));
+
+      const countPipeline = [
+        { $match: dirFilter },
+        { $group: {
+          _id: '$contactNumber',
+          ...(searchMatch ? { contactName: { $first: '$contactName' } } : {})
+        }},
+        ...(searchMatch ? [{ $match: searchMatch }] : []),
+        { $count: 'total' }
+      ];
+
+      const dirPipeline = [
+        { $match: dirFilter },
+        { $group: {
+          _id: '$contactNumber',
+          contactName: { $first: '$contactName' },
+          totalCalls: { $sum: 1 },
+          connectedCalls: { $sum: { $cond: [{ $gt: ['$duration', 0] }, 1, 0] } },
+          lastCallAt: { $max: '$timestamp' }
+        }},
+        ...(searchMatch ? [{ $match: searchMatch }] : []),
+        { $sort: { lastCallAt: -1 } },
+        { $skip: (pageNum - 1) * pageSize },
+        { $limit: pageSize }
+      ];
+
+      const [countRes, rows] = await Promise.all([
+        CallLog.aggregate(countPipeline).allowDiskUse(true),
+        CallLog.aggregate(dirPipeline).allowDiskUse(true)
+      ]);
+
+      const totalCount = countRes[0]?.total || 0;
+      return res.json({
+        success: true,
+        data: {
+          mode: 'directory',
+          total: totalCount,
+          pages: Math.max(1, Math.ceil(totalCount / pageSize)),
+          page: pageNum,
+          clients: rows.map((r) => ({
+            phone: r._id,
+            contactName: r.contactName || '',
+            totalCalls: r.totalCalls,
+            connectedCalls: r.connectedCalls,
+            notConnectedCalls: Math.max(0, r.totalCalls - r.connectedCalls),
+            lastCallAt: r.lastCallAt
+          }))
+        }
+      });
+    }
+
+    // ── SINGLE-CLIENT REPORT MODE ──────────────────────────────────────────
     const digits = phone.replace(/\D/g, '');
     if (!digits) return res.status(400).json({ success: false, error: 'Enter a valid phone number' });
 
-    const filter = { contactNumber: { $regex: digits, $options: 'i' } };
+    // Normalise to last 10 digits so +918320006222 / 08320006222 / 8320006222 all match
+    const last10 = digits.slice(-10);
+    const filter = { contactNumber: { $regex: last10, $options: 'i' } };
+    if (baseEmpFilter) {
+      filter.employeeId = baseEmpFilter;
+    }
 
     if (duration !== 'all') {
       const now = new Date();
@@ -1547,34 +1776,33 @@ router.get('/client', protect, isManager, async (req, res) => {
       .sort({ timestamp: -1, _id: -1 })
       .lean();
 
-    const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
-    calls.forEach((c) => { if (byType[c.callType]) byType[c.callType].push(c); });
-
     const totalDuration = calls.reduce((s, c) => s + (c.duration || 0), 0);
     const connectedCalls = calls.filter((c) => (c.duration || 0) > 0).length;
-    const notPickupByClient = byType.outgoing.filter((c) => !c.duration || c.duration === 0).length;
-    const neverAttended = byType.missed.filter((c) => !byType.outgoing.find((o) => o.contactNumber === c.contactNumber)).length;
+    const notPickupByClient = calls.filter((c) => c.callType === 'outgoing' && (!c.duration || c.duration === 0)).length;
+    const neverAttended = calls.filter((c) => c.callType === 'missed').length;
 
     if (calls.length === 0) {
-      return res.json({
-        success: true,
-        data: { phone, noResults: true }
-      });
+      return res.json({ success: true, data: { phone, noResults: true } });
     }
 
     if (tab === 'summary') {
       const empSummary = {};
+      const byType = { incoming: [], outgoing: [], missed: [], rejected: [] };
+      calls.forEach((c) => { if (byType[c.callType]) byType[c.callType].push(c); });
+
       calls.forEach((c) => {
         const id = c.employeeId?._id?.toString() || c.employeeId?.toString();
         if (!id) return;
-        if (!empSummary[id]) empSummary[id] = {
-          employeeId: id, employeeName: empName(c), employeePhone: empPhone(c), tlName: empTL(c),
-          totalCalls: 0, totalDuration: 0,
-          incomingTotal: 0, incomingConnected: 0, incomingDuration: 0,
-          outgoingTotal: 0, outgoingConnected: 0, outgoingDuration: 0,
-          missed: 0, rejected: 0, neverAttended: 0, notPickupByClient: 0,
-          lastSyncTime: c.timestamp
-        };
+        if (!empSummary[id]) {
+          empSummary[id] = {
+            employeeId: id, employeeName: empName(c), employeePhone: empPhone(c), tlName: empTL(c),
+            totalCalls: 0, totalDuration: 0,
+            incomingTotal: 0, incomingConnected: 0, incomingDuration: 0,
+            outgoingTotal: 0, outgoingConnected: 0, outgoingDuration: 0,
+            missed: 0, rejected: 0, neverAttended: 0, notPickupByClient: 0,
+            lastSyncTime: c.timestamp
+          };
+        }
         const e = empSummary[id];
         e.totalCalls++;
         e.totalDuration += c.duration || 0;

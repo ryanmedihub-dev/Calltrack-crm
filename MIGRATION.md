@@ -205,3 +205,24 @@ password in plaintext, that overrode `process.env.MONGO_URI`. The line has been 
 **Deleting the line does not un-leak the credential.** If this repo has ever been pushed to a
 remote, shared, or committed to history, that username/password must be rotated in Atlas —
 it remains readable in the git history until then.
+
+---
+
+## RBAC Phase 1: Legacy Manager to Admin Migration
+
+Under the 4-role RBAC architecture (`admin`, `manager`, `tl`, `employee`), legacy Admin accounts previously stored with `role: "manager"` must be migrated to `role: "admin"`.
+
+### Preview Migration (Dry-Run Mode):
+```bash
+node scripts/migrateLegacyManagerToAdmin.js --dry-run
+```
+
+### Apply Migration:
+```bash
+node scripts/migrateLegacyManagerToAdmin.js
+```
+
+### Safety:
+- Modifies **only** the `role` attribute (`manager` -> `admin`).
+- Does not modify passwords, IDs, timestamps, or assignments.
+- Idempotent and safe to run multiple times.

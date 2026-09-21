@@ -8,6 +8,7 @@ import {
 import api from '../../../../lib/api';
 import { fmtTime } from '../../../../lib/timezone';
 import { triggerLocalExport } from '../../../../lib/downloads';
+import { Trophy } from 'lucide-react';
 import {
   DataTable, ChartTip, EmptyState, TYPE_META,
   PhoneIco, UsersIco, CheckIco, XIco, ClockIco, DownloadIco,
@@ -28,7 +29,8 @@ const TABS = [
   { key: 'hourly',   label: 'Hourly Analysis' },
 ];
 
-const MEDALS = ['🥇', '🥈', '🥉'];
+const RANK_COLORS = ['#F59E0B', '#94A3B8', '#B45309'];
+const RANK_BG = ['rgba(245,158,11,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
 
 function initials(name) {
   return (name || 'U').slice(0, 2).toUpperCase();
@@ -126,7 +128,15 @@ export default function LeaderboardPage() {
   const columns = [
     {
       key: 'rank', label: 'Rank', sortable: false, searchable: false,
-      render: (row) => row.rank <= 3 ? <span className="text-lg">{MEDALS[row.rank - 1]}</span> : <span className="font-bold text-xs text-gray-400">#{row.rank}</span>,
+      render: (row) => row.rank <= 3 ? (
+        <span
+          className="inline-flex items-center justify-center w-6 h-6 rounded-full"
+          style={{ background: RANK_BG[row.rank - 1], color: RANK_COLORS[row.rank - 1] }}
+          title={`Rank ${row.rank}`}
+        >
+          <Trophy size={14} />
+        </span>
+      ) : <span className="font-bold text-xs text-gray-400">#{row.rank}</span>,
     },
     {
       key: 'name', label: 'Agent',

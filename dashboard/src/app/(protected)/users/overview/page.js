@@ -15,6 +15,8 @@ const PhoneIco   = ({s=11}) => <Ico size={s}><path d="M22 16.92v3a2 2 0 0 1-2.18
 const ROLE_COLORS = {
   admin:{ color:'#7C3AED', bg:'#F5F3FF' },
   manager:{ color:'#2563EB', bg:'#EFF6FF' },
+  tl:{ color:'#D97706', bg:'#FFFBEB' },
+  employee:{ color:'#16A34A', bg:'#F0FDF4' },
   agent:{ color:'#16A34A', bg:'#F0FDF4' },
   supervisor:{ color:'#D97706', bg:'#FFFBEB' },
 };
@@ -29,7 +31,23 @@ export default function UsersOverviewPage() {
   const [status,  setStatus]  = useState('');
 
   useEffect(() => {
-    api.get('/api/employees').then(r=>{ setUsers(r.data?.data||[]); }).catch(()=>{}).finally(()=>setLoading(false));
+    Promise.all([
+      api.get('/api/employees').catch(() => ({ data: { data: [] } })),
+      api.get('/api/users/hierarchy').catch(() => ({ data: { data: null } })),
+    ]).then(([empRes, hierRes]) => {
+      const employees = empRes.data?.data || [];
+      const hier = hierRes.data?.data;
+      const managers = (hier?.managers || []).map(m => m.manager).filter(Boolean);
+      const tls = (hier?.managers || []).flatMap(m => (m.teamLeads || []).map(t => t.tl)).filter(Boolean);
+      const unassignedTLs = (hier?.unassignedTLs || []).filter(Boolean);
+      const seen = new Set();
+      const all = [...employees, ...managers, ...tls, ...unassignedTLs].filter(u => {
+        if (!u?._id || seen.has(u._id.toString())) return false;
+        seen.add(u._id.toString());
+        return true;
+      });
+      setUsers(all);
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const roles   = [...new Set(users.map(u=>u.role||'agent'))];

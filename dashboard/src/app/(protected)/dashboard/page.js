@@ -11,6 +11,8 @@ import CallTypeBadge from '../../../components/CallTypeBadge';
 import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../components/DateRangeFilter';
 import { Truncate } from '../../../components/report-shared';
 import { motion, AnimatePresence } from 'framer-motion';
+import ManagerDashboard from '../../../components/manager/ManagerDashboard';
+import TLDashboard from '../../../components/tl/TLDashboard';
 
 
 function parseUTC(ts) {
@@ -409,6 +411,7 @@ const LEAD_STATUSES = [
 ];
 
 export default function DashboardPage() {
+  const [user, setUser] = useState(null);
   const [stats, setStats] = useState(null);
   const [liveFeed, setLiveFeed] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -420,6 +423,10 @@ export default function DashboardPage() {
   const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
   const channelRef = useRef(null);
   const dateRangeRef = useRef(dateRange);
+
+  useEffect(() => {
+    api.get('/api/auth/me').then(r => setUser(r.data.data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     dateRangeRef.current = dateRange;
@@ -533,6 +540,16 @@ export default function DashboardPage() {
 
   const totalLeads = Object.values(leadStats).reduce((a, b) => a + b, 0);
 
+  // isSuperAdmin (Ryan Admin) retains the full legacy admin dashboard.
+  // Genuine scoped managers (isSuperAdmin === false) go to ManagerDashboard.
+  if (user?.role === 'manager' && !user?.isSuperAdmin) {
+    return <ManagerDashboard user={user} />;
+  }
+
+  if (user?.role === 'tl') {
+    return <TLDashboard user={user} />;
+  }
+
   return (
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto space-y-6 lg:space-y-7">
@@ -544,7 +561,7 @@ export default function DashboardPage() {
         >
           <div>
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-              {greeting} 👋
+              {greeting}
             </h1>
             <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
               <ClockIco />
