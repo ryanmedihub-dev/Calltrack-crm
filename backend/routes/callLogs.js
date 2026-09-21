@@ -4,7 +4,13 @@ const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isAdmin, requireManagement, isSystemAdmin } = require('../middleware/auth');
+const {
+  protect,
+  isAdmin,
+  isManager,
+  requireManagement,
+  isSystemAdmin
+} = require('../middleware/auth');
 const { getScopedEmployeeIds, validateEmployeeInScope, resolveEmployeeFilter } = require('../lib/scope');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
