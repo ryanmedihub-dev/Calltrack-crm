@@ -4,7 +4,12 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
 
-const signToken = (id) => jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+// Service accounts (ryan-crm's CALLBY_SERVICE_TOKEN and similar) get a 365-day token
+// instead of the normal 7-day session — see User.isServiceAccount. Deliberately not
+// non-expiring: still bounded, still revocable by flipping isActive, just rotated yearly
+// instead of weekly.
+const signToken = (id, { longLived = false } = {}) =>
+  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: longLived ? '365d' : '7d' });
 
 // Only authenticated managers can register new accounts; role is always 'employee'
 router.post('/register', protect, isManager, async (req, res) => {
@@ -44,7 +49,7 @@ router.post('/login', async (req, res) => {
         error: 'Your account has been deactivated. Please contact your manager.',
       });
     }
-    const token = signToken(user._id);
+    const token = signToken(user._id, { longLived: user.isServiceAccount });
     const userObj = user.toJSON();
     return res.json({ success: true, data: { user: userObj, token }, message: 'Login successful' });
   } catch (err) {

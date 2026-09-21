@@ -12,6 +12,8 @@
 // callback (LOW) has not cooled the lead off. Storing an ordinal lets the write be a plain
 // $max inside the same update pipeline, with no read-then-decide race.
 
+// Mirrored verbatim in the ryan-crm repo at src/lib/owner/engagementBands.js (Owner panel
+// employee KPIs sum these bands into "interested"/"notConnected"). Keep both in sync.
 const BANDS = [
   { key: 'NOT_CONNECTED',   score: 0, label: 'Not Connected',   minSec: 0,   maxSec: 0   },
   { key: 'LOW',             score: 1, label: 'Low',             minSec: 1,   maxSec: 30  },

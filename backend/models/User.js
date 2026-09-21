@@ -13,6 +13,12 @@ const userSchema = new mongoose.Schema({
   dailyTarget: { type: Number, default: 100 },
   isActive:    { type: Boolean, default: true },
   ryanEmployeeCode: { type: String, default: null, index: true, trim: true },
+  // Marks an account as a server-to-server integration login (e.g. ryan-crm's
+  // CALLBY_SERVICE_TOKEN), not a person's daily-use account. Login tokens for this account
+  // get a long expiry instead of the normal 7-day user session — see signToken() in
+  // routes/auth.js. Not a real API-key system (still a login JWT, still gated by
+  // isActive), but avoids rotating this specific token every week by hand.
+  isServiceAccount: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
