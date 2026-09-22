@@ -32,6 +32,12 @@ const callLogSchema = new mongoose.Schema({
   // `callStatus` (the old manual pick) is left in place and untouched for historical rows.
   engagement:      { type: String, enum: ENGAGEMENT_KEYS, default: null },
   engagementScore: { type: Number, default: null },
+
+  // What of this call has already been pushed onto its lead. Lets a resync (e.g. the agent
+  // tapping Save a minute after the call already synced) push the new remark / follow-up /
+  // healed duration onto the lead exactly once, without re-counting the attempt.
+  leadSyncedAt:       { type: Date, default: null },   // the notesUpdatedAt value last applied
+  leadSyncedDuration: { type: Number, default: 0 },    // the duration last applied
 });
 
 callLogSchema.index({ employeeId: 1, timestamp: -1 });

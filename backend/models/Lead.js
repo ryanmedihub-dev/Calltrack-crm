@@ -21,6 +21,11 @@ const leadSchema = new mongoose.Schema({
     default: 'new'
   },
   assignedTo:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  // When and how the current owner was set. `first_call` = the lead's first attempt claimed it
+  // (lib/applyCallToLead.js); `manual` = a manager set it. Informational — nothing reads it
+  // to make a decision.
+  assignedAt:  { type: Date, default: null },
+  assignedVia: { type: String, enum: ['first_call', 'manual', null], default: null },
   capturedBy:  { type: String },
   importedBy:  { type: String },
   city:        { type: String },

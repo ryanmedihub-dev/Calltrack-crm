@@ -56,6 +56,8 @@ function describeChangelogEntry(action, details) {
       return details.callType ? `Call linked (${details.callType})` : 'Call linked to lead';
     case 'note_added':
       return details.text ? `Note added: "${details.text}"` : 'Note added';
+    case 'source_updated':
+      return `Source set to "${details.to}" from a campaign upload`;
     case 'updated':
       if (details.source === 'recycle_lock')   return 'Manager stopped this lead from auto-recycling';
       if (details.source === 'recycle_unlock') return 'Manager allowed this lead to auto-recycle again';
@@ -124,6 +126,8 @@ router.post('/', protect, async (req, res) => {
       if (ownedBySelf) return res.json({ success: true, data: existing, message: 'Already in your leads' });
       if (isUnassigned) {
         existing.assignedTo = req.user._id;
+        existing.assignedAt = new Date();
+        existing.assignedVia = 'manual';
         existing.changelog.push({ changedBy: req.user._id, changedByName: req.user.name, action: 'assigned', details: { source: 'manual' } });
         await existing.save();
         return res.json({ success: true, data: existing, message: 'Lead claimed' });
@@ -135,6 +139,8 @@ router.post('/', protect, async (req, res) => {
       ...req.body,
       phone,
       assignedTo: req.body.assignedTo || req.user._id,
+      assignedAt: new Date(),
+      assignedVia: 'manual',
       changelog: [{
         changedBy:     req.user._id,
         changedByName: req.user.name,
@@ -356,6 +362,8 @@ router.post('/bulk-upload', protect, async (req, res) => {
             } else {
               const previousAssignee = existing.assignedTo;
               existing.assignedTo    = null;
+              existing.assignedAt    = null;
+              existing.assignedVia   = null;
               existing.claimedAt     = null;
               existing.claimedBy     = null;
               existing.pooledAt      = new Date();
@@ -382,7 +390,11 @@ router.post('/bulk-upload', protect, async (req, res) => {
               repooled++;
             }
           } else if (duplicateStrategy === 'replace') {
-            existing.assignedTo = assignedTo || existing.assignedTo;
+            if (assignedTo) {
+              existing.assignedTo = assignedTo;
+              existing.assignedAt = new Date();
+              existing.assignedVia = 'manual';
+            }
             existing.tags = [...new Set([...(existing.tags || []), ...mergedTags])];
             existing.changelog.push({
               changedBy: req.user._id,
@@ -408,6 +420,8 @@ router.post('/bulk-upload', protect, async (req, res) => {
           tags: mergedTags,
           status,
           assignedTo,
+          assignedAt: assignedTo ? new Date() : null,
+          assignedVia: assignedTo ? 'manual' : null,
           // Stamp arrival time only for rows that actually land in the pool, so the pool
           // sorts by when a lead became available rather than when it was created.
           pooledAt: assignedTo ? null : new Date(),
@@ -449,7 +463,9 @@ router.post('/bulk-assign', protect, isManager, async (req, res) => {
   try {
     const { leadIds, employeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
-    const result = await Lead.updateMany({ _id: { $in: leadIds } }, { $set: { assignedTo: employeeId || null } });
+    const result = await Lead.updateMany({ _id: { $in: leadIds } }, { $set: employeeId
+      ? { assignedTo: employeeId, assignedAt: new Date(), assignedVia: 'manual' }
+      : { assignedTo: null, assignedAt: null, assignedVia: null } });
     return res.json({ success: true, data: { modified: result.modifiedCount }, message: `${result.modifiedCount} leads assigned` });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -461,7 +477,7 @@ router.post('/bulk-transfer', protect, isManager, async (req, res) => {
   try {
     const { leadIds, toEmployeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
-    const result = await Lead.updateMany({ _id: { $in: leadIds } }, { $set: { assignedTo: toEmployeeId } });
+    const result = await Lead.updateMany({ _id: { $in: leadIds } }, { $set: { assignedTo: toEmployeeId, assignedAt: new Date(), assignedVia: 'manual' } });
     return res.json({ success: true, data: { modified: result.modifiedCount }, message: `${result.modifiedCount} leads transferred` });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -731,6 +747,10 @@ router.put('/:id', protect, async (req, res) => {
 
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
     if (payload.phone) payload.phone = normalizePhone(payload.phone) || payload.phone;
+    if ('assignedTo' in payload) {
+      payload.assignedAt  = payload.assignedTo ? new Date() : null;
+      payload.assignedVia = payload.assignedTo ? 'manual' : null;
+    }
 
     // Track status change in changelog
     const changelogEntry = {

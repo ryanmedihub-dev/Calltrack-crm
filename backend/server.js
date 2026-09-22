@@ -15,6 +15,7 @@ const workforceSummaryRoutes = require('./routes/workforceSummary');
 const agentDetailRoutes      = require('./routes/agentDetail');
 const phoneMatchRoutes       = require('./routes/phoneMatch');
 const retryQueueRoutes       = require('./routes/retryQueue');
+const leadSourceRoutes       = require('./routes/leadSource');
 const leadRoutes      = require('./routes/leads');
 const leadPoolRoutes  = require('./routes/leadPool');
 const reportRoutes    = require('./routes/reports');
@@ -188,6 +189,7 @@ app.use('/api/leads',      workforceSummaryRoutes);
 app.use('/api/leads',      agentDetailRoutes);
 app.use('/api/leads',      phoneMatchRoutes);
 app.use('/api/leads',      retryQueueRoutes);
+app.use('/api/leads',      leadSourceRoutes);
 app.use('/api/leads',      leadRoutes);
 app.use('/api/lead-pool',  leadPoolRoutes);
 app.use('/api/reports',    reportRoutes);
@@ -229,18 +231,16 @@ async function runRecycleSweepSafely() {
     }
   }
 
-  // Auto-assign stays on regardless of the pool flag — see config/features.js. Runs after the
-  // recycle sweep (when it runs), on the same tick and the same single-worker guard: recycling
-  // can leave a lead unassigned, and this is what stops one that is past the attempt limit from
-  // sitting there with no owner. Its own try/catch so a failure here cannot take the recycle
-  // sweep's interval down with it. connectDB() is called here too since it can no longer rely
-  // on the recycle branch above having run it.
-  try {
-    await connectDB();
-    const result = await leadPoolRoutes.runAutoAssignSweep();
-    if (result.assigned) console.log(`[auto-assign] assigned ${result.assigned} over-attempted lead(s) to their last caller`);
-  } catch (err) {
-    console.error('[auto-assign] failed:', err.message);
+  // Superseded by the first-call assignment rule in lib/applyCallToLead.js — see
+  // config/features.js. Off by default; code kept behind the flag.
+  if (FEATURES.AUTO_ASSIGN_SWEEP) {
+    try {
+      await connectDB();
+      const result = await leadPoolRoutes.runAutoAssignSweep();
+      if (result.assigned) console.log(`[auto-assign] assigned ${result.assigned} over-attempted lead(s) to their last caller`);
+    } catch (err) {
+      console.error('[auto-assign] failed:', err.message);
+    }
   }
 }
 

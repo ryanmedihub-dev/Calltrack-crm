@@ -11,6 +11,7 @@ const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONT
 const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
+const { applyCallToLead } = require('../lib/applyCallToLead');
 const { FEATURES } = require('../config/features');
 const { BANDS, deriveEngagement } = require('../lib/engagement');
 const cache = require('../lib/cache');
@@ -297,15 +298,6 @@ router.post('/sync', protect, async (req, res) => {
       })
       .filter((d) => d.contactNumber && d.timestamp && !Number.isNaN(d.timestamp.getTime()) && d.callType);
 
-    // Whether any copy of this call in the batch was actually submitted through the
-    // post-call form (Save tapped) rather than just picked up by a routine background
-    // sync — gates whether an unmatched call is allowed to auto-create a new lead below.
-    const submittedMap = new Map();
-    for (const d of docs) {
-      const key = callKey(d);
-      submittedMap.set(key, submittedMap.get(key) || d.submittedViaPostCall);
-    }
-
     // The mobile app resyncs the whole day's calls on every sync (e.g. once the
     // post-call popup is filled in, the same call is resent with notes/callStatus
     // added). We used to rely on a unique DB index on (employeeId, contactNumber,
@@ -478,18 +470,15 @@ router.post('/sync', protect, async (req, res) => {
     // Re-fetch ALL docs in this batch (not just freshly-inserted ones) — the mobile
     // app resyncs the whole day's calls on every sync, so a call is often already
     // in the DB (synced bare, before the post-call popup was filled in) by the time
-    // its enriched resync arrives. Using `leadId` as the "already counted" guard
-    // means every call still gets counted toward Lead.attempts exactly once, even
-    // if the lead didn't exist yet on an earlier sync and only appeared later.
+    // its enriched resync arrives. lib/applyCallToLead.js is what makes every call count
+    // toward Lead.attempts exactly once regardless of how many times it resyncs.
     //
-    // Built from `toProcess`, not every doc in the payload — a fingerprint-skipped call was
-    // already linked (or deliberately left unlinked) the last time its content changed, so
-    // there's nothing new here for it. The one gap this opens: a call that's still unlinked
-    // because no Lead existed yet for its number won't retroactively pick one up if that Lead
-    // is created later out-of-band, until either the call's own content changes or its 24h
-    // fingerprint expires and it's reprocessed — an acceptable bound for what is a speed
-    // shortcut, not a correctness mechanism.
-    const batchKeys = toProcess
+    // From EVERY doc in the payload, not just `toProcess`. The fingerprint skip only saves the
+    // bulkWrite; linking must still see skipped calls, because a call made before its Lead
+    // existed (imported / webhooked later the same day) is only ever linked here — lead imports
+    // do not back-link calls. applyCallToLead() returns without writing for calls that have
+    // nothing new, so this costs the same two reads the loop always did.
+    const batchKeys = docs
       .map((d) => d.clientCallId
         ? { employeeId: req.user._id, clientCallId: d.clientCallId }
         : { employeeId: req.user._id, contactNumber: d.contactNumber, timestamp: d.timestamp })
@@ -504,98 +493,48 @@ router.post('/sync', protect, async (req, res) => {
     }
 
     for (const log of batchDocs) {
-      if (log.leadId) continue; // already linked + counted on a previous sync
-
       const lead = phoneToLead[log.contactNumber];
       const fuDate = followUpMap[log.contactNumber];
-      // Informational only now — duration, not the post-call Save tap, decides everything
-      // (see lib/engagement.js). Still computed because old app builds keep sending
-      // submittedViaPostCall and nothing should break parsing it.
-      const wasSubmitted = submittedMap.get(callKey(log)) || false; // eslint-disable-line no-unused-vars
 
-      if (lead) {
-        // Existing lead: update call stats + add callLog reference
-        await CallLog.findByIdAndUpdate(log._id, { leadId: lead._id });
-
-        const updateData = {
-          $inc: { attempts: 1 },
-          $set: {
-            lastCallAt:            log.timestamp,
-            lastCallType:          log.callType,
-            lastCallDuration:      log.duration || 0,
-            lastCallEmployee:      req.user.name,
-            lastCallEmployeePhone: req.user.phone || '',
-          },
-          $addToSet: { callLogs: log._id },
-          $push: {
-            changelog: {
-              changedBy:     req.user._id,
-              changedByName: req.user.name,
-              action:        'call_linked',
-              details: {
-                callType:   log.callType,
-                duration:   log.duration || 0,
-                timestamp:  log.timestamp,
-                notes:      log.notes     || null,
-                callStatus: log.callStatus || null,
-              }
-            }
+      if (!lead) {
+        if (!log.leadId && FEATURES.AUTO_LEAD_CREATE_ON_CALL && log.callType === 'outgoing' && (log.duration || 0) > 0) {
+          // No lead exists yet. Off by default — see config/features.js: every dialled number
+          // becoming a Lead pollutes the pool filter, retry queue, report tabs and ryan-crm.
+          try {
+            const contactName = log.contactName && log.contactName !== 'Unknown'
+              ? log.contactName
+              : log.contactNumber;
+            const band = deriveEngagement(log);
+            const newLead = await createLeadFromCall({
+              actor:  req.user,
+              call:   log,
+              name:   contactName,
+              phone:  log.contactNumber,
+              source: 'Call',
+              status: 'contacted',
+              note:   log.notes,
+              followUpDate: fuDate,
+              engagement:          band.key,
+              engagementScore:     band.score,
+              lastCallEngagement:  band.key,
+              engagementUpdatedAt: log.timestamp,
+            });
+            await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
+            phoneToLead[log.contactNumber] = newLead; // so later logs in this batch link to it too
+          } catch (_err) {
+            // Rare race (two calls to the same brand-new number synced concurrently) — the
+            // lead created by the other request will be picked up by phoneToLead next sync.
           }
-        };
-
-        if ((log.duration || 0) > 0) updateData.$inc.connectedCallCount = 1;
-        if (fuDate) updateData.$set.followUpDate = new Date(fuDate);
-        if (log.callStatus) updateData.$set.lastCallSummary = log.callStatus;
-        if (log.notes && log.notes.trim()) updateData.$set.lastCallNote = log.notes.trim();
-        // Lead.status is never written from a call anymore — see lib/engagement.js. It stays
-        // the manual/pipeline field; `engagement` (below) is the parallel derived track.
-
-        const band = deriveEngagement(log);
-        updateData.$set.lastCallEngagement = band.key;
-        updateData.$max = { engagementScore: band.score };
-
-        await Lead.findByIdAndUpdate(lead._id, updateData);
-        // $max above can't also set the `engagement` label (it's a string), so it's written
-        // here in a second, filtered update that only fires when this call actually raises the
-        // band — cheaper and race-free versus a read-then-decide in JS.
-        await Lead.updateOne(
-          { _id: lead._id, $or: [{ engagement: null }, { engagementScore: { $lte: band.score } }] },
-          { $set: { engagement: band.key, engagementUpdatedAt: log.timestamp } }
-        );
-
-      } else if (FEATURES.AUTO_LEAD_CREATE_ON_CALL && log.callType === 'outgoing' && (log.duration || 0) > 0) {
-        // No lead exists yet. Off by default — see config/features.js: every dialled number
-        // becoming a Lead pollutes the pool filter, retry queue, report tabs and ryan-crm.
-        try {
-          const contactName = log.contactName && log.contactName !== 'Unknown'
-            ? log.contactName
-            : log.contactNumber;
-          const band = deriveEngagement(log);
-          const newLead = await createLeadFromCall({
-            actor:  req.user,
-            call:   log,
-            name:   contactName,
-            phone:  log.contactNumber,
-            source: 'Call',
-            status: 'contacted',
-            note:   log.notes,
-            followUpDate: fuDate,
-            engagement:          band.key,
-            engagementScore:     band.score,
-            lastCallEngagement:  band.key,
-            engagementUpdatedAt: log.timestamp,
-          });
-          await CallLog.findByIdAndUpdate(log._id, { leadId: newLead._id });
-          phoneToLead[log.contactNumber] = newLead; // so later logs in this batch link to it too
-        } catch (_err) {
-          // Rare race (two calls to the same brand-new number synced concurrently) — the
-          // lead created by the other request will be picked up by phoneToLead next sync.
         }
+        continue; // no lead for this number -> call log saved, nothing else happens
       }
-      // No number in system and auto-create is off (or this call didn't qualify) — call log
-      // saved, nothing else to do. `wasSubmitted`/submittedMap are still parsed above for
-      // backwards compatibility with app builds that send them, but no longer gate anything —
-      // see lib/engagement.js.
+
+      try {
+        await applyCallToLead({ log, lead, user: req.user, followUpDate: fuDate });
+      } catch (err) {
+        // One bad lead must not fail the whole sync — the call logs are already saved above.
+        console.error('[calls/sync] applyCallToLead failed:', log._id.toString(), err.message);
+      }
     }
 
     const pusher = getPusher();
@@ -1081,6 +1020,9 @@ router.patch('/:id/notes', protect, async (req, res) => {
       call.notesUpdatedAt     = Number.isNaN(stampedAt.getTime()) ? new Date() : stampedAt;
       call.notesUpdatedBy     = req.user._id;
       call.notesUpdatedByName = req.user.name;
+      // Marks this edit as already pushed to the lead (below), so the next app resync of the
+      // same call (POST /sync, via lib/applyCallToLead.js) doesn't push it again.
+      call.leadSyncedAt       = call.notesUpdatedAt;
     }
     await call.save();
 
@@ -1089,12 +1031,19 @@ router.patch('/:id/notes', protect, async (req, res) => {
     if (call.leadId) {
       const leadUpdate = {};
       if (callStatus) leadUpdate.lastCallSummary = callStatus;
-      // Mirror a cleared remark onto the lead too — `if (notes && ...)` left the lead showing
-      // text the agent had just deleted from the call.
-      if (notes !== undefined) leadUpdate.lastCallNote = notes.trim();
       if (followUpDate !== undefined) leadUpdate.followUpDate = followUpDate ? new Date(followUpDate) : null;
       if (Object.keys(leadUpdate).length) {
         await Lead.findByIdAndUpdate(call.leadId, { $set: leadUpdate }).catch(() => {});
+      }
+      // Only the lead's most recent call may overwrite its "last call" remark — editing the
+      // note on an older call must not replace today's remark on the lead. Mirrors a cleared
+      // remark too (`notes !== undefined`, not `notes &&`) so a deleted note doesn't leave
+      // stale text showing on the lead.
+      if (notes !== undefined) {
+        await Lead.updateOne(
+          { _id: call.leadId, lastCallAt: { $lte: call.timestamp } },
+          { $set: { lastCallNote: notes.trim() } }
+        ).catch(() => {});
       }
     }
 

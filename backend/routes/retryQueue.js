@@ -28,6 +28,16 @@ const router = express.Router();
 const Lead = require('../models/Lead');
 const User = require('../models/User');
 const { protect, isManager } = require('../middleware/auth');
+const { FEATURES } = require('../config/features');
+
+// Paused — see config/features.js. 404 so consumers treat it as "feature absent". This router
+// is mounted at /api/leads alongside other routers, so the gate must only close our own path
+// and call next() for everything else, or it would swallow every /api/leads/* request.
+router.use((req, res, next) => {
+  if (FEATURES.RETRY_QUEUE) return next();
+  if (req.path !== '/retry-queue') return next();
+  return res.status(404).json({ success: false, error: 'Route not found' });
+});
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;

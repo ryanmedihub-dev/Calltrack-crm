@@ -16,6 +16,10 @@ async function createLeadFromCall({
     email,
     source: source || 'Call',
     assignedTo: assignedTo || actor._id,
+    // A lead born from a call is that caller's first attempt, so the same rule as any other
+    // first-call claim in lib/applyCallToLead.js applies.
+    assignedAt: new Date(),
+    assignedVia: 'first_call',
     status: status || 'new',
     capturedBy: actor.name,
     callLogs: call ? [call._id] : [],

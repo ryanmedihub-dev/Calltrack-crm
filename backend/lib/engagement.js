@@ -4,8 +4,11 @@
 // WHY A SEPARATE FIELD AND NOT Lead.status
 // Lead.status is the pipeline enum and is load-bearing in poolFilter.js (pool membership
 // whitelist), retryQueue.js (priority tiers) and in the ryan-crm repo, which reads these
-// statuses over HTTP. Writing derived values into it would silently re-tier leads in three
-// systems at once. `engagement` is a parallel, derived-only track; status stays manual.
+// statuses over HTTP. `engagement` is the parallel, derived-only track that always reflects
+// the best call ever had. lib/applyCallToLead.js does let engagement drive `status`, but only
+// among the four values the system itself owns (new/contacted/not_connected/interested) — a
+// status a person set by hand (follow_up, not_interested, booking_done, converted, lost) is
+// never touched by a call.
 //
 // WHY A NUMERIC SCORE ALONGSIDE THE LABEL
 // Bands must only ever move UP. An agent who has a 6-minute call (HOT) and then a 10-second

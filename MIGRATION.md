@@ -197,6 +197,56 @@ covers the `^7.1.5` already installed here.
 
 ---
 
+## 8. Simple lead flow — first-call assignment, sweeps off
+
+Additive schema changes, two new flags, no backfill needed:
+
+```js
+db.leads.createIndex({ assignedTo: 1, createdAt: -1 }, { background: true }) // already exists — no-op, listed for completeness
+```
+
+New fields (all default `null`/`0`, nothing reads them until this deploys):
+
+- `Lead.assignedAt`, `Lead.assignedVia` (`'first_call' | 'manual' | null`) — when/how the current
+  owner was set. Informational only.
+- `CallLog.leadSyncedAt`, `CallLog.leadSyncedDuration` — what of this call has already been
+  pushed onto its lead, so a resync doesn't re-count an attempt or re-push a stale remark.
+
+Existing linked calls simply have `leadSyncedAt: null`, so their current remark gets pushed to
+the lead once more on their next Save — harmless, idempotent.
+
+**Behavior change — first call claims the lead.** The first agent to make a *counted* attempt
+(any outgoing call, or an incoming call that connected) on an unassigned-or-fresh lead becomes
+its owner immediately, via `backend/lib/applyCallToLead.js`. A missed/rejected incoming call
+links to the lead but never claims it. Every later attempt updates the lead's call data and
+leaves the owner alone — only a manager changes an owner after that, by hand.
+
+**Behavior change — `Lead.status` moves again, narrowly.** Supersedes the "status is untouched"
+note in step 6: `applyCallToLead.js` now lets the best-ever engagement score drive `status`, but
+only among the four values the system itself owns (`new`/`contacted`/`not_connected`/
+`interested`) and only upward. A status a person set by hand (`follow_up`, `not_interested`,
+`booking_done`, `converted`, `lost`) is never touched by a call.
+
+New env vars, both default closed:
+
+```
+FEATURE_AUTO_ASSIGN_SWEEP=false   # backend/.env — superseded by first-call assignment above
+FEATURE_RETRY_QUEUE=false         # backend/.env — GET /api/leads/retry-queue now 404s while off
+```
+
+**ryan-crm impact:** its Owner Panel `/owner/leads/retry` page reads `GET /api/leads/retry-queue`
+and will show its callby-error state while `FEATURE_RETRY_QUEUE=false`. Nothing else in ryan-crm
+reads the auto-assign sweep directly.
+
+### Rollback
+
+Both new Lead/CallLog fields are additive and nothing destructive reads them — reverting the
+code leaves them in place, unread and harmless. Both new flags default to their pre-deploy
+behavior when unset on an older code version (the routes/sweep simply didn't exist yet), and
+flipping either flag back on restores the old sweep/route behavior with no data migration.
+
+---
+
 ## Credential rotation — do this regardless
 
 `backend/seed.js` contained a hardcoded MongoDB Atlas connection string, with username and

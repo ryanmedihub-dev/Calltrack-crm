@@ -16,14 +16,22 @@ const FEATURES = {
   // Recycle sweep UNASSIGNS claimed leads back into the pool every 5 minutes. With the pool
   // closed this would strip ownership off leads with nowhere for them to go, so it is tied
   // to LEAD_POOL and must never be enabled independently.
-  // The auto-assign sweep is NOT tied to it — giving an over-attempted unassigned lead an
-  // owner is useful with or without a pool.
   get LEAD_POOL_RECYCLE_SWEEP() { return this.LEAD_POOL; },
 
   // Whether a call to an unknown number should create a Lead. Default OFF: every dialled
   // number becoming a Lead pollutes the collection that feeds the pool filter, the retry
   // queue, the report tabs and the ryan-crm owner panel. Flip on only deliberately.
   AUTO_LEAD_CREATE_ON_CALL: envBool('FEATURE_AUTO_LEAD_CREATE_ON_CALL', false),
+
+  // Every 5 minutes, gives over-attempted UNASSIGNED leads to their last caller. Replaced by
+  // the first-call assignment rule in lib/applyCallToLead.js — the first agent to call a lead
+  // owns it immediately, so there is nothing left for a sweep to do. Off; code kept.
+  AUTO_ASSIGN_SWEEP: envBool('FEATURE_AUTO_ASSIGN_SWEEP', false),
+
+  // GET /api/leads/retry-queue. Read-only list (it never changes a lead), but the owner wants
+  // no retry workflow at all right now. Off; code kept. NOTE: ryan-crm's /owner/leads/retry
+  // page reads this route and will show its callby-error state while this is off.
+  RETRY_QUEUE: envBool('FEATURE_RETRY_QUEUE', false),
 };
 
 module.exports = { FEATURES };
