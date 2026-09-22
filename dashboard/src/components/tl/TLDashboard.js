@@ -143,9 +143,16 @@ export default function TLDashboard({ user }) {
   // KPI values
   const totalEmployees   = myAgents.length;
   const activeEmployees  = myAgents.filter(a => a.isActive !== false).length;
-  const totalCalls       = callStats?.totalCalls    ?? 0;
-  const connectedCalls   = callStats?.connectedCalls ?? 0;
-  const connectRate      = pct(connectedCalls, totalCalls);
+
+  // The /api/calls/stats response shape nests per-period stats under .selected
+  // (for the chosen range) or .today (for the today range). The root-level
+  // callStats object does NOT have .totalCalls directly. Reading it from the
+  // wrong level always produced 0, hiding the Period Calls KPI and the chart.
+  const selectedStats  = callStats?.selected || callStats?.today || callStats;
+  const totalCalls     = selectedStats?.totalCalls    ?? callStats?.totalToday ?? 0;
+  const connectedCalls = selectedStats?.connectedCalls ?? 0;
+  const connectRate    = pct(connectedCalls, totalCalls);
+  const hourlyData     = selectedStats?.callsPerHour  || callStats?.callsPerHour || [];
 
   const greeting = (() => {
     const h = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }));
@@ -218,7 +225,7 @@ export default function TLDashboard({ user }) {
           ) : (
             <div className="px-4 pb-4 pt-2">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={callStats.callsPerHour || []} barCategoryGap="40%"
+                <BarChart data={hourlyData} barCategoryGap="40%"
                   margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="tlBarGrad" x1="0" y1="0" x2="0" y2="1">

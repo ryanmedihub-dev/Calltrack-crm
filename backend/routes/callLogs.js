@@ -733,15 +733,45 @@ router.get('/', protect, requireManagement, async (req, res) => {
 // GET /api/calls/stats — full dashboard stats (today/yesterday/lastWeek + a
 // filterable `selected` bucket driven by ?range=today|tomorrow|thisWeek|custom
 // (custom also takes ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD, IST calendar dates)
+//
+// RBAC: Uses resolveEmployeeFilter so Managers and TLs only see stats for
+// employees within their own hierarchy. Admins/superAdmins remain unrestricted.
 router.get('/stats', protect, requireManagement, async (req, res) => {
   try {
     const { range = 'today', startDate, endDate, employee } = req.query;
-    const employeeId = employee && mongoose.Types.ObjectId.isValid(employee) ? employee : null;
 
-    // Not scoped to the requesting manager — every manager sees the same numbers for a given
-    // range/employee, so the cache key only needs the query inputs, not req.user.
+    // Resolve RBAC scope first — this determines which employees' calls are counted.
+    // For a TL: employee IDs whose teamLeadId === req.user._id.
+    // For a Manager: employee IDs across all their TLs.
+    // For admin/superAdmin: unrestricted (null = entire collection).
+    const { allowed, filter: scopeFilter, error: scopeErr } =
+      await resolveEmployeeFilter(req.user, employee || null, 'employeeId');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: scopeErr });
+    }
+
+    // Derive the effective employeeScope value for computePeriodStats.
+    // scopeFilter may be {}, { employeeId: '<id>' }, or { employeeId: { $in: [...] } }.
+    let effectiveScope = null;
+    if (scopeFilter.employeeId) {
+      if (scopeFilter.employeeId.$in) {
+        // Array of ObjectIds from a Manager/TL hierarchy — pass directly
+        effectiveScope = scopeFilter.employeeId.$in;
+      } else {
+        // Single employee ID (client requested a specific one that passed auth)
+        effectiveScope = scopeFilter.employeeId;
+      }
+    }
+    // When scopeFilter is {} (admin, no employee param), effectiveScope stays null
+    // and computePeriodStats aggregates across the whole collection.
+
+    // Cache key must include the requesting user's identity to prevent a TL from
+    // receiving a cached admin response (or another TL's response) for the same range.
+    const userScopeKey = isSystemAdmin(req.user) ? 'admin' : req.user._id.toString();
+    const employeeParamKey = employee || '';
+
     const data = await cache.cached(
-      ['calls', 'stats', range, startDate || '', endDate || '', employeeId || ''],
+      ['calls', 'stats', userScopeKey, range, startDate || '', endDate || '', employeeParamKey],
       30,
       async () => {
         const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
@@ -755,11 +785,11 @@ router.get('/stats', protect, requireManagement, async (req, res) => {
         const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate);
 
         const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
-          computePeriodStats(todayStart, todayEnd, employeeId),
-          computePeriodStats(ystStart, ystEnd, employeeId),
-          computePeriodStats(lw7Start, lw7End, employeeId),
-          computePeriodStats(lm30Start, lm30End, employeeId),
-          isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId)
+          computePeriodStats(todayStart, todayEnd, effectiveScope),
+          computePeriodStats(ystStart, ystEnd, effectiveScope),
+          computePeriodStats(lw7Start, lw7End, effectiveScope),
+          computePeriodStats(lm30Start, lm30End, effectiveScope),
+          isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, effectiveScope)
         ]);
 
         const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
@@ -778,7 +808,7 @@ router.get('/stats', protect, requireManagement, async (req, res) => {
           lastMonth: lastMonthStats,
           selected,
           range,
-          employee: employeeId,
+          employee: employee || null,
           totalToday:     todayStats.totalCalls,
           missedToday:    todayStats.missed,
           incomingToday:  todayStats.incoming,
@@ -805,14 +835,42 @@ router.get('/stats', protect, requireManagement, async (req, res) => {
 // Owner Panel "Attendance" page (Part 6): that page SUGGESTS a day status
 // from this activity data but a human must confirm/override it — this
 // endpoint only reports call counts, it makes no claim about presence.
-router.get('/daily-by-employee', protect, isManager, async (req, res) => {
+//
+// RBAC: Uses requireManagement (allows TL, not just manager) and resolves
+// each request against the caller's hierarchy via resolveEmployeeFilter.
+// Cache key is user-scoped to prevent cross-user cache pollution.
+router.get('/daily-by-employee', protect, requireManagement, async (req, res) => {
   try {
-    const records = await cache.cached(['calls', 'daily-by-employee', req.query], 60, async () => {
-      const { startDate, endDate, employeeId } = req.query;
+    const { startDate, endDate, employeeId } = req.query;
+
+    // Validate and enforce RBAC scope before touching the cache or DB.
+    const { allowed, filter: scopeFilter, error: scopeErr } =
+      await resolveEmployeeFilter(req.user, employeeId || null, 'employeeId');
+    if (!allowed) {
+      return res.status(403).json({ success: false, error: scopeErr });
+    }
+
+    const userScopeKey = isSystemAdmin(req.user) ? 'admin' : req.user._id.toString();
+
+    const records = await cache.cached(
+      ['calls', 'daily-by-employee', userScopeKey, startDate || '', endDate || '', employeeId || ''],
+      60,
+      async () => {
       const { start, end } = getISTCustomBounds(startDate, endDate);
       const match = { timestamp: { $gte: start, $lt: end } };
-      if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
-        match.employeeId = new mongoose.Types.ObjectId(employeeId);
+
+      // Apply the RBAC-resolved scope filter to the aggregation match.
+      if (scopeFilter.employeeId) {
+        if (scopeFilter.employeeId.$in) {
+          match.employeeId = { $in: scopeFilter.employeeId.$in.map((id) =>
+            mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id
+          ) };
+        } else {
+          const singleId = scopeFilter.employeeId;
+          if (mongoose.Types.ObjectId.isValid(singleId)) {
+            match.employeeId = new mongoose.Types.ObjectId(singleId);
+          }
+        }
       }
 
       const rows = await CallLog.aggregate([
