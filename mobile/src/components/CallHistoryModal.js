@@ -11,14 +11,19 @@ const TYPE_CFG = {
 };
 
 const STATUS_CFG = {
-  interested:     { label: 'Interested',     color: '#16A34A' },
-  contacted:      { label: 'Contacted',      color: '#2563EB' },
-  not_connected:  { label: 'Not Connected',  color: '#64748B' },
-  not_interested: { label: 'Not Interested', color: '#DC2626' },
-  follow_up:      { label: 'Follow Up',      color: '#7C3AED' },
-  booking_done:   { label: 'Booking Done',   color: '#059669' },
-  converted:      { label: 'Converted',      color: '#059669' },
-  lost:           { label: 'Lost',           color: '#6B7280' },
+  interested:      { label: 'Interested',            color: '#16A34A' },
+  contacted:       { label: 'Contacted',              color: '#2563EB' },
+  not_connected:   { label: 'Not Connected',          color: '#64748B' },
+  low:             { label: 'Low',                    color: '#64748B' },
+  engaged:         { label: 'Engaged',                color: '#2563EB' },
+  warm:            { label: 'Warm / Strong Interest', color: '#D97706' },
+  hot:             { label: 'Hot',                    color: '#EA580C' },
+  high_engagement: { label: 'High Engagement',        color: '#DC2626' },
+  not_interested:  { label: 'Not Interested',         color: '#DC2626' },
+  follow_up:       { label: 'Follow Up',              color: '#7C3AED' },
+  booking_done:    { label: 'Booking Done',           color: '#059669' },
+  converted:       { label: 'Converted',              color: '#059669' },
+  lost:            { label: 'Lost',                   color: '#6B7280' },
 };
 
 function fmtTs(ts) {

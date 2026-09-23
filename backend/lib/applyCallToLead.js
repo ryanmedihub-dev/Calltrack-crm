@@ -1,6 +1,6 @@
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
-const { deriveEngagement } = require('./engagement');
+const { deriveEngagement, AUTO_STATUSES, STATUS_FROM_SCORE_EXPR } = require('./engagement');
 
 // The whole call -> lead rule, in one place. Called from POST /api/calls/sync for every
 // synced call whose number matches a Lead.
@@ -21,23 +21,6 @@ function countsAsAttempt(call) {
   if (call.callType === 'incoming') return (call.duration || 0) > 0;
   return false;
 }
-
-// Lead.status values the system is allowed to move on its own. Anything else
-// (follow_up, not_interested, booking_done, converted, lost) was set by a person and is
-// never overwritten by a call.
-const AUTO_STATUSES = ['new', 'contacted', 'not_connected', 'interested'];
-
-// Best-ever engagement score -> pipeline status. Driven by the monotonic best score, so
-// status only ever moves up, same as `engagement`.
-const STATUS_FROM_SCORE = {
-  $switch: {
-    branches: [
-      { case: { $gte: ['$engagementScore', 4] }, then: 'interested' },   // INTERESTED and above
-      { case: { $gte: ['$engagementScore', 1] }, then: 'contacted' },    // LOW .. ENGAGED
-    ],
-    default: 'not_connected',
-  },
-};
 
 function ms(d) { return d ? new Date(d).getTime() : 0; }
 
@@ -185,7 +168,7 @@ async function settleEngagementAndStatus(leadId, band, at) {
   );
   await Lead.updateOne(
     { _id: leadId, status: { $in: AUTO_STATUSES } },
-    [{ $set: { status: STATUS_FROM_SCORE } }]
+    [{ $set: { status: STATUS_FROM_SCORE_EXPR } }]
   );
 }
 

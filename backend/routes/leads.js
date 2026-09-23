@@ -12,6 +12,7 @@ const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const fmtDuration = require('../lib/formatDuration');
 const { createLeadFromCall } = require('../lib/leadFromCall');
 const { normalizeExtraDetails } = require('../lib/normalizeExtraDetails');
+const { ALL_LEAD_STATUSES } = require('../lib/engagement');
 const getPusher = require('../lib/pusher');
 const cache = require('../lib/cache');
 
@@ -294,10 +295,7 @@ router.get('/logs', protect, isManager, async (req, res) => {
 // POST /api/leads/bulk-upload (must be before /:id routes)
 // Powers the multi-step "Import Leads" wizard: field-mapped rows arrive already
 // normalized by the frontend; this route only handles assignment + duplicate policy + insert.
-const VALID_STATUSES = new Set([
-  'new','contacted','not_connected','interested',
-  'not_interested','follow_up','booking_done','converted','lost',
-]);
+const VALID_STATUSES = new Set(ALL_LEAD_STATUSES);
 const MAX_BULK_UPLOAD = 5000;
 
 router.post('/bulk-upload', protect, async (req, res) => {

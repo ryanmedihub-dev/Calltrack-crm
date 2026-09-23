@@ -239,11 +239,18 @@ const GaugeIco = () => (
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
 ──────────────────────────────────────────────────────────── */
+// Talk-time bands (not_connected .. high_engagement) ride a cold -> hot ramp; mirrors
+// backend/lib/engagement.js.
 const STATUS_META = {
   new: { label: "New", color: "#2563EB", bg: "#EFF6FF" },
+  not_connected: { label: "Not Connected", color: "#94A3B8", bg: "#F8FAFC" },
+  low: { label: "Low", color: "#64748B", bg: "#F1F5F9" },
   contacted: { label: "Contacted", color: "#0891B2", bg: "#ECFEFF" },
-  not_connected: { label: "Not Connected", color: "#DC2626", bg: "#FEF2F2" },
+  engaged: { label: "Engaged", color: "#2563EB", bg: "#EFF6FF" },
   interested: { label: "Interested", color: "#0D9488", bg: "#F0FDFA" },
+  warm: { label: "Warm / Strong Interest", color: "#D97706", bg: "#FFFBEB" },
+  hot: { label: "Hot", color: "#EA580C", bg: "#FFF7ED" },
+  high_engagement: { label: "High Engagement", color: "#DC2626", bg: "#FEF2F2" },
   not_interested: { label: "Not Interested", color: "#94A3B8", bg: "#F8FAFC" },
   follow_up: { label: "Follow-up", color: "#D97706", bg: "#FFFBEB" },
   booking_done: { label: "Booking Done", color: "#7C3AED", bg: "#F5F3FF" },

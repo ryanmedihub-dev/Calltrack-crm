@@ -20,7 +20,8 @@ const TrendUpIco = () => <Ico size={12}><polyline points="23 6 13.5 15.5 8.5 10.
 // Real chart colors matching lib/leadStatus.js's STATUS_STYLES dot tones — Recharts
 // renders raw SVG, so its `fill` prop needs an actual color value, not a Tailwind class.
 const CHART_COLORS = {
-  new: '#3B82F6', contacted: '#8B5CF6', not_connected: '#9CA3AF', interested: '#F59E0B',
+  new: '#3B82F6', not_connected: '#9CA3AF', low: '#64748B', contacted: '#0EA5E9', engaged: '#3B82F6',
+  interested: '#8B5CF6', warm: '#F59E0B', hot: '#EA580C', high_engagement: '#DC2626',
   not_interested: '#EF4444', follow_up: '#14B8A6', booking_done: '#10B981', converted: '#16A34A', lost: '#9CA3AF',
 };
 

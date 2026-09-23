@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
-const { BANDS } = require('./engagement');
+const { BANDS, ALL_LEAD_STATUSES } = require('./engagement');
 
 // Engagement counts ride along on the call-stats aggregation that already runs. Same $match,
 // same index, so this costs one extra accumulator per band rather than a second round trip.
@@ -17,10 +17,7 @@ const engagementAccumulators = Object.fromEntries(
 
 // Every lead status in the schema — always present in `byStatus` (zeroed, not omitted) so a
 // consumer never has to guess whether a missing key means zero or means "not implemented yet".
-const LEAD_STATUSES = [
-  'new', 'contacted', 'not_connected', 'interested', 'not_interested',
-  'follow_up', 'booking_done', 'converted', 'lost',
-];
+const LEAD_STATUSES = ALL_LEAD_STATUSES;
 
 function emptyCallStats() {
   return {

@@ -16,6 +16,7 @@
 // Whitelist rather than a $nin of the decided ones: Mongo can use an index for $in but not
 // $nin, and a status added to the enum later stays OUT of the pool until somebody deliberately
 // opts it in — the safe direction for a screen every agent works from.
+// TODO(if pool is re-enabled): statuses changed to talk-time bands — see lib/engagement.js. Revisit this list.
 const POOL_ELIGIBLE_STATUSES = ['new', 'contacted', 'not_connected'];
 
 // A lead dialled more than this many times is not an open opportunity for the floor — it belongs

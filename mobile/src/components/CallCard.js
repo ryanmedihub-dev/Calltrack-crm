@@ -24,14 +24,19 @@ function hashColor(str) {
 }
 
 const STATUS_CFG = {
-  interested:     { label: 'Interested',     color: '#16A34A', bg: '#DCFCE7' },
-  contacted:      { label: 'Contacted',      color: '#2563EB', bg: '#DBEAFE' },
-  not_connected:  { label: 'Not Connected',  color: '#64748B', bg: '#F1F5F9' },
-  not_interested: { label: 'Not Interested', color: '#DC2626', bg: '#FEE2E2' },
-  follow_up:      { label: 'Follow Up',      color: '#7C3AED', bg: '#EDE9FE' },
-  booking_done:   { label: 'Booking Done',   color: '#059669', bg: '#D1FAE5' },
-  converted:      { label: 'Converted',      color: '#059669', bg: '#D1FAE5' },
-  lost:           { label: 'Lost',           color: '#6B7280', bg: '#F3F4F6' },
+  interested:      { label: 'Interested',             color: '#16A34A', bg: '#DCFCE7' },
+  contacted:       { label: 'Contacted',               color: '#2563EB', bg: '#DBEAFE' },
+  not_connected:   { label: 'Not Connected',           color: '#64748B', bg: '#F1F5F9' },
+  low:             { label: 'Low',                     color: '#64748B', bg: '#F1F5F9' },
+  engaged:         { label: 'Engaged',                 color: '#2563EB', bg: '#DBEAFE' },
+  warm:            { label: 'Warm / Strong Interest',  color: '#D97706', bg: '#FEF3C7' },
+  hot:             { label: 'Hot',                     color: '#EA580C', bg: '#FFEDD5' },
+  high_engagement: { label: 'High Engagement',         color: '#DC2626', bg: '#FEE2E2' },
+  not_interested:  { label: 'Not Interested',          color: '#DC2626', bg: '#FEE2E2' },
+  follow_up:       { label: 'Follow Up',               color: '#7C3AED', bg: '#EDE9FE' },
+  booking_done:    { label: 'Booking Done',            color: '#059669', bg: '#D1FAE5' },
+  converted:       { label: 'Converted',               color: '#059669', bg: '#D1FAE5' },
+  lost:            { label: 'Lost',                    color: '#6B7280', bg: '#F3F4F6' },
 };
 
 // Call type visual config

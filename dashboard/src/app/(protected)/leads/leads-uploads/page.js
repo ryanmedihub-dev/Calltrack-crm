@@ -35,9 +35,14 @@ const SYSTEM_FIELDS = [
 
 const STATUS_OPTIONS = [
   { key: 'new', label: 'New' },
-  { key: 'contacted', label: 'Contacted' },
   { key: 'not_connected', label: 'Not Connected' },
+  { key: 'low', label: 'Low' },
+  { key: 'contacted', label: 'Contacted' },
+  { key: 'engaged', label: 'Engaged' },
   { key: 'interested', label: 'Interested' },
+  { key: 'warm', label: 'Warm / Strong Interest' },
+  { key: 'hot', label: 'Hot' },
+  { key: 'high_engagement', label: 'High Engagement' },
   { key: 'not_interested', label: 'Not Interested' },
   { key: 'follow_up', label: 'Follow-up' },
   { key: 'booking_done', label: 'Booking Done' },

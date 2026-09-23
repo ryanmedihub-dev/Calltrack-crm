@@ -9,15 +9,20 @@ import { Colors } from '../theme/colors';
 
 // ── Valid status values (must match backend enum) ─────────────────────────────
 const VALID_STATUSES = new Set([
-  'new','contacted','not_connected','interested',
+  'new','not_connected','low','contacted','engaged','interested','warm','hot','high_engagement',
   'not_interested','follow_up','booking_done','converted','lost',
 ]);
 
 const STATUS_ALIASES = {
   'new': 'new', 'fresh': 'new', 'lead': 'new',
-  'contacted': 'contacted', 'called': 'contacted', 'reached': 'contacted',
   'not connected': 'not_connected', 'not_connected': 'not_connected', 'no answer': 'not_connected', 'busy': 'not_connected',
-  'interested': 'interested', 'warm': 'interested',
+  'low': 'low',
+  'contacted': 'contacted', 'called': 'contacted', 'reached': 'contacted',
+  'engaged': 'engaged',
+  'interested': 'interested',
+  'warm': 'warm', 'strong interest': 'warm',
+  'hot': 'hot',
+  'high engagement': 'high_engagement', 'high_engagement': 'high_engagement',
   'not interested': 'not_interested', 'not_interested': 'not_interested', 'cold': 'not_interested',
   'follow up': 'follow_up', 'follow_up': 'follow_up', 'callback': 'follow_up', 'follow-up': 'follow_up',
   'booking done': 'booking_done', 'booking_done': 'booking_done', 'booked': 'booking_done',

@@ -511,7 +511,7 @@ router.post('/sync', protect, async (req, res) => {
               name:   contactName,
               phone:  log.contactNumber,
               source: 'Call',
-              status: 'contacted',
+              status: band.status,
               note:   log.notes,
               followUpDate: fuDate,
               engagement:          band.key,

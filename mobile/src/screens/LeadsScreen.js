@@ -16,15 +16,20 @@ const LEADS_CACHE_KEY = 'leads_assigned';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATUS = {
-  new:           { fg: '#1A6BFF', bg: '#EBF2FF', label: 'New',           icon: '🆕' },
-  contacted:     { fg: '#7C3AED', bg: '#EDE9FE', label: 'Contacted',     icon: '📞' },
-  not_connected: { fg: '#64748B', bg: '#F1F5F9', label: 'Not Connected',  icon: '📵' },
-  interested:    { fg: '#D97706', bg: '#FEF3C7', label: 'Interested',    icon: '👍' },
-  not_interested:{ fg: '#DC2626', bg: '#FEE2E2', label: 'Not Interested', icon: '👎' },
-  follow_up:     { fg: '#7C3AED', bg: '#EDE9FE', label: 'Follow Up',     icon: '📅' },
-  booking_done:  { fg: '#059669', bg: '#D1FAE5', label: 'Booking Done',  icon: '✅' },
-  converted:     { fg: '#16A34A', bg: '#DCFCE7', label: 'Converted',     icon: '🎉' },
-  lost:          { fg: '#6B7280', bg: '#F3F4F6', label: 'Lost',          icon: '💀' },
+  new:             { fg: '#1A6BFF', bg: '#EBF2FF', label: 'New',                  icon: '🆕' },
+  not_connected:   { fg: '#64748B', bg: '#F1F5F9', label: 'Not Connected',        icon: '📵' },
+  low:             { fg: '#64748B', bg: '#F1F5F9', label: 'Low',                  icon: '🔅' },
+  contacted:       { fg: '#7C3AED', bg: '#EDE9FE', label: 'Contacted',            icon: '📞' },
+  engaged:         { fg: '#2563EB', bg: '#DBEAFE', label: 'Engaged',              icon: '💬' },
+  interested:      { fg: '#D97706', bg: '#FEF3C7', label: 'Interested',           icon: '👍' },
+  warm:            { fg: '#D97706', bg: '#FEF3C7', label: 'Warm / Strong Interest', icon: '🌤' },
+  hot:             { fg: '#EA580C', bg: '#FFEDD5', label: 'Hot',                  icon: '🔥' },
+  high_engagement: { fg: '#DC2626', bg: '#FEE2E2', label: 'High Engagement',      icon: '⚡' },
+  not_interested:  { fg: '#DC2626', bg: '#FEE2E2', label: 'Not Interested',       icon: '👎' },
+  follow_up:       { fg: '#7C3AED', bg: '#EDE9FE', label: 'Follow Up',            icon: '📅' },
+  booking_done:    { fg: '#059669', bg: '#D1FAE5', label: 'Booking Done',         icon: '✅' },
+  converted:       { fg: '#16A34A', bg: '#DCFCE7', label: 'Converted',            icon: '🎉' },
+  lost:            { fg: '#6B7280', bg: '#F3F4F6', label: 'Lost',                 icon: '💀' },
 };
 
 const DATE_PRESETS = [

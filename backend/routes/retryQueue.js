@@ -49,6 +49,9 @@ const PRIORITY_ORDER = ['P0', 'P1', 'P2', 'P3', 'P4'];
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 5000;
 
+// TODO(if retry queue is re-enabled): statuses changed to talk-time bands — see
+// lib/engagement.js. Revisit the tier rules below.
+//
 // Priority rules, checked in order — a lead is scored by the first rule its status matches,
 // never by more than one. A lead whose status doesn't satisfy its own tier's extra condition
 // (e.g. an 'interested' lead with no past follow-up) falls all the way through and is excluded

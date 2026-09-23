@@ -9,6 +9,7 @@ const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 const fmtDuration = require('../lib/formatDuration');
 const reportCache = require('../lib/reportCache');
+const { STATUS_LABELS } = require('../lib/engagement');
 
 // Parses a 'YYYY-MM-DD' IST calendar-date string (as sent by the dashboard's
 // date-range filters) into the UTC instant of that day's IST start/end — using
@@ -815,17 +816,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
 });
 
 // Lead status keys/labels — mirrors dashboard/src/app/(protected)/reports/lead/page.js STATUS_META
-const LEAD_STATUS_LABELS = {
-  new:            'New',
-  contacted:      'Contacted',
-  not_connected:  'Not Connected',
-  interested:     'Interested',
-  not_interested: 'Not Interested',
-  follow_up:      'Follow-up',
-  booking_done:   'Booking Done',
-  converted:      'Converted',
-  lost:           'Lost'
-};
+const LEAD_STATUS_LABELS = STATUS_LABELS;
 const LEAD_STATUS_KEYS = Object.keys(LEAD_STATUS_LABELS);
 
 function applyLeadTimeFilter(filter, leadTime) {

@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { ENGAGEMENT_KEYS } = require('../lib/engagement');
+const { ENGAGEMENT_KEYS, ALL_LEAD_STATUSES } = require('../lib/engagement');
 
 const changelogSchema = new mongoose.Schema({
   changedAt:     { type: Date, default: Date.now },
@@ -17,7 +17,7 @@ const leadSchema = new mongoose.Schema({
   tags:       [{ type: String }],
   status: {
     type: String,
-    enum: ['new', 'contacted', 'not_connected', 'interested', 'not_interested', 'follow_up', 'booking_done', 'converted', 'lost'],
+    enum: ALL_LEAD_STATUSES,
     default: 'new'
   },
   assignedTo:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
