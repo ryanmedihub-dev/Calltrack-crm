@@ -430,6 +430,8 @@ router.post('/sync', protect, async (req, res) => {
     });
 
     let inserted = [];
+    // Index -> failed. null = the whole bulkWrite failed with no per-op detail.
+    let failedIdx = new Set();
     if (ops.length) {
       try {
         const result = await CallLog.bulkWrite(ops, { ordered: false });
@@ -448,21 +450,25 @@ router.post('/sync', protect, async (req, res) => {
           `[calls/sync] bulkWrite: ${writeErrors.length || 'unknown count of'} op(s) failed out of ${ops.length}:`,
           writeErrors.map((e) => ({ index: e.index, code: e.code, message: e.errmsg || e.message }))
         );
+        failedIdx = writeErrors.length ? new Set(writeErrors.map((e) => e.index)) : null;
         const newIds = Object.values(bulkErr.result?.upsertedIds || {});
-        if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } });
+        if (newIds.length) inserted = await CallLog.find({ _id: { $in: newIds } }).catch(() => []);
       }
 
-      // Best-effort, pipelined (one round trip): remembers this batch's fingerprints so an
-      // identical resync of these same calls can skip them next time. Written for every op
-      // attempted here, success or partial failure — the write itself is idempotent (it's an
-      // upsert keyed the same way either way), so even a fingerprint recorded for an op that
-      // hit a transient error just means the NEXT resync repeats that one op, same as today.
-      if (redis.isEnabled() && toProcess.length) {
+      // Fingerprint only ops that actually committed. A fingerprint on a failed op makes every
+      // resync skip that call for 24h, so a DB outage (e.g. Atlas quota) silently lost the call.
+      const committed = failedIdx ? toProcess.filter((_d, i) => !failedIdx.has(i)) : [];
+      if (redis.isEnabled() && committed.length) {
         try {
           const pipeline = redis.client.pipeline();
-          toProcess.forEach((d) => pipeline.set(fpKeyFor(d), fingerprintOf(d), 'EX', 86400));
+          committed.forEach((d) => pipeline.set(fpKeyFor(d), fingerprintOf(d), 'EX', 86400));
           await pipeline.exec();
         } catch {}
+      }
+
+      // Nothing saved -> tell the app, so it queues the calls instead of treating them as synced.
+      if (!failedIdx || failedIdx.size === ops.length) {
+        return res.status(503).json({ success: false, error: 'Call logs could not be saved, will retry' });
       }
     }
 

@@ -42,7 +42,8 @@ const callLogSchema = new mongoose.Schema({
 
 callLogSchema.index({ employeeId: 1, timestamp: -1 });
 callLogSchema.index({ timestamp: -1 });
-callLogSchema.index({ contactNumber: 1 });
+// No bare { contactNumber: 1 }: the index below covers it as a prefix. Keep it out — the Atlas
+// free tier counts index size against its 512 MB quota.
 // Supports the "first ever contact" lookup used by the call history report
 // (New/Repeat column) — matches on contactNumber with timestamp covered by
 // the same index instead of scanning every historical call for that number.
