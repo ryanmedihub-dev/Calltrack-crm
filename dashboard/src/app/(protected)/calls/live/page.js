@@ -16,6 +16,7 @@ import {
   Cell,
 } from 'recharts';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { parseUTC } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -239,10 +240,7 @@ export default function LiveMonitorPage() {
           .get('/api/calls/realtime')
           .then((r) => setLiveFeed((r.data.data || []).slice(0, 30)))
           .catch(() => {}),
-        api
-          .get('/api/employees')
-          .then((r) => setEmployees(r.data.data || []))
-          .catch(() => {}),
+        getAllEmployeesSafe(api).then(setEmployees).catch(() => {}),
       ]);
       setLoading(false);
     })();

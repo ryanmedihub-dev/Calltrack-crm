@@ -22,6 +22,7 @@ const reportRoutes    = require('./routes/reports');
 const auditRoutes     = require('./routes/auditLog');
 const scriptRoutes    = require('./routes/scripts');
 const employeeRoutes  = require('./routes/employees');
+const userRoutes      = require('./routes/users');
 const downloadRoutes  = require('./routes/downloads');
 const { FEATURES }    = require('./config/features');
 
@@ -196,6 +197,7 @@ app.use('/api/reports',    reportRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/scripts',    scriptRoutes);
 app.use('/api/employees',  employeeRoutes);
+app.use('/api/users',      userRoutes);
 app.use('/api/downloads',  downloadRoutes);
 
 app.get('/api/health', (_req, res) => res.json({

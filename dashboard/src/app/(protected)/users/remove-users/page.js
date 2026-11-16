@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { DataTable } from '../../../../components/report-shared';
 
 function Ico({ size=16, children }) {
@@ -16,6 +17,8 @@ const SpinnerIco = ({s=15}) => <Ico size={s} className="animate-spin"><line x1="
 const ROLE_COLORS = {
   admin:{ color:'#7C3AED', bg:'#F5F3FF' },
   manager:{ color:'#2563EB', bg:'#EFF6FF' },
+  tl:{ color:'#D97706', bg:'#FFFBEB' },
+  employee:{ color:'#16A34A', bg:'#F0FDF4' },
   agent:{ color:'#16A34A', bg:'#F0FDF4' },
   supervisor:{ color:'#D97706', bg:'#FFFBEB' },
 };
@@ -30,7 +33,7 @@ export default function RemoveUsersPage() {
 
   const load = useCallback(()=>{
     setLoading(true);
-    api.get('/api/employees').then(r=>setUsers(r.data?.data||[])).catch(()=>{}).finally(()=>setLoading(false));
+    getAllEmployeesSafe(api).then(emps=>setUsers(emps||[])).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
   useEffect(()=>{ load(); },[load]);

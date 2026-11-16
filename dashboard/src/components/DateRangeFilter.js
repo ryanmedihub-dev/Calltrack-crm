@@ -33,6 +33,7 @@ function fmtShort(dateStr) {
 }
 
 const RANGE_OPTIONS = [
+  { key: 'all', label: 'All Time' },
   { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
   { key: 'thisWeek', label: 'This Week' },
@@ -48,6 +49,8 @@ const RANGE_OPTIONS = [
 export function rangeToDates(value) {
   const today = todayIST();
   switch (value?.range) {
+    case 'all':
+      return { fromDate: '', toDate: '' };
     case 'yesterday': {
       const d = addDays(today, -1);
       return { fromDate: d, toDate: d };
@@ -65,13 +68,13 @@ export function rangeToDates(value) {
 
 /** Human label for the current filter value — usable outside the component too. */
 export function formatRangeLabel(value) {
-  if (!value) return 'Today';
+  if (!value) return 'All Time';
   if (value.range === 'custom' && value.startDate) {
     const s = fmtShort(value.startDate);
     const e = fmtShort(value.endDate || value.startDate);
     return value.startDate === (value.endDate || value.startDate) ? s : `${s} – ${e}`;
   }
-  return RANGE_OPTIONS.find((o) => o.key === value.range)?.label || 'Today';
+  return RANGE_OPTIONS.find((o) => o.key === value.range)?.label || (value.range === 'all' ? 'All Time' : 'Today');
 }
 
 const CalendarIco = () => (
@@ -94,12 +97,16 @@ const ChevronIco = () => (
  * `onChange(nextValue)` fires whenever the user picks a new range or applies a custom one.
  * All dates are plain 'YYYY-MM-DD' IST calendar-date strings.
  */
-export default function DateRangeFilter({ value, onChange, className = '' }) {
+export default function DateRangeFilter({ value, onChange, className = '', includeAll = false }) {
   const [open, setOpen] = useState(false);
   const [showCustom, setShowCustom] = useState(value?.range === 'custom');
   const [customStart, setCustomStart] = useState(value?.startDate || todayIST());
   const [customEnd, setCustomEnd] = useState(value?.endDate || todayIST());
   const wrapRef = useRef(null);
+
+  const options = includeAll || value?.range === 'all'
+    ? RANGE_OPTIONS
+    : RANGE_OPTIONS.filter((o) => o.key !== 'all');
 
   useEffect(() => {
     function onDocClick(e) {
@@ -164,7 +171,7 @@ export default function DateRangeFilter({ value, onChange, className = '' }) {
             exit={{ opacity: 0, y: -10 }}
             className="absolute right-0 top-full mt-2 z-30 bg-white rounded-xl shadow-2xl border border-gray-100 min-w-[260px] overflow-hidden"
           >
-            {RANGE_OPTIONS.map((o) => (
+            {options.map((o) => (
               <button
                 key={o.key}
                 onClick={() => select(o.key)}

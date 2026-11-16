@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { StatCard, Skeleton, ChartTip, PhoneIco, CheckIco, UsersIco } from '../../../../components/report-shared';
 
 const PERIODS = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }];
@@ -27,8 +28,8 @@ function EmployeePerformanceReportContent() {
   const [loadingEmp, setLoadingEmp] = useState(true);
 
   useEffect(() => {
-    api.get('/api/employees').then(r => {
-      const emps = r.data?.data || [];
+    getAllEmployeesSafe(api).then(r => {
+      const emps = Array.isArray(r) ? r : (r?.data?.data || []);
       setEmployees(emps);
       const preselect = empParam && emps.some(e => e._id === empParam) ? empParam : emps[0]?._id;
       if (preselect) setSelected(preselect);

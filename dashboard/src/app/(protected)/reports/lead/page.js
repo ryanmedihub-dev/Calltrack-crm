@@ -18,6 +18,7 @@ import {
   Area,
 } from "recharts";
 import api from "../../../../lib/api";
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { useReportData, invalidateReportCache } from "../../../../lib/useReportData";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
@@ -629,10 +630,7 @@ function LeadReportsPageContent() {
   } = useReportData("/api/reports/leads-periodic", requestParams);
   const load = refresh;
   useEffect(() => {
-    api
-      .get("/api/employees")
-      .then((r) => setEmployees(r.data.data || []))
-      .catch(() => {});
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => {});
   }, []);
 
   const saveNote = async (leadId, text) => {

@@ -7,6 +7,8 @@ import {
   PieChart, Pie, Cell, Legend, LabelList,
 } from 'recharts';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
+import { STATUSES, STATUS_LABELS } from '../../../lib/leadStatus';
 import CallTypeBadge from '../../../components/CallTypeBadge';
 import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../components/DateRangeFilter';
 import { Truncate } from '../../../components/report-shared';
@@ -400,13 +402,30 @@ const ChartTip = ({ active, payload, label }) => {
   );
 };
 
-const LEAD_STATUSES = [
-  { key: 'new', label: 'New', color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
-  { key: 'contacted', label: 'Contacted', color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
-  { key: 'interested', label: 'Interested', color: '#0D9488', bg: '#F0FDFA', border: '#99F6E4' },
-  { key: 'converted', label: 'Converted', color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
-  { key: 'lost', label: 'Lost', color: '#DC2626', bg: '#FFF1F2', border: '#FECACA' },
-];
+const STATUS_COLORS = {
+  new:             { color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
+  not_connected:   { color: '#6B7280', bg: '#F3F4F6', border: '#E5E7EB' },
+  low:             { color: '#475569', bg: '#F1F5F9', border: '#CBD5E1' },
+  contacted:       { color: '#0284C7', bg: '#F0F9FF', border: '#BAE6FD' },
+  engaged:         { color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
+  interested:      { color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
+  warm:            { color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
+  hot:             { color: '#EA580C', bg: '#FFF7ED', border: '#FFEDD5' },
+  high_engagement: { color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
+  follow_up:       { color: '#0D9488', bg: '#F0FDFA', border: '#99F6E4' },
+  not_interested:  { color: '#EF4444', bg: '#FEF2F2', border: '#FECACA' },
+  booking_done:    { color: '#059669', bg: '#ECFDF5', border: '#A7F3D0' },
+  converted:       { color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
+  lost:            { color: '#9CA3AF', bg: '#F3F4F6', border: '#E5E7EB' },
+};
+
+const LEAD_STATUSES = STATUSES.map((key) => ({
+  key,
+  label: STATUS_LABELS[key] || key,
+  color: STATUS_COLORS[key]?.color || '#6B7280',
+  bg: STATUS_COLORS[key]?.bg || '#F3F4F6',
+  border: STATUS_COLORS[key]?.border || '#E5E7EB',
+}));
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
@@ -474,7 +493,7 @@ export default function DashboardPage() {
   }, [dateRange]);
 
   useEffect(() => {
-    api.get('/api/employees').then((r) => setEmployees(r.data.data)).catch(() => { });
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => { });
     api
       .get('/api/calls/realtime')
       .then((r) => setLiveFeed((r.data.data || []).slice(0, 30)))
@@ -571,6 +590,19 @@ export default function DashboardPage() {
           </div>
         </motion.div>
 
+        {/* Date Scope Notice */}
+        {dateRange.range === 'today' && stats?.selected?.totalCalls === 0 && stats?.latestActivityDate && (
+          <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl px-4 py-3 flex items-center gap-3 text-xs text-amber-800">
+            <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <span>No calls logged on today's calendar date ({stats?.selected?.date || 'Today'}). Latest recorded activity: <strong>{stats.latestActivityDate}</strong>.</span>
+              <span className="ml-2 text-amber-700">Select a custom date or range to view historical activity.</span>
+            </div>
+          </div>
+        )}
+
         {/* KPI Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           {KPI.map((cfg, i) => (
@@ -601,7 +633,9 @@ export default function DashboardPage() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Lead Pipeline</h3>
-                <p className="text-xs text-gray-500">{totalLeads} total leads</p>
+                <p className="text-xs text-gray-500">
+                  {totalLeads} total leads {dateRange.range === 'today' && totalLeads === 0 ? '(0 created today)' : ''}
+                </p>
               </div>
             </div>
             <Link
@@ -611,7 +645,15 @@ export default function DashboardPage() {
               View all →
             </Link>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {dateRange.range === 'today' && totalLeads === 0 && (
+            <div className="mb-4 bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-700 flex items-center justify-between">
+              <span>No leads created on today's calendar date. All 121,124 historical leads are available under All Time.</span>
+              <Link href="/leads/overview" className="underline font-medium hover:text-blue-900 ml-2 shrink-0">
+                Go to Leads Overview →
+              </Link>
+            </div>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
             {LEAD_STATUSES.map((s, i) => {
               const count = leadStats[s.key] ?? 0;
               const pct = totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0;
@@ -622,23 +664,23 @@ export default function DashboardPage() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.04 + 0.35 }}
                     whileHover={{ y: -2 }}
-                    className="bg-gray-50 hover:bg-white rounded-xl p-4 border border-gray-100 hover:border-gray-200 transition-all duration-300 cursor-pointer"
+                    className="bg-gray-50 hover:bg-white rounded-xl p-3 border border-gray-100 hover:border-gray-200 transition-all duration-300 cursor-pointer"
                   >
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: s.color }}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider truncate mr-1" style={{ color: s.color }} title={s.label}>
                         {s.label}
                       </span>
                       <span
-                        className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
                         style={{ background: s.bg, color: s.color }}
                       >
                         {pct}%
                       </span>
                     </div>
-                    <p className="text-2xl font-bold text-gray-900 tabular-nums">
+                    <p className="text-xl font-bold text-gray-900 tabular-nums">
                       {leadStats[s.key] === undefined ? '—' : count}
                     </p>
-                    <div className="mt-3 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                    <div className="mt-2 h-1.5 rounded-full bg-gray-200 overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${pct}%` }}

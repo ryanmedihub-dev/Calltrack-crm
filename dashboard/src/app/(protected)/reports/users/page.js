@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/api';
+import { getAllEmployees } from '../../../../lib/employees';
 import { fmtDate } from '@/lib/timezone';
 import { DataTable, StatCard, UsersIco, CheckIco, XIco, SearchIco } from '@/components/report-shared';
 
@@ -107,8 +108,8 @@ export default function UsersPage() {
   const fetchUsers = useCallback(async (q = search) => {
     setLoading(true);
     try {
-      const res = await api.get('/api/employees', { params: q ? { search: q } : {} });
-      setUsers(res.data.data || []);
+      const res = await getAllEmployees(api, { params: q ? { search: q } : {} });
+      setUsers(res || []);
     } catch {
       toast.error('Failed to load users');
     }

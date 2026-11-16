@@ -69,9 +69,10 @@ function describeChangelogEntry(action, details) {
 }
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
-function getISTDateBounds(offsetDays = 0) {
+// When a custom `anchor` Date is supplied, bounds are computed relative to that date.
+function getISTDateBounds(offsetDays = 0, anchor = null) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const nowIST = new Date((anchor ? anchor.getTime() : Date.now()) + IST_OFFSET_MS);
   nowIST.setUTCHours(0, 0, 0, 0);
   nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
   const start = new Date(nowIST.getTime() - IST_OFFSET_MS);
@@ -79,10 +80,10 @@ function getISTDateBounds(offsetDays = 0) {
   return { start, end };
 }
 
-// Returns UTC start/end (7-day span) of the current calendar week (Mon–Sun) in IST.
-function getISTWeekBounds() {
+// Returns UTC start/end (7-day span) of the calendar week (Mon–Sun) that contains `anchor` in IST.
+function getISTWeekBoundsFor(anchor = null) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const nowIST = new Date((anchor ? anchor.getTime() : Date.now()) + IST_OFFSET_MS);
   const day = nowIST.getUTCDay(); // 0=Sun..6=Sat
   const diffToMonday = (day + 6) % 7;
   nowIST.setUTCHours(0, 0, 0, 0);
@@ -91,6 +92,8 @@ function getISTWeekBounds() {
   const end   = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
   return { start, end };
 }
+
+function getISTWeekBounds() { return getISTWeekBoundsFor(null); }
 
 // Returns UTC start/end for an IST calendar-date range given as 'YYYY-MM-DD' strings.
 function getISTCustomBounds(startDateStr, endDateStr) {
@@ -102,9 +105,24 @@ function getISTCustomBounds(startDateStr, endDateStr) {
   return { start, end };
 }
 
+let _latestLeadTsCache = null;
+async function getLatestLeadTimestamp() {
+  if (_latestLeadTsCache && (Date.now() - _latestLeadTsCache.fetchedAt) < 5 * 60 * 1000) {
+    return _latestLeadTsCache.ts;
+  }
+  const doc = await Lead.findOne({}, { createdAt: 1 }).sort({ createdAt: -1, _id: -1 }).lean();
+  const ts = doc ? new Date(doc.createdAt) : null;
+  _latestLeadTsCache = { ts, fetchedAt: Date.now() };
+  return ts;
+}
+
 // Resolves a named/custom range keyword to UTC {start, end} bounds.
-function resolveDateRange(range, startDate, endDate) {
+// Always uses true wall-clock IST calendar dates. No silent remapping.
+function resolveDateRange(range, startDate, endDate, latestTs = null) {
   switch (range) {
+    case 'latest':
+    case 'latestActive':
+      return latestTs ? getISTDateBounds(0, latestTs) : getISTDateBounds(0);
     case 'yesterday': return getISTDateBounds(-1);
     case 'thisWeek':  return getISTWeekBounds();
     case 'custom':    return getISTCustomBounds(startDate, endDate);
@@ -188,8 +206,10 @@ router.get('/', protect, isManager, async (req, res) => {
         { email: { $regex: search, $options: 'i' } },
       ];
     }
-    if (range) {
-      const { start, end } = resolveDateRange(range, startDate, endDate);
+    let latestTs = null;
+    if (range && range !== 'all') {
+      latestTs = await getLatestLeadTimestamp();
+      const { start, end } = resolveDateRange(range, startDate, endDate, latestTs);
       filter.createdAt = { $gte: start, $lt: end };
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -198,7 +218,19 @@ router.get('/', protect, isManager, async (req, res) => {
       Lead.find(filter).populate('assignedTo', 'name email phone tlName').sort(sort).skip(skip).limit(parseInt(limit)),
       Lead.countDocuments(filter)
     ]);
-    return res.json({ success: true, data: { leads, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) } });
+    if (!latestTs) latestTs = await getLatestLeadTimestamp();
+    const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+    return res.json({
+      success: true,
+      data: {
+        leads,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
+        latestActivityDate: latestTs ? fmtDate(latestTs) : null,
+        latestActivityTs: latestTs ? latestTs.toISOString() : null,
+      }
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -254,34 +286,40 @@ router.get('/logs', protect, isManager, async (req, res) => {
       changelogMatch['changelog.changedBy'] = new mongoose.Types.ObjectId(employee);
     }
 
-    const [result] = await Lead.aggregate([
-      { $match: leadMatch },
+    const basePipeline = [
+      ...(Object.keys(leadMatch).length ? [{ $match: leadMatch }] : []),
+      { $project: { name: 1, phone: 1, changelog: 1 } },
       { $unwind: '$changelog' },
       ...(Object.keys(changelogMatch).length ? [{ $match: changelogMatch }] : []),
-      { $sort: { 'changelog.changedAt': -1 } },
-      {
-        $facet: {
-          data: [
-            { $skip: skip },
-            { $limit: limitNum },
-            { $project: {
-              _id:         '$changelog._id',
-              leadId:      '$_id',
-              leadName:    '$name',
-              leadPhone:   '$phone',
-              action:      '$changelog.action',
-              timestamp:   '$changelog.changedAt',
-              performedBy: '$changelog.changedByName',
-              details:     '$changelog.details',
-            } },
-          ],
-          total: [{ $count: 'count' }],
+    ];
+
+    const [logsRaw, countResult] = await Promise.all([
+      Lead.aggregate([
+        ...basePipeline,
+        { $sort: { 'changelog.changedAt': -1 } },
+        { $skip: skip },
+        { $limit: limitNum },
+        {
+          $project: {
+            _id:         '$changelog._id',
+            leadId:      '$_id',
+            leadName:    '$name',
+            leadPhone:   '$phone',
+            action:      '$changelog.action',
+            timestamp:   '$changelog.changedAt',
+            performedBy: '$changelog.changedByName',
+            details:     '$changelog.details',
+          },
         },
-      },
+      ], { allowDiskUse: true }),
+      Lead.aggregate([
+        ...basePipeline,
+        { $count: 'count' },
+      ], { allowDiskUse: true }),
     ]);
 
-    const total = result?.total?.[0]?.count || 0;
-    const logs = (result?.data || []).map((l) => ({
+    const total = countResult[0]?.count || 0;
+    const logs = (logsRaw || []).map((l) => ({
       ...l,
       description: describeChangelogEntry(l.action, l.details),
     }));

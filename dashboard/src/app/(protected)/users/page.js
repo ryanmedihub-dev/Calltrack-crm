@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
 
 function Ico({ size=16, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
@@ -26,11 +27,17 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/api/employees').then(r=>{
-      const users  = r.data?.data||[];
-      const active = users.filter(u=>u.isActive!==false).length;
-      setStats({ total:users.length, active, inactive:users.length-active });
-    }).catch(()=>{}).finally(()=>setLoading(false));
+    (async () => {
+      try {
+        const all = await getAllEmployeesSafe(api);
+        const total = all.length;
+        const active = all.filter(u => u.isActive !== false).length;
+        const inactive = total - active;
+        setStats({ total, active, inactive });
+      } catch { /* non-fatal — stats remain at zero */ } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   return (

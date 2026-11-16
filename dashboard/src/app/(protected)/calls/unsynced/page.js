@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { triggerLocalExport } from '../../../../lib/downloads';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -189,10 +190,7 @@ export default function UnsyncedCallsPage() {
     load();
   }, [load]);
   useEffect(() => {
-    api
-      .get('/api/employees')
-      .then((r) => setEmployees(r.data.data || []))
-      .catch(() => {});
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => {});
   }, []);
 
   const createLead = async () => {

@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { SearchIco, EmptyState, Ico } from '../../../../components/report-shared';
 
@@ -51,7 +52,7 @@ export default function LeadsLogsPage() {
   }, [search, action, employee, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data?.data||[])).catch(()=>{}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(()=>{}); }, []);
 
   const totalPages = Math.ceil(total/PER_PAGE);
 

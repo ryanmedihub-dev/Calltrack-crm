@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, Fragment } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import {
   CheckIco, XIco, DownloadIco, SearchIco, Field,
 } from '../../../../components/report-shared';
@@ -197,7 +198,7 @@ export default function LeadsUploadsPage() {
 
   useEffect(() => {
     if (step === 4 && assignMode === 'employee' && employees.length === 0) {
-      api.get('/api/employees').then((r) => setEmployees(r.data?.data || [])).catch(() => {});
+      getAllEmployeesSafe(api).then(setEmployees).catch(() => {});
     }
   }, [step, assignMode, employees.length]);
 

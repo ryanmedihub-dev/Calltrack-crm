@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { DataTable } from '../../../../components/report-shared';
 
 function Ico({ size=16, children }) {
@@ -33,10 +34,13 @@ export default function EmployeesOverviewPage() {
       setLoading(true);
       try {
         const [empRes, callRes] = await Promise.allSettled([
-          api.get('/api/employees'),
+          getAllEmployeesSafe(api),
           api.get('/api/calls/stats'),
         ]);
-        if (empRes.status==='fulfilled') setEmployees(empRes.value.data?.data||[]);
+        if (empRes.status === 'fulfilled') {
+          const val = empRes.value;
+          setEmployees(Array.isArray(val) ? val : (val?.data?.data || []));
+        }
         if (callRes.status==='fulfilled') setCallStats(callRes.value.data?.data);
       } catch {}
       setLoading(false);

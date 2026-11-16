@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { fmtDate } from '../../../../lib/timezone';
 import { DataTable, LeadStatusBadge, InfoDot } from '../../../../components/report-shared';
 import { statusStyle, statusLabel } from '../../../../lib/leadStatus';
@@ -53,7 +54,7 @@ export default function FollowUpsPage() {
   }, [search, employee, dueSoon, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data?.data||[])).catch(()=>{}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(()=>{}); }, []);
 
   const totalPages = Math.ceil(total/PER_PAGE);
   // NOTE: this page is server-paginated — `leads` only holds the CURRENT page's rows,

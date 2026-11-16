@@ -38,9 +38,11 @@ function callKey(d) {
 }
 
 // Returns UTC start/end of a calendar day in IST (UTC+5:30).
-function getISTDateBounds(offsetDays = 0) {
+// When a custom `anchor` Date is supplied, the bounds are computed relative to that date
+// instead of the wall-clock now. Used by the stats route to handle data-lag gracefully.
+function getISTDateBounds(offsetDays = 0, anchor = null) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const nowIST = new Date((anchor ? anchor.getTime() : Date.now()) + IST_OFFSET_MS);
   nowIST.setUTCHours(0, 0, 0, 0);
   nowIST.setUTCDate(nowIST.getUTCDate() + offsetDays);
   const start = new Date(nowIST.getTime() - IST_OFFSET_MS);
@@ -48,10 +50,10 @@ function getISTDateBounds(offsetDays = 0) {
   return { start, end };
 }
 
-// Returns UTC start/end (7-day span) of the current calendar week (Mon–Sun) in IST.
-function getISTWeekBounds() {
+// Returns UTC start/end (7-day span) of the calendar week (Mon–Sun) that contains `anchor` in IST.
+function getISTWeekBoundsFor(anchor = null) {
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const nowIST = new Date(Date.now() + IST_OFFSET_MS);
+  const nowIST = new Date((anchor ? anchor.getTime() : Date.now()) + IST_OFFSET_MS);
   const day = nowIST.getUTCDay(); // 0=Sun..6=Sat
   const diffToMonday = (day + 6) % 7;
   nowIST.setUTCHours(0, 0, 0, 0);
@@ -60,6 +62,23 @@ function getISTWeekBounds() {
   const end   = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
   return { start, end };
 }
+
+// Looks up the latest call log timestamp in the collection (with a 5-minute in-process
+// cache to avoid a round-trip on every stats request). Returns null when the collection
+// is empty. This is PURELY a read-only metadata probe — it touches no documents.
+let _latestTsCache = null; // { ts: Date, fetchedAt: number }
+async function getLatestCallTimestamp() {
+  if (_latestTsCache && (Date.now() - _latestTsCache.fetchedAt) < 5 * 60 * 1000) {
+    return _latestTsCache.ts;
+  }
+  const doc = await CallLog.findOne({}, { timestamp: 1 }).sort({ timestamp: -1, _id: -1 }).lean();
+  const ts = doc ? new Date(doc.timestamp) : null;
+  _latestTsCache = { ts, fetchedAt: Date.now() };
+  return ts;
+}
+
+// Synchronous aliases for IST week and custom bounds
+function getISTWeekBounds() { return getISTWeekBoundsFor(null); }
 
 // Returns UTC start/end for an IST calendar-date range given as 'YYYY-MM-DD' strings.
 function getISTCustomBounds(startDateStr, endDateStr) {
@@ -72,9 +91,14 @@ function getISTCustomBounds(startDateStr, endDateStr) {
 }
 
 // Resolves a named/custom range keyword to UTC {start, end} bounds.
-function resolveStatsRange(range, startDate, endDate) {
+// Always uses true wall-clock IST calendar dates. No silent remapping.
+// Explicit opt-in 'latestActive' / 'latest' is supported for staging/demo inspection.
+function resolveStatsRange(range, startDate, endDate, latestTs = null) {
   switch (range) {
-    case 'tomorrow': return getISTDateBounds(1);
+    case 'latest':
+    case 'latestActive':
+      return latestTs ? getISTDateBounds(0, latestTs) : getISTDateBounds(0);
+    case 'tomorrow':  return getISTDateBounds(1);
     case 'yesterday': return getISTDateBounds(-1);
     case 'thisWeek':  return getISTWeekBounds();
     case 'custom':    return getISTCustomBounds(startDate, endDate);
@@ -116,7 +140,7 @@ async function computePeriodStats(start, end, employeeId) {
 
     CallLog.aggregate([
       { $match: match },
-      { $group: { _id: { $hour: '$timestamp' }, count: { $sum: 1 } } }
+      { $group: { _id: { $hour: { date: '$timestamp', timezone: 'Asia/Kolkata' } }, count: { $sum: 1 } } }
     ]),
 
     // Per-employee stats — lookup User for name/tlName
@@ -180,7 +204,9 @@ async function computePeriodStats(start, end, employeeId) {
   perHour.forEach((p) => { if (callsPerHour[p._id]) callsPerHour[p._id].count = p.count; });
 
   const topDialers = employees.slice(0, 5).map((e) => ({
-    employeeId: e._id.toString(), name: e.name, count: e.count
+    employeeId: e._id ? e._id.toString() : 'unknown',
+    name: e.name || 'Unknown',
+    count: e.count
   }));
 
   // Full per-employee breakdown (not capped at top 5) — used by Analytics
@@ -195,8 +221,8 @@ async function computePeriodStats(start, end, employeeId) {
   const employeeStats = employees.map((e) => {
     const target = e.dailyTarget || 0;
     return {
-      employeeId: e._id.toString(),
-      name: e.name,
+      employeeId: e._id ? e._id.toString() : 'unknown',
+      name: e.name || 'Unknown',
       tlName: e.tlName || '',
       count: e.count,
       connectedCalls: e.connectedCalls,
@@ -240,7 +266,7 @@ async function computePeriodStats(start, end, employeeId) {
 function enrichWithEmployee(doc) {
   return {
     ...doc,
-    employeeName:  doc.employeeId?.name  || 'Unknown',
+    employeeName:  doc.employeeId?.name  || doc.employeeName || 'Unknown',
     employeePhone: doc.employeeId?.phone || '',
     employeeTL:    doc.employeeId?.tlName || '',
     // The schema field is `notes`; `remarks` is the name the UI has always
@@ -654,6 +680,10 @@ router.get('/stats', protect, isManager, async (req, res) => {
       ['calls', 'stats', range, startDate || '', endDate || '', employeeId || ''],
       30,
       async () => {
+        // Fetch latest call timestamp for informational metadata (never silently used as Today)
+        const latestTs = await getLatestCallTimestamp();
+
+        // Always use true calendar dates in Asia/Kolkata
         const { start: todayStart, end: todayEnd } = getISTDateBounds(0);
         const { start: ystStart,   end: ystEnd   } = getISTDateBounds(-1);
         const lw7Start = new Date(ystEnd); lw7Start.setDate(lw7Start.getDate() - 7);
@@ -662,7 +692,7 @@ router.get('/stats', protect, isManager, async (req, res) => {
         const lm30End   = new Date(ystEnd);
 
         const isToday = range === 'today';
-        const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate);
+        const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate, latestTs);
 
         const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
           computePeriodStats(todayStart, todayEnd, employeeId),
@@ -679,7 +709,9 @@ router.get('/stats', protect, isManager, async (req, res) => {
         const selected = isToday ? todayStats : selectedStats;
         selected.date = range === 'custom'
           ? `${fmtDate(selStart)} to ${fmtDate(new Date(selEnd.getTime() - 86400000))}`
-          : fmtDate(selStart);
+          : (range === 'latestActive' || range === 'latest') && latestTs
+            ? fmtDate(latestTs)
+            : fmtDate(selStart);
 
         return {
           today:     { ...todayStats,     date: fmtDate(todayStart) },
@@ -689,6 +721,11 @@ router.get('/stats', protect, isManager, async (req, res) => {
           selected,
           range,
           employee: employeeId,
+          // Transparent metadata: exposes latest activity date without disguising it as Today
+          latestActivityDate: latestTs ? fmtDate(latestTs) : null,
+          latestActivityTs: latestTs ? latestTs.toISOString() : null,
+          hasDataToday: todayStats.totalCalls > 0,
+          dataAnchor: null,  // No silent historical fallback
           totalToday:     todayStats.totalCalls,
           missedToday:    todayStats.missed,
           incomingToday:  todayStats.incoming,
@@ -696,9 +733,9 @@ router.get('/stats', protect, isManager, async (req, res) => {
           rejectedToday:  todayStats.rejected,
           avgDuration:    todayStats.avgDuration,
           activeEmployees: todayStats.activeEmployees,
-          topDialers:     todayStats.topDialers,
-          employeeStats:  todayStats.employeeStats,
-          callsPerHour:   todayStats.callsPerHour
+          topDialers:     selected.topDialers,
+          employeeStats:  selected.employeeStats,
+          callsPerHour:   selected.callsPerHour
         };
       }
     );

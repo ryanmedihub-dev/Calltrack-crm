@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 
 function Ico({ size=16, children }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
@@ -18,7 +19,7 @@ const EyeOffIco = ({s=14}) => <Ico size={s}><path d="M17.94 17.94A10.07 10.07 0 
 // `status`/`workingStatus` string on the backend, so reads must derive from
 // `isActive` (not fall back to a hardcoded 'active') and writes must go
 // through PATCH /:id/status (the only route that persists it).
-const EMPTY = { name:'', email:'', phone:'', role:'agent', status:'active', password:'', confirmPassword:'', tlName:'', ryanEmployeeCode:'' };
+const EMPTY = { name:'', email:'', phone:'', role:'employee', status:'active', password:'', confirmPassword:'', tlName:'', ryanEmployeeCode:'' };
 
 export default function UpdateUsersPage() {
   const params   = useSearchParams();
@@ -37,14 +38,25 @@ export default function UpdateUsersPage() {
 
   const load = useCallback(()=>{
     setLoading(true);
-    api.get('/api/employees').then(r=>{
-      const list = r.data?.data||[];
+    (async () => {
+      let list = [];
+      try {
+        const r0 = await api.get('/api/users', { params: { page: 1, limit: 200 } });
+        const pages = r0.data?.pages ?? 1;
+        list = r0.data?.data || [];
+        for (let p = 2; p <= pages; p++) {
+          const rp = await api.get('/api/users', { params: { page: p, limit: 200 } });
+          list = [...list, ...(rp.data?.data || [])];
+        }
+      } catch {
+        list = await getAllEmployeesSafe(api);
+      }
       setUsers(list);
       if (editId) {
         const u = list.find(x=>x._id===editId);
-        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'agent', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' }); }
+        if (u) { setSelected(u); setForm({ name:u.name||'', email:u.email||'', phone:u.phone||'', role:u.role||'employee', status:u.isActive===false?'inactive':'active', password:'', confirmPassword:'', tlName:u.tlName||'', ryanEmployeeCode:u.ryanEmployeeCode||'' }); }
       }
-    }).catch(()=>{}).finally(()=>setLoading(false));
+    })().catch(()=>{}).finally(()=>setLoading(false));
   }, [editId]);
 
   useEffect(()=>{ load(); },[load]);
@@ -193,8 +205,8 @@ export default function UpdateUsersPage() {
                   <select required className="form-input text-sm" value={form.role} onChange={e=>setF('role',e.target.value)}>
                     <option value="admin">Admin</option>
                     <option value="manager">Manager</option>
-                    <option value="supervisor">Supervisor</option>
-                    <option value="agent">Agent</option>
+                    <option value="tl">Team Lead</option>
+                    <option value="employee">Agent</option>
                   </select>
                 </div>
                 <div>

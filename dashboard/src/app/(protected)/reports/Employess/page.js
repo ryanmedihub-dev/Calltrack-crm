@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { triggerServerExport } from '../../../../lib/downloads';
 import {
   DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton, TLFilter, Truncate,
@@ -141,7 +142,7 @@ export default function EmployeeReportsPage() {
   }, [buildParams, activeTab]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.get('/api/employees').then((r) => setEmployees(r.data.data || [])).catch(() => {}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then((list) => setEmployees(list)).catch(() => {}); }, []);
 
   // Full-schema server-side export (every User field + performance aggregates,
   // including total talktime) — replaces the old client-side CSV that only

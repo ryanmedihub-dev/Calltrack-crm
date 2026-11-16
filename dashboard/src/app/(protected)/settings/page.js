@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
 
 const TABS = ['Profile', 'Security', 'Team', 'Preferences', 'About'];
 const PREF_KEY = 'calltrack_prefs';
@@ -85,7 +86,7 @@ export default function SettingsPage() {
   useEffect(() => { if (tab === 'Team') loadEmployees(); }, [tab]);
 
   const loadEmployees = () => {
-    api.get('/api/employees').then(r => setEmployees(r.data.data||[])).catch(() => {});
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => {});
   };
 
   const handleProfileSave = async () => {

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { DataTable, TLFilter, Truncate } from '../../../../components/report-shared';
 
 const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
@@ -32,10 +33,10 @@ export default function DailyTargetsPage() {
     (async () => {
       try {
         const [empRes, statsRes] = await Promise.all([
-          api.get('/api/employees'),
+          getAllEmployeesSafe(api),
           api.get('/api/calls/stats'),
         ]);
-        setEmployees(empRes.data.data||[]);
+        setEmployees(Array.isArray(empRes) ? empRes : (empRes?.data?.data || []));
         const counts = {};
         // employeeStats covers every employee with activity today, not just
         // the top-5 dialers topDialers is capped to — fixes most employees

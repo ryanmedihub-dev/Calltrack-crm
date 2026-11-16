@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import api from '../../../../lib/api';
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { fmtDate } from '../../../../lib/timezone';
 import { DataTable, LeadStatusBadge } from '../../../../components/report-shared';
 import EngagementBadge from '../../../../components/EngagementBadge';
@@ -58,7 +59,7 @@ export default function AssignedLeadsPage() {
   }, [search, employee, status, engagement, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.get('/api/employees').then(r=>setEmployees(r.data?.data||[])).catch(()=>{}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(()=>{}); }, []);
   useEffect(() => { setSelected(new Set()); }, [search, employee, status, engagement, page]);
 
   const totalPages = Math.ceil(total/PER_PAGE);

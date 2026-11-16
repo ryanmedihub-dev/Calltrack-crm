@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
 import Pagination from '../../../components/Pagination';
 import { parseUTC } from '../../../lib/timezone';
 import {
@@ -45,7 +46,7 @@ export default function ReportsPage() {
   const [applied, setApplied] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
 
-  useEffect(() => { api.get('/api/employees').then(r => setEmployees(r.data.data)).catch(() => {}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(() => {}); }, []);
 
   const fetchReport = async (tab = activeTab, p = 1) => {
     setLoading(true);

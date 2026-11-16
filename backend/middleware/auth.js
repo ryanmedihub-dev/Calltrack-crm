@@ -34,4 +34,19 @@ const isEmployee = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, isManager, isEmployee };
+// Returns true for accounts that have full administrative access (role 'admin',
+// role 'manager' with isSuperAdmin flag, or the legacy 'ryanadmin' pattern).
+function isSystemAdmin(user) {
+  return Boolean(user && (user.role === 'admin' || user.isSuperAdmin === true));
+}
+
+// Middleware: allow only system admins (admin role or isSuperAdmin flag).
+// Also allows manager-role users who have isSuperAdmin=true (the production ryanadmin account).
+const isAdmin = (req, res, next) => {
+  if (!isSystemAdmin(req.user)) {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
+  }
+  next();
+};
+
+module.exports = { protect, isManager, isEmployee, isAdmin, isSystemAdmin };

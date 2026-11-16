@@ -37,15 +37,18 @@ const QUICK_LINKS = [
 export default function LeadsOverviewPage() {
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
+  const [dateRange, setDateRange] = useState({ range: 'all', startDate: null, endDate: null });
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const params = { limit: 1, range: dateRange.range };
-      if (dateRange.range === 'custom') {
-        params.startDate = dateRange.startDate;
-        params.endDate = dateRange.endDate;
+      const params = { limit: 1 };
+      if (dateRange.range && dateRange.range !== 'all') {
+        params.range = dateRange.range;
+        if (dateRange.range === 'custom') {
+          params.startDate = dateRange.startDate;
+          params.endDate = dateRange.endDate;
+        }
       }
       try {
         const results = await Promise.all(
@@ -116,10 +119,22 @@ export default function LeadsOverviewPage() {
             <p className="text-sm text-gray-500 mt-1">Complete lead pipeline summary with status breakdown</p>
           </div>
           <div className="flex items-center gap-2.5">
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            <DateRangeFilter value={dateRange} onChange={setDateRange} includeAll />
             <Link href="/leads/leads-uploads" className="btn-primary text-xs py-2 px-4 rounded-xl whitespace-nowrap">+ Import Leads</Link>
           </div>
         </motion.div>
+
+        {/* Date Scope Notice */}
+        {dateRange.range === 'today' && total === 0 && (
+          <div className="bg-blue-50/80 border border-blue-200/80 rounded-xl px-4 py-3 flex items-center gap-3 text-xs text-blue-800">
+            <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>
+              No leads were created on today's calendar date ({rangeLabel}). Select <strong>All Time</strong> in the date dropdown above to view the complete pipeline of leads.
+            </span>
+          </div>
+        )}
 
         {/* Quick Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

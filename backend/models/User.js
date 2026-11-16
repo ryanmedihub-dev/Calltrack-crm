@@ -5,13 +5,16 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String, required: true, select: false },
-  role: { type: String, enum: ['manager', 'employee'], default: 'employee' },
+  role: { type: String, enum: ['admin', 'manager', 'tl', 'employee'], default: 'employee' },
   phone: { type: String },
-  deviceId:    { type: String },
+  deviceId:    { type: String, select: false },
   tlName:      { type: String, default: '' },
-  fcmToken:    { type: String, default: null },
+  fcmToken:    { type: String, default: null, select: false },
   dailyTarget: { type: Number, default: 100 },
   isActive:    { type: Boolean, default: true },
+  isSuperAdmin: { type: Boolean, default: false },
+  isDeleted:   { type: Boolean, default: false },
+  deletedAt:   { type: Date, default: null },
   ryanEmployeeCode: { type: String, default: null, index: true, trim: true },
   // Marks an account as a server-to-server integration login (e.g. ryan-crm's
   // CALLBY_SERVICE_TOKEN), not a person's daily-use account. Login tokens for this account
@@ -35,6 +38,8 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 userSchema.set('toJSON', {
   transform: (_doc, ret) => {
     delete ret.password;
+    delete ret.fcmToken;
+    delete ret.deviceId;
     return ret;
   }
 });

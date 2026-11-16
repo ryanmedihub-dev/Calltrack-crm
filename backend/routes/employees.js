@@ -10,12 +10,17 @@ const cache = require('../lib/cache');
 // over-invalidating both cached reads together costs nothing measurable.
 const invalidateEmployees = () => cache.invalidate(['employees']);
 
+// Safe field projection — never returns password, fcmToken, or deviceId.
+// Includes all fields needed by employee screens, dropdowns, reports, hierarchy
+// and call-log attribution.
+const SAFE_EMPLOYEE_FIELDS = 'name email role phone tlName dailyTarget isActive isDeleted deletedAt createdAt ryanEmployeeCode isSuperAdmin';
+
 // GET /api/employees
 router.get('/', protect, isManager, async (req, res) => {
   try {
     const { search, page = 1, limit = 200 } = req.query;
     const data = await cache.cached(['employees', 'list', search || '', page, limit], 120, async () => {
-      const filter = { role: 'employee' };
+      const filter = { role: 'employee', isDeleted: { $ne: true } };
       if (search) {
         filter.$or = [
           { name: { $regex: search, $options: 'i' } },
@@ -24,7 +29,7 @@ router.get('/', protect, isManager, async (req, res) => {
       }
       const skip = (parseInt(page) - 1) * parseInt(limit);
       const [employees, total] = await Promise.all([
-        User.find(filter).sort({ name: 1 }).skip(skip).limit(parseInt(limit)).lean(),
+        User.find(filter).select(SAFE_EMPLOYEE_FIELDS).sort({ name: 1 }).skip(skip).limit(parseInt(limit)).lean(),
         User.countDocuments(filter),
       ]);
       return { employees, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) };
@@ -40,7 +45,7 @@ router.get('/', protect, isManager, async (req, res) => {
 router.get('/tl-names', protect, isManager, async (req, res) => {
   try {
     const names = await cache.cached(['employees', 'tl-names'], 300, async () => {
-      const distinct = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' } });
+      const distinct = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' }, isDeleted: { $ne: true } });
       return distinct.sort((a, b) => a.localeCompare(b));
     });
     return res.json({ success: true, data: names });
@@ -61,7 +66,7 @@ router.post('/', protect, isManager, async (req, res) => {
     }
     const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName, ryanEmployeeCode: ryanEmployeeCode || null });
     await invalidateEmployees();
-    return res.status(201).json({ success: true, data: user, message: 'Employee created' });
+    return res.status(201).json({ success: true, data: user.toJSON(), message: 'Employee created' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -70,7 +75,7 @@ router.post('/', protect, isManager, async (req, res) => {
 // GET /api/employees/:id
 router.get('/:id', protect, isManager, async (req, res) => {
   try {
-    const employee = await User.findOne({ _id: req.params.id, role: 'employee' });
+    const employee = await User.findOne({ _id: req.params.id, role: 'employee' }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     return res.json({ success: true, data: employee });
   } catch (err) {
@@ -85,7 +90,14 @@ router.patch('/:id/status', protect, isManager, async (req, res) => {
     if (typeof isActive !== 'boolean') {
       return res.status(400).json({ success: false, error: 'isActive must be a boolean' });
     }
-    const employee = await User.findByIdAndUpdate(req.params.id, { isActive }, { new: true });
+    // Reactivating an employee also clears the soft-deletion flag so they
+    // appear in active employee lists again.
+    const update = { isActive };
+    if (isActive === true) {
+      update.isDeleted = false;
+      update.deletedAt = null;
+    }
+    const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     await invalidateEmployees();
     return res.json({ success: true, data: employee });
@@ -101,7 +113,7 @@ router.patch('/:id/target', protect, isManager, async (req, res) => {
     if (typeof dailyTarget !== 'number' || dailyTarget < 0) {
       return res.status(400).json({ success: false, error: 'dailyTarget must be a non-negative number' });
     }
-    const employee = await User.findByIdAndUpdate(req.params.id, { dailyTarget }, { new: true });
+    const employee = await User.findByIdAndUpdate(req.params.id, { dailyTarget }, { new: true }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     await invalidateEmployees();
     return res.json({ success: true, data: employee });
@@ -120,7 +132,7 @@ router.put('/:id', protect, isManager, async (req, res) => {
     }
     const update = { name, phone, deviceId, tlName };
     if (ryanEmployeeCode !== undefined) update.ryanEmployeeCode = ryanEmployeeCode || null;
-    const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true });
+    const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     await invalidateEmployees();
     return res.json({ success: true, data: employee });
@@ -133,6 +145,8 @@ router.put('/:id', protect, isManager, async (req, res) => {
 // must say what to do with them: reassignTo another employee, or deleteLeads
 // to remove them too. Without either, the request is rejected (409) so the
 // frontend can prompt the manager instead of silently orphaning leads.
+// Uses soft deletion: marks isDeleted=true and records deletedAt timestamp.
+// Historical call-log attribution is preserved via the stored employeeName field.
 router.delete('/:id', protect, isManager, async (req, res) => {
   try {
     const { reassignTo, deleteLeads } = req.body || {};
@@ -155,7 +169,11 @@ router.delete('/:id', protect, isManager, async (req, res) => {
       }
     }
 
-    await User.deleteOne({ _id: employee._id });
+    // Soft delete — preserves historical call-log attribution
+    await User.updateOne(
+      { _id: employee._id },
+      { $set: { isActive: false, isDeleted: true, deletedAt: new Date() } }
+    );
     await invalidateEmployees();
     return res.json({ success: true, message: 'Employee deleted' });
   } catch (err) {
@@ -163,4 +181,5 @@ router.delete('/:id', protect, isManager, async (req, res) => {
   }
 });
 
+router.SAFE_EMPLOYEE_FIELDS = SAFE_EMPLOYEE_FIELDS;
 module.exports = router;

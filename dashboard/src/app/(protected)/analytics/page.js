@@ -7,6 +7,7 @@ import {
   ComposedChart, Line,
 } from 'recharts';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
 import { utcHourToISTLabel } from '../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DataTable, Truncate, TLFilter } from '../../../components/report-shared';
@@ -203,7 +204,7 @@ export default function AnalyticsPage() {
   }, [dateRange]);
 
   useEffect(() => {
-    api.get('/api/employees').then((e) => setEmployees(e.data.data)).catch(() => { });
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => { });
   }, []);
 
   const isTodayRange = dateRange.range === 'today';

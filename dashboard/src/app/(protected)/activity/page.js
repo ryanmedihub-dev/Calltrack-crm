@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import api from '../../../lib/api';
+import { getAllEmployeesSafe } from '../../../lib/employees';
 import { parseUTC } from '../../../lib/timezone';
 
 const ACTION_CONFIG = {
@@ -63,7 +64,7 @@ export default function ActivityLogPage() {
   };
 
   useEffect(() => {
-    api.get('/api/employees').then(r=>setEmployees(r.data.data||[])).catch(()=>{});
+    getAllEmployeesSafe(api).then(setEmployees).catch(()=>{});
   }, []);
 
   useEffect(() => { load(1); }, [actionFilter, empFilter]);

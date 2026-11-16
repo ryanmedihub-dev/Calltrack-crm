@@ -18,6 +18,7 @@ import {
   Area,
 } from "recharts";
 import api from "../../../../lib/api";
+import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { useReportData, invalidateReportCache } from "../../../../lib/useReportData";
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
@@ -596,10 +597,7 @@ function PeriodicReportsPageContent() {
   } = useReportData("/api/reports/periodic", requestParams);
   const load = refresh;
   useEffect(() => {
-    api
-      .get("/api/employees")
-      .then((r) => setEmployees(r.data.data || []))
-      .catch(() => {});
+    getAllEmployeesSafe(api).then(setEmployees).catch(() => {});
   }, []);
 
   // Rethrow on failure so EditableRemarks rolls back its optimistic text instead of
