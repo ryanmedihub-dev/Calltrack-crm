@@ -4,8 +4,8 @@ const router = express.Router();
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
-const { resolveEmployeeIdsForTL } = require('../lib/tlFilter');
+const { protect, isManager, scoped, scopeKey } = require('../middleware/auth');
+const { resolveEmployeeIdsForTL, tlNameMatch } = require('../lib/tlFilter');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob } = require('../lib/downloadJobs');
 const fmtDuration = require('../lib/formatDuration');
 const reportCache = require('../lib/reportCache');
@@ -328,7 +328,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     const pageSize = Math.min(1000, Math.max(1, parseInt(limit, 10) || 100));
     const skip = (pageNum - 1) * pageSize;
 
-    const filter = { timestamp: { $gte: start, $lte: end } };
+    const filter = scoped(req, { timestamp: { $gte: start, $lte: end } });
     // `aggregate()` does no schema casting the way `find()` does — an employeeId left as a
     // string matches nothing in a $match and the report silently comes back empty.
     if (employeeId) {
@@ -372,7 +372,7 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     const agg = (stages) => CallLog.aggregate([...pre, ...stages]).allowDiskUse(true);
     // Cache key must cover every input that changes the answer, including the caller's TL scope.
     const cacheParts = [
-      'periodic', tab, start.getTime(), end.getTime(), employeeId || '', tlName || '',
+      'periodic', scopeKey(req), tab, start.getTime(), end.getTime(), employeeId || '', tlName || '',
       callType || '', duration || '', callTime || '', source || '', search || '',
       connectedOnly || '', pageNum, pageSize,
     ];
@@ -873,7 +873,7 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
       tab = 'summary', page = 1, limit = 500,
     } = req.query;
 
-    const filter = {};
+    const filter = scoped(req, {}, 'assignedTo');
     if (startDate) filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
     if (endDate) filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
     if (employeeId) {
@@ -902,7 +902,7 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
     const skip = (pageNum - 1) * pageSize;
 
     const cacheParts = [
-      'leads-periodic', tab, startDate || '', endDate || '', employeeId || '', tlName || '',
+      'leads-periodic', scopeKey(req), tab, startDate || '', endDate || '', employeeId || '', tlName || '',
       status || '', source || '', leadTime || '', pageNum, pageSize,
     ];
     // leadList carries the inline-editable note column — same reasoning as callHistory above.
@@ -1244,9 +1244,9 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
-    const empFilter = { role: 'employee' };
+    const empFilter = scoped(req, { role: 'employee' }, '_id');
     if (employeeId) empFilter._id = employeeId;
-    if (tlName) empFilter.tlName = tlName;
+    if (tlName) empFilter.tlName = tlNameMatch(tlName);
     if (status === 'active') empFilter.isActive = true;
     else if (status === 'inactive') empFilter.isActive = false;
 
@@ -1412,8 +1412,8 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
     const start = startDate ? istDateStrStart(startDate) : istDayStart(-29);
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
-    const empFilter = { role: 'employee' };
-    if (tlName) empFilter.tlName = tlName;
+    const empFilter = scoped(req, { role: 'employee' }, '_id');
+    if (tlName) empFilter.tlName = tlNameMatch(tlName);
     if (status === 'active') empFilter.isActive = true;
     else if (status === 'inactive') empFilter.isActive = false;
 
@@ -1521,6 +1521,8 @@ router.get('/client', protect, isManager, async (req, res) => {
     const digits = phone.replace(/\D/g, '');
     if (!digits) return res.status(400).json({ success: false, error: 'Enter a valid phone number' });
 
+    // Deliberately NOT team-scoped: any dashboard user can look up a client's full call history
+    // across all agents. (Editing a remark on another team's call is still blocked by PATCH /notes.)
     const filter = { contactNumber: { $regex: digits, $options: 'i' } };
 
     if (duration !== 'all') {

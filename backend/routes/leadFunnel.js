@@ -3,10 +3,11 @@ const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
+const { tlNameMatch } = require('../lib/tlFilter');
 const normalizePhone = require('../lib/normalizePhone');
 
-router.get('/funnel-data', protect, isManager, async (req, res) => {
+router.get('/funnel-data', protect, requireFullAccess, async (req, res) => {
   try {
     const { agentIds, teams, dateFrom, dateTo, leadNumber } = req.query;
 
@@ -34,7 +35,7 @@ router.get('/funnel-data', protect, isManager, async (req, res) => {
 
     if (teams) {
       const teamList = teams.split(',').filter(Boolean);
-      const teamEmployeeIds = await User.distinct('_id', { tlName: { $in: teamList } });
+      const teamEmployeeIds = await User.distinct('_id', { tlName: tlNameMatch(teamList) });
       const teamIdStrings = teamEmployeeIds.map((id) => id.toString());
       resolvedAgentIds = resolvedAgentIds
         ? resolvedAgentIds.filter((id) => teamIdStrings.includes(id))

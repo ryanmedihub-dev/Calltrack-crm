@@ -187,9 +187,17 @@ function App() {
     // ─── Store call + fire notification (NO immediate modal) ─────────────────
     // Native (CallTrackService.kt) already filters by tracked SIM before emitting.
     // Only store + notify once per call (duplicate guard for the 4s poll).
+    // PhoneStateReceiver and CallTrackService both emit onCallEnded for the same call, close
+    // enough together that the async AsyncStorage check below can't stop the second one.
+    // A synchronous clientCallId check can.
+    let lastNotifiedCallId = null;
     const notifyPostCall = async (data) => {
+      if (data?.clientCallId && data.clientCallId === lastNotifiedCallId) return;
       if (pendingCallRef.current) return; // modal already open
       if (isHandlingRef.current) return;
+      // Marked only after the sync guards, so a call rejected above can still be re-prompted
+      // by the native-pending poll later.
+      if (data?.clientCallId) lastNotifiedCallId = data.clientCallId;
 
       const existingRaw = await AsyncStorage.getItem(PENDING_CALL_KEY).catch(() => null);
       if (existingRaw) {
@@ -200,7 +208,10 @@ function App() {
           if (Date.now() - (existing._storedAt || 0) > AUTO_SKIP_MS) {
             await AsyncStorage.removeItem(PENDING_CALL_KEY);
           } else {
-            return; // a genuinely fresh pending call is still active — don't stomp it
+            // A genuinely fresh pending call is still active — don't stomp it. Unmark this
+            // call unless it *is* that pending call, so the poll can prompt it afterwards.
+            if (existing.clientCallId !== data?.clientCallId) lastNotifiedCallId = null;
+            return;
           }
         } catch {
           await AsyncStorage.removeItem(PENDING_CALL_KEY);

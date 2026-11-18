@@ -1,10 +1,10 @@
 const express = require('express');
 const router  = express.Router();
 const AuditLog = require('../models/AuditLog');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
 
 // GET /api/audit-logs
-router.get('/', protect, isManager, async (req, res) => {
+router.get('/', protect, requireFullAccess, async (req, res) => {
   try {
     const { page = 1, limit = 50, userId, action } = req.query;
     const filter = {};

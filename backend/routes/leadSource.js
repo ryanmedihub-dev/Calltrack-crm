@@ -12,13 +12,13 @@
 const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 
 const MAX_PHONES = 1000;
 const MAX_SOURCE_LEN = 120;
 
-router.post('/source-update', protect, isManager, async (req, res) => {
+router.post('/source-update', protect, requireFullAccess, async (req, res) => {
   try {
     const { phones, source, dryRun = false, ref = null } = req.body || {};
 

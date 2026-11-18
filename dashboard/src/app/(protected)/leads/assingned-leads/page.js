@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import api from '../../../../lib/api';
+import useIsAdmin from '../../../../lib/useIsAdmin';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { fmtDate } from '../../../../lib/timezone';
 import { DataTable, LeadStatusBadge } from '../../../../components/report-shared';
@@ -24,6 +25,7 @@ const XIco      = ({s=16}) => <Ico size={s}><line x1="18" y1="6" x2="6" y2="18"/
 const fmt = fmtDate;
 
 export default function AssignedLeadsPage() {
+  const isAdmin = useIsAdmin();
   const [leads,     setLeads]     = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
@@ -142,7 +144,7 @@ export default function AssignedLeadsPage() {
     { key: 'assignedAt', label: 'Assigned Date', render: (l) => <span className="text-xs text-gray-400">{fmt(l.assignedAt||l.updatedAt)}</span> },
     {
       key: 'actions', label: 'Actions', align: 'right', sortable: false, searchable: false,
-      render: (l) => (
+      render: (l) => isAdmin && (
         <button
           onClick={()=>openReassign([l])}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
@@ -196,7 +198,7 @@ export default function AssignedLeadsPage() {
       </motion.div>
 
       {/* Bulk action bar */}
-      {selected.size > 0 && (
+      {isAdmin && selected.size > 0 && (
         <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
           className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-blue-50 border border-blue-200">
           <span className="text-xs font-semibold text-blue-700">{selected.size} lead{selected.size===1?'':'s'} selected</span>
@@ -222,7 +224,7 @@ export default function AssignedLeadsPage() {
           totalPages={totalPages}
           totalCount={total}
           onPageChange={setPage}
-          selectable
+          selectable={isAdmin}
           selectedIds={selected}
           onToggleSelect={toggleSelect}
           onToggleSelectAll={toggleSelectAll}

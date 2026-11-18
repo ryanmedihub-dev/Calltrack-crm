@@ -28,13 +28,13 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
 const cache = require('../lib/cache');
 
-router.get('/agent-detail/:employeeId', protect, isManager, async (req, res) => {
+router.get('/agent-detail/:employeeId', protect, requireFullAccess, async (req, res) => {
   try {
     const { employeeId } = req.params;
 

@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isManager, scoped, canAccessEmployee, scopeKey } = require('../middleware/auth');
 const getPusher = require('../lib/pusher');
 const normalizePhone = require('../lib/normalizePhone');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
@@ -108,9 +108,10 @@ function resolveStatsRange(range, startDate, endDate, latestTs = null) {
 }
 
 // Aggregation-based period stats — no full doc loads
-async function computePeriodStats(start, end, employeeId) {
+async function computePeriodStats(start, end, employeeId, teamIds = null) {
   const match = { timestamp: { $gte: start, $lt: end } };
   if (employeeId) match.employeeId = new mongoose.Types.ObjectId(employeeId);
+  if (teamIds) match.$and = [{ employeeId: { $in: teamIds } }];
 
   const [summary, perHour, employees, notPickupRes, neverAttRes] = await Promise.all([
     CallLog.aggregate([
@@ -614,7 +615,7 @@ router.get('/', protect, isManager, async (req, res) => {
       tlName, durationMin, durationMax, connectedOnly, engagement,
       page = 1, limit = 20,
     } = req.query;
-    const filter = {};
+    const filter = scoped(req, {});
     if (employeeId) filter.employeeId = employeeId;
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType) filter.callType = callType;
@@ -677,7 +678,7 @@ router.get('/stats', protect, isManager, async (req, res) => {
     // Not scoped to the requesting manager — every manager sees the same numbers for a given
     // range/employee, so the cache key only needs the query inputs, not req.user.
     const data = await cache.cached(
-      ['calls', 'stats', range, startDate || '', endDate || '', employeeId || ''],
+      ['calls', 'stats', scopeKey(req), range, startDate || '', endDate || '', employeeId || ''],
       30,
       async () => {
         // Fetch latest call timestamp for informational metadata (never silently used as Today)
@@ -695,11 +696,11 @@ router.get('/stats', protect, isManager, async (req, res) => {
         const { start: selStart, end: selEnd } = resolveStatsRange(range, startDate, endDate, latestTs);
 
         const [todayStats, yesterdayStats, lastWeekStats, lastMonthStats, selectedStats] = await Promise.all([
-          computePeriodStats(todayStart, todayEnd, employeeId),
-          computePeriodStats(ystStart, ystEnd, employeeId),
-          computePeriodStats(lw7Start, lw7End, employeeId),
-          computePeriodStats(lm30Start, lm30End, employeeId),
-          isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId)
+          computePeriodStats(todayStart, todayEnd, employeeId, req.teamIds),
+          computePeriodStats(ystStart, ystEnd, employeeId, req.teamIds),
+          computePeriodStats(lw7Start, lw7End, employeeId, req.teamIds),
+          computePeriodStats(lm30Start, lm30End, employeeId, req.teamIds),
+          isToday ? Promise.resolve(null) : computePeriodStats(selStart, selEnd, employeeId, req.teamIds)
         ]);
 
         const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
@@ -754,10 +755,10 @@ router.get('/stats', protect, isManager, async (req, res) => {
 // endpoint only reports call counts, it makes no claim about presence.
 router.get('/daily-by-employee', protect, isManager, async (req, res) => {
   try {
-    const records = await cache.cached(['calls', 'daily-by-employee', req.query], 60, async () => {
+    const records = await cache.cached(['calls', 'daily-by-employee', scopeKey(req), req.query], 60, async () => {
       const { startDate, endDate, employeeId } = req.query;
       const { start, end } = getISTCustomBounds(startDate, endDate);
-      const match = { timestamp: { $gte: start, $lt: end } };
+      const match = scoped(req, { timestamp: { $gte: start, $lt: end } });
       if (employeeId && mongoose.Types.ObjectId.isValid(employeeId)) {
         match.employeeId = new mongoose.Types.ObjectId(employeeId);
       }
@@ -811,7 +812,7 @@ router.get('/daily-by-employee', protect, isManager, async (req, res) => {
 // GET /api/calls/realtime — latest 50 calls
 router.get('/realtime', protect, isManager, async (req, res) => {
   try {
-    const callsRaw = await CallLog.find().populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
+    const callsRaw = await CallLog.find(scoped(req)).populate('employeeId', 'name phone tlName').sort({ timestamp: -1, _id: -1 }).limit(50).lean();
     return res.json({ success: true, data: callsRaw.map(enrichWithEmployee) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -901,7 +902,7 @@ router.get('/export', protect, isManager, async (req, res) => {
   let job = null;
   try {
     const { employeeId, callType, startDate, endDate, tlName, source } = req.query;
-    const filter = {};
+    const filter = scoped(req, {});
     if (employeeId) filter.employeeId = employeeId;
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (callType)   filter.callType   = callType;
@@ -1032,8 +1033,7 @@ router.patch('/:id/notes', protect, async (req, res) => {
     const { notes, callStatus, followUpDate, notesUpdatedAt } = req.body;
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
-    const isOwner = call.employeeId.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
+    if (!canAccessEmployee(req, call.employeeId)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -1101,8 +1101,7 @@ router.delete('/:id', protect, async (req, res) => {
   try {
     const call = await CallLog.findById(req.params.id);
     if (!call) return res.status(404).json({ success: false, error: 'Call not found' });
-    const isOwner = call.employeeId.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
+    if (!canAccessEmployee(req, call.employeeId)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
     await call.deleteOne();
@@ -1119,7 +1118,7 @@ router.get('/history/:phoneNumber', protect, async (req, res) => {
   try {
     const number = normalizePhone(req.params.phoneNumber) || req.params.phoneNumber;
     const filter = { contactNumber: number };
-    if (req.user.role !== 'manager') filter.employeeId = req.user._id;
+    scoped(req, filter);
     const calls = await CallLog.find(filter)
       .populate('employeeId', 'name phone tlName')
       .sort({ timestamp: -1 })
@@ -1132,9 +1131,7 @@ router.get('/history/:phoneNumber', protect, async (req, res) => {
 
 // GET /api/calls/employee/:id
 router.get('/employee/:id', protect, async (req, res) => {
-  const isManagerRole = req.user.role === 'manager';
-  const isSelf = req.user._id.toString() === req.params.id;
-  if (!isManagerRole && !isSelf) {
+  if (!canAccessEmployee(req, req.params.id)) {
     return res.status(403).json({ success: false, error: 'Access denied' });
   }
   try {

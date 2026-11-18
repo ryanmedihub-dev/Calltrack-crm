@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
+import useIsAdmin from '../../../lib/useIsAdmin';
 import { getAllEmployeesSafe } from '../../../lib/employees';
 
 const TABS = ['Profile', 'Security', 'Team', 'Preferences', 'About'];
@@ -63,6 +64,7 @@ function PrefRow({ label, desc, children }) {
 const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
 
 export default function SettingsPage() {
+  const isAdmin = useIsAdmin();
   const [tab,       setTab]       = useState('Profile');
   const [user,      setUser]      = useState(null);
   const [saving,    setSaving]    = useState(false);
@@ -148,7 +150,7 @@ export default function SettingsPage() {
 
       {/* Tab strip */}
       <div className="flex gap-0.5 rounded-xl p-1 flex-wrap" style={{ background:'#fff', border:'1px solid #E2E8F0', width:'fit-content' }}>
-        {TABS.map(t => (
+        {TABS.filter(t => isAdmin || t !== 'Team').map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
             style={tab === t
@@ -253,7 +255,7 @@ export default function SettingsPage() {
       )}
 
       {/* ── TEAM ── */}
-      {tab === 'Team' && user?.role === 'manager' && (
+      {tab === 'Team' && isAdmin && (
         <div className="space-y-4">
           <Section title="Team Members" desc="Manage employee accounts">
             <div className="-mx-1">

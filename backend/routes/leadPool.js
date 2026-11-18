@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isManager, requireFullAccess, canAccessEmployee } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const getPusher = require('../lib/pusher');
 const { logAction } = require('../lib/audit');
@@ -270,6 +270,7 @@ router.get('/attempts-by-employee', protect, isManager, async (req, res) => {
           lastAttemptAt: { $max: '$changelog.changedAt' },
         },
       },
+      ...(req.teamIds ? [{ $match: { _id: { $in: req.teamIds } } }] : []),
       {
         $project: {
           _id: 0,
@@ -376,8 +377,7 @@ router.post('/:id/release', protect, async (req, res) => {
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
 
-    const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) {
+    if (!lead.assignedTo || !canAccessEmployee(req, lead.assignedTo)) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
 
@@ -405,7 +405,7 @@ router.post('/:id/release', protect, async (req, res) => {
 });
 
 // POST /api/lead-pool/push — manager pushes existing leads back into the pool in bulk.
-router.post('/push', protect, isManager, async (req, res) => {
+router.post('/push', protect, requireFullAccess, async (req, res) => {
   try {
     const { leadIds } = req.body;
     if (!Array.isArray(leadIds) || leadIds.length === 0) {
@@ -444,7 +444,7 @@ router.post('/push', protect, isManager, async (req, res) => {
 
 // POST /api/lead-pool/:id/lock — manager stops a lead from ever auto-recycling again, without
 // waiting for it to hit MAX_RECYCLES.
-router.post('/:id/lock', protect, isManager, async (req, res) => {
+router.post('/:id/lock', protect, requireFullAccess, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });
@@ -472,7 +472,7 @@ router.post('/:id/lock', protect, isManager, async (req, res) => {
 });
 
 // POST /api/lead-pool/:id/unlock — manager lets a capped-out or manually-pinned lead recycle again.
-router.post('/:id/unlock', protect, isManager, async (req, res) => {
+router.post('/:id/unlock', protect, requireFullAccess, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(404).json({ success: false, error: 'Lead not found', code: 'NOT_FOUND' });

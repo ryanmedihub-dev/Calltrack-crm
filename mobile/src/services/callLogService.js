@@ -39,9 +39,12 @@ export function isSameCall(a, b) {
 // unavailable (e.g. iOS or older builds without the native module).
 // ------------------------------------------------------------------
 
+// Returns null only when the native module is unavailable/failed. An empty array means
+// "the tracked SIM genuinely has no calls" — that must NOT fall through to the local fallback,
+// which isn't SIM-filtered and used to re-sync other SIMs' calls.
 async function readNativeCallLogs(sinceTimestamp) {
   const { CallLogModule } = NativeModules;
-  if (!CallLogModule?.getCallLogsSince) return [];
+  if (!CallLogModule?.getCallLogsSince) return null;
   try {
     // Pass tracked SIM's subscriptionId + slotIndex (fallback for MIUI devices that
     // store slot index instead of subscription ID in the call log table)
@@ -53,7 +56,7 @@ async function readNativeCallLogs(sinceTimestamp) {
     const logs = await CallLogModule.getCallLogsSince(sinceTimestamp, subscriptionId, slotIndex);
     return Array.isArray(logs) ? logs : [];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -221,7 +224,7 @@ async function doSyncCallLogs() {
   const sinceTimestamp = todayStart.getTime();
 
   let nativeLogs = await readNativeCallLogs(sinceTimestamp);
-  if (nativeLogs.length === 0) nativeLogs = await readLocalCallLogs_fallback(sinceTimestamp);
+  if (nativeLogs === null) nativeLogs = readLocalCallLogs_fallback(sinceTimestamp);
   if (nativeLogs.length === 0) return { synced: 0, message: 'No new calls to sync' };
 
   // Build list of local logs enriched by AfterCallModal (notes/status/followUp).

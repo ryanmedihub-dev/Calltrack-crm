@@ -29,13 +29,14 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
+const { tlNameMatch } = require('../lib/tlFilter');
 const {
   emptyCallStats, emptyLeadStats, getCallStatsByEmployee, getLeadStatsByEmployee, resolveCallStatsRange,
 } = require('../lib/workforceStats');
 const cache = require('../lib/cache');
 
-router.get('/workforce-summary', protect, isManager, async (req, res) => {
+router.get('/workforce-summary', protect, requireFullAccess, async (req, res) => {
   try {
     const data = await cache.cached(['leads', 'workforce-summary', req.query], 60, () => buildWorkforceSummary(req.query));
     return res.json({ success: true, data });
@@ -54,7 +55,7 @@ async function buildWorkforceSummary({ dateFrom, dateTo, teams }) {
     const employeeFilter = { role: 'employee' };
     if (teams) {
       const teamList = teams.split(',').filter(Boolean);
-      employeeFilter.tlName = { $in: teamList };
+      employeeFilter.tlName = tlNameMatch(teamList);
     }
     const employees = await User.find(employeeFilter).select('name tlName isActive dailyTarget ryanEmployeeCode').lean();
 

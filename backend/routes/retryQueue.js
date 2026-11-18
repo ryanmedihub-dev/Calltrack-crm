@@ -27,7 +27,8 @@ const express = require('express');
 const router = express.Router();
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
+const { tlNameMatch } = require('../lib/tlFilter');
 const { FEATURES } = require('../config/features');
 
 // Paused — see config/features.js. 404 so consumers treat it as "feature absent". This router
@@ -149,7 +150,7 @@ const PROJECTION = {
   followUpDate: 1, connectedCallCount: 1, createdAt: 1, assignedTo: 1,
 };
 
-router.get('/retry-queue', protect, isManager, async (req, res) => {
+router.get('/retry-queue', protect, requireFullAccess, async (req, res) => {
   try {
     const { dateFrom, dateTo, teams } = req.query;
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit) || DEFAULT_LIMIT));
@@ -167,7 +168,7 @@ router.get('/retry-queue', protect, isManager, async (req, res) => {
     }
     if (teams) {
       const teamList = teams.split(',').filter(Boolean);
-      const teamEmployeeIds = await User.distinct('_id', { tlName: { $in: teamList } });
+      const teamEmployeeIds = await User.distinct('_id', { tlName: tlNameMatch(teamList) });
       base.assignedTo = { $in: teamEmployeeIds };
     }
 

@@ -3,7 +3,12 @@ node_modules/
 dist/
 .env
 *.log
-android/
+# android/ holds hand-written native code (CallTrackService, CallLogModule, SimFilter…) — track it,
+# but never the signing secrets. Build dirs/local.properties are covered by android/.gitignore.
+android/keystore.properties
+android/app/*.keystore
+android/app/*.jks
+!android/app/debug.keystore
 ios/
 *.zip
 *.apk

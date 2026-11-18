@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import toast from 'react-hot-toast';
 import Cookies from 'js-cookie';
 import Sidebar from '../../components/Sidebar';
 import TopBar  from '../../components/TopBar';
-import { isAuthenticated } from '../../lib/auth';
+import { isAuthenticated, isAdminUser, isAdminOnlyPath } from '../../lib/auth';
 import api from '../../lib/api';
 
 function LoadingScreen() {
@@ -48,6 +49,19 @@ export default function ProtectedLayout({ children }) {
     api.get('/api/auth/me').then(r => setUser(r.data.data)).catch(() => {});
     setReady(true);
   }, [router]);
+
+  // Employees have no dashboard (the API refuses them); managers/TLs can't open org-wide pages.
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!user) return;
+    if (user.role === 'employee') {
+      toast.error('The dashboard is for managers and admins only');
+      Cookies.remove('token');
+      router.push('/login');
+    } else if (!isAdminUser(user) && isAdminOnlyPath(pathname)) {
+      router.replace('/team');
+    }
+  }, [user, pathname, router]);
 
   const toggleSidebar = () => {
     setCollapsed(prev => {

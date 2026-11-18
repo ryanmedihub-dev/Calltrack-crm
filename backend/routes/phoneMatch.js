@@ -10,14 +10,14 @@ const router = express.Router();
 const CallLog = require('../models/CallLog');
 const Lead = require('../models/Lead');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, requireFullAccess } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { phoneVariants } = require('../lib/assignToLastCaller');
 const { bandByScore } = require('../lib/engagement');
 
 const MAX_PHONES = 1000;
 
-router.post('/phone-match', protect, isManager, async (req, res) => {
+router.post('/phone-match', protect, requireFullAccess, async (req, res) => {
   try {
     const { phones, dateFrom, dateTo } = req.body || {};
     if (!Array.isArray(phones) || phones.length === 0) {

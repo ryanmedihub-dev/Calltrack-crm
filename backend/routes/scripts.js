@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const CallScript = require('../models/CallScript');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isManager, requireFullAccess } = require('../middleware/auth');
 const cache = require('../lib/cache');
 
 // GET /api/scripts — scoped to the requesting manager, so the cache key MUST include their id:
@@ -18,7 +18,7 @@ router.get('/', protect, isManager, async (req, res) => {
 });
 
 // POST /api/scripts
-router.post('/', protect, isManager, async (req, res) => {
+router.post('/', protect, requireFullAccess, async (req, res) => {
   try {
     const { title, category, content } = req.body;
     if (!title || !content) return res.status(400).json({ success: false, error: 'Title and content required' });
@@ -31,7 +31,7 @@ router.post('/', protect, isManager, async (req, res) => {
 });
 
 // PUT /api/scripts/:id
-router.put('/:id', protect, isManager, async (req, res) => {
+router.put('/:id', protect, requireFullAccess, async (req, res) => {
   try {
     const { title, category, content } = req.body;
     if (!title || !content) return res.status(400).json({ success: false, error: 'Title and content required' });
@@ -49,7 +49,7 @@ router.put('/:id', protect, isManager, async (req, res) => {
 });
 
 // DELETE /api/scripts/:id
-router.delete('/:id', protect, isManager, async (req, res) => {
+router.delete('/:id', protect, requireFullAccess, async (req, res) => {
   try {
     const script = await CallScript.findOneAndDelete({ _id: req.params.id, managerId: req.user._id });
     if (!script) return res.status(404).json({ success: false, error: 'Script not found' });

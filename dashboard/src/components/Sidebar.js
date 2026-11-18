@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FEATURES } from "../lib/features";
+import { isAdminUser } from "../lib/auth";
 
 function Icon({ children, size = 15 }) {
   return (
@@ -224,6 +225,7 @@ const ic = {
 const NAV = [
   { href: "/dashboard", label: "Dashboard", Ic: ic.Dashboard },
   { href: "/analytics", label: "Analytics", Ic: ic.Analytics },
+  { href: "/team", label: "Team", Ic: ic.Employees },
   null,
   {
     href: "/calls",
@@ -291,6 +293,7 @@ const NAV = [
   {
     href: "/users",
     label: "Users",
+    admin: true,
     Ic: ic.AgentReport,
     children: [
       { href: "/users/overview", label: "Overview", Ic: ic.Overview },
@@ -310,7 +313,7 @@ const NAV = [
       { href: "/reports/lead", label: "Lead", Ic: ic.Leads },
       { href: "/reports/Employess", label: "Employees", Ic: ic.Employees },
       { href: "/reports/calllogs", label: "Call Logs", Ic: ic.CallLogs },
-      { href: "/reports/users", label: "Users", Ic: ic.AgentReport },
+      { href: "/reports/users", label: "Users", Ic: ic.AgentReport, admin: true },
       { href: "/reports/export", label: "Export Center", Ic: ic.Export },
     ],
   },
@@ -319,13 +322,21 @@ const NAV = [
   { href: "/notifications", label: "Notifications", Ic: ic.Bell },
   { href: "/scripts", label: "Scripts", Ic: ic.Scripts },
   null,
-  { href: "/activity", label: "Activity", Ic: ic.Activity },
+  { href: "/activity", label: "Activity", Ic: ic.Activity, admin: true },
   { href: "/settings", label: "Settings", Ic: ic.Settings },
 ];
 
 // A child is hidden when it names a feature flag that is currently off. Centralised here so
 // the active-check, the flyout height calc and the flyout item list can never disagree about
 // which children are visible.
+// Managers/TLs never see admin-only entries (the API would refuse them anyway).
+function navFor(user) {
+  if (isAdminUser(user)) return NAV;
+  return NAV.filter((i) => !i?.admin).map((i) =>
+    i?.children ? { ...i, children: i.children.filter((c) => !c.admin) } : i
+  );
+}
+
 function visibleChildren(item) {
   if (!item?.children) return [];
   return item.children.filter((c) => !c.feature || FEATURES[c.feature]);
@@ -459,7 +470,7 @@ export default function Sidebar({
           className="flex-1 mt-5 overflow-y-auto py-2 px-2"
           style={{ scrollbarWidth: "none" }}
         >
-          {NAV.map((item, i) => {
+          {navFor(user).map((item, i) => {
             if (item === null) {
               return (
                 <div

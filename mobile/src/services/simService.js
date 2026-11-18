@@ -19,7 +19,12 @@ export async function getTrackedSimId() {
   return raw ? parseInt(raw, 10) : -1;
 }
 
-export async function setTrackedSim(subscriptionId, slotIndex = -1) {
+export async function setTrackedSim(subscriptionId, slotIndex) {
+  // SimPickerModal / ProfileScreen pass only the subId; look the slot up so it isn't reset to -1.
+  if (slotIndex === undefined) {
+    const sim = (await getAvailableSims()).find((s) => s.subscriptionId === subscriptionId);
+    slotIndex = sim ? sim.slotIndex : -1;
+  }
   await AsyncStorage.setItem(SIM_PREF_KEY,  String(subscriptionId));
   await AsyncStorage.setItem(SLOT_PREF_KEY, String(slotIndex));
   // Push both values into native SharedPreferences so CallTrackService can filter

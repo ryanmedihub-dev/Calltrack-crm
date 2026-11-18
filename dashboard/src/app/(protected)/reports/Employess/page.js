@@ -6,6 +6,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import api from '../../../../lib/api';
+import useIsAdmin from '../../../../lib/useIsAdmin';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { triggerServerExport } from '../../../../lib/downloads';
 import {
@@ -51,6 +52,7 @@ function TargetCell({ employeeId, initial, onSaved }) {
   const [value, setValue] = useState(initial ?? 0);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const isAdmin = useIsAdmin();
 
   const commit = async () => {
     setEditing(false);
@@ -69,6 +71,7 @@ function TargetCell({ employeeId, initial, onSaved }) {
     }
   };
 
+  if (!isAdmin) return <span className="text-xs font-semibold text-gray-700">{value || 0}</span>;
   if (editing) {
     return (
       <input
@@ -91,6 +94,7 @@ function TargetCell({ employeeId, initial, onSaved }) {
 /* Active/Inactive toggle, backed by PATCH /api/employees/:id/status */
 function StatusToggle({ employeeId, active, onSaved }) {
   const [busy, setBusy] = useState(false);
+  const isAdmin = useIsAdmin();
   const toggle = async () => {
     setBusy(true);
     try {
@@ -103,6 +107,7 @@ function StatusToggle({ employeeId, active, onSaved }) {
       setBusy(false);
     }
   };
+  if (!isAdmin) return <StatusPill active={active} />;
   return (
     <button onClick={toggle} disabled={busy} className="disabled:opacity-50">
       <StatusPill active={active} />

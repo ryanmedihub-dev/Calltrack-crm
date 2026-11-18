@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const CallLog = require('../models/CallLog');
 const User = require('../models/User');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isManager, requireFullAccess, scoped, canAccessEmployee } = require('../middleware/auth');
 const normalizePhone = require('../lib/normalizePhone');
 const { logAction } = require('../lib/audit');
 const { createPendingDownloadJob, completeDownloadJob, failDownloadJob, MAX_CONTENT_BYTES } = require('../lib/downloadJobs');
@@ -136,6 +136,7 @@ router.post('/', protect, async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone) || req.body.phone;
     if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
+    if (req.body.assignedTo && !canAccessEmployee(req, req.body.assignedTo)) return res.status(403).json({ success: false, error: 'Can only assign to your own team' });
 
     // Handle existing phone gracefully
     const existing = await Lead.findOne({ phone });
@@ -187,7 +188,7 @@ router.get('/', protect, isManager, async (req, res) => {
       status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax, engagement,
       page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate,
     } = req.query;
-    const filter = {};
+    const filter = scoped(req, {}, 'assignedTo');
     if (status) filter.status = { $in: status.split(',') };
     if (assignedTo) filter.assignedTo = assignedTo;
     else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
@@ -272,7 +273,7 @@ router.get('/logs', protect, isManager, async (req, res) => {
     const limitNum = Math.max(1, parseInt(limit) || 40);
     const skip = (pageNum - 1) * limitNum;
 
-    const leadMatch = {};
+    const leadMatch = scoped(req, {}, 'assignedTo');
     if (search) {
       leadMatch.$or = [
         { name:  { $regex: search, $options: 'i' } },
@@ -359,7 +360,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
     let employeeIds = [];
     if (assignment.mode === 'employee') {
       const ids = Array.isArray(assignment.employeeIds) ? assignment.employeeIds : [];
-      const validEmployees = await User.find({ _id: { $in: ids }, role: 'employee' }).select('_id').lean();
+      const validEmployees = await User.find(scoped(req, { _id: { $in: ids }, role: 'employee' }, '_id')).select('_id').lean();
       employeeIds = validEmployees.map((e) => e._id.toString());
       if (!employeeIds.length) {
         return res.status(400).json({ success: false, error: 'Select at least one valid employee to assign leads to' });
@@ -495,7 +496,7 @@ router.post('/bulk-upload', protect, async (req, res) => {
 });
 
 // POST /api/leads/bulk-assign (must be before /:id routes)
-router.post('/bulk-assign', protect, isManager, async (req, res) => {
+router.post('/bulk-assign', protect, requireFullAccess, async (req, res) => {
   try {
     const { leadIds, employeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -509,7 +510,7 @@ router.post('/bulk-assign', protect, isManager, async (req, res) => {
 });
 
 // POST /api/leads/bulk-transfer (must be before /:id routes)
-router.post('/bulk-transfer', protect, isManager, async (req, res) => {
+router.post('/bulk-transfer', protect, requireFullAccess, async (req, res) => {
   try {
     const { leadIds, toEmployeeId } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -521,7 +522,7 @@ router.post('/bulk-transfer', protect, isManager, async (req, res) => {
 });
 
 // DELETE /api/leads/bulk-delete (must be before /:id routes)
-router.delete('/bulk-delete', protect, isManager, async (req, res) => {
+router.delete('/bulk-delete', protect, requireFullAccess, async (req, res) => {
   try {
     const { leadIds } = req.body;
     if (!Array.isArray(leadIds) || !leadIds.length) return res.status(400).json({ success: false, error: 'leadIds array required' });
@@ -536,6 +537,7 @@ router.delete('/bulk-delete', protect, isManager, async (req, res) => {
 router.post('/from-call', protect, async (req, res) => {
   try {
     const { callId, name, phone, email, source, assignedTo, status = 'new', lastCallNote, followUpDate } = req.body;
+    if (assignedTo && !canAccessEmployee(req, assignedTo)) return res.status(403).json({ success: false, error: 'Can only assign to your own team' });
     if (!phone) return res.status(400).json({ success: false, error: 'Phone required' });
 
     // Look up the originating call (if we have it) so the very first attempt is
@@ -613,7 +615,7 @@ router.get('/export', protect, isManager, async (req, res) => {
   let job = null;
   try {
     const { status, assignedTo, startDate, endDate, search, tags, tlName } = req.query;
-    const filter = {};
+    const filter = scoped(req, {}, 'assignedTo');
     if (status)     filter.status     = status;
     if (assignedTo) filter.assignedTo = assignedTo;
     else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
@@ -729,11 +731,14 @@ router.get('/:id', protect, async (req, res) => {
         path: 'callLogs',
         populate: { path: 'employeeId', select: 'name phone' }
       });
-    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    // Unassigned (pool) leads stay readable; an assigned lead only by the assignee's team.
+    if (!lead || (lead.assignedTo && !canAccessEmployee(req, lead.assignedTo))) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
 
     // Also fetch any calls by phone not yet linked (for backwards compatibility)
     const linkedIds = new Set((lead.callLogs || []).map((c) => c._id.toString()));
-    const callsByNumber = await CallLog.find({ contactNumber: lead.phone })
+    const callsByNumber = await CallLog.find(scoped(req, { contactNumber: lead.phone }))
       .populate('employeeId', 'name phone')
       .sort({ timestamp: -1, _id: -1 })
       .limit(50)
@@ -768,8 +773,7 @@ router.put('/:id', protect, async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
-    const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) return res.status(403).json({ success: false, error: 'Access denied' });
+    if (!canAccessEmployee(req, lead.assignedTo)) return res.status(403).json({ success: false, error: 'Access denied' });
 
     const {
       name, phone, email,
@@ -777,7 +781,12 @@ router.put('/:id', protect, async (req, res) => {
       lastCallNote, lastCallSummary
     } = req.body;
 
-    const payload = req.user.role === 'manager'
+    const canEditAll = !req.teamIds || req.user.role === 'manager' || req.user.role === 'tl';
+    // A manager/TL may only hand a lead to someone in their own team (or back to the pool).
+    if (canEditAll && assignedTo && !canAccessEmployee(req, assignedTo)) {
+      return res.status(403).json({ success: false, error: 'Can only assign to your own team' });
+    }
+    const payload = canEditAll
       ? { name, phone, email, source, tags, status, assignedTo, followUpDate, lastCallNote, lastCallSummary }
       : { status, followUpDate, lastCallNote, lastCallSummary };
 
@@ -815,7 +824,7 @@ router.put('/:id', protect, async (req, res) => {
 });
 
 // DELETE /api/leads/:id
-router.delete('/:id', protect, isManager, async (req, res) => {
+router.delete('/:id', protect, requireFullAccess, async (req, res) => {
   try {
     const lead = await Lead.findByIdAndDelete(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
@@ -833,8 +842,7 @@ router.post('/:id/note', protect, async (req, res) => {
     if (!text) return res.status(400).json({ success: false, error: 'Note text required' });
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
-    const isOwner = lead.assignedTo && lead.assignedTo.toString() === req.user._id.toString();
-    if (req.user.role !== 'manager' && !isOwner) return res.status(403).json({ success: false, error: 'Access denied' });
+    if (!canAccessEmployee(req, lead.assignedTo)) return res.status(403).json({ success: false, error: 'Access denied' });
     lead.changelog.push({
       changedBy:     req.user._id,
       changedByName: req.user.name,
@@ -849,7 +857,7 @@ router.post('/:id/note', protect, async (req, res) => {
 });
 
 // PATCH /api/leads/:id/link-call
-router.patch('/:id/link-call', protect, isManager, async (req, res) => {
+router.patch('/:id/link-call', protect, requireFullAccess, async (req, res) => {
   try {
     const { callId } = req.body;
     if (!callId) return res.status(400).json({ success: false, error: 'callId required' });

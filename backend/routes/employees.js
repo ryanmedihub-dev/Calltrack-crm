@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const Lead = require('../models/Lead');
-const { protect, isManager } = require('../middleware/auth');
+const { protect, isManager, requireFullAccess, scoped, canAccessEmployee, scopeKey } = require('../middleware/auth');
 const cache = require('../lib/cache');
 
 // Every write handler below calls this after its DB write resolves — cheaper than picking
@@ -13,14 +13,15 @@ const invalidateEmployees = () => cache.invalidate(['employees']);
 // Safe field projection — never returns password, fcmToken, or deviceId.
 // Includes all fields needed by employee screens, dropdowns, reports, hierarchy
 // and call-log attribution.
+const ROLES = User.schema.path('role').enumValues;
 const SAFE_EMPLOYEE_FIELDS = 'name email role phone tlName dailyTarget isActive isDeleted deletedAt createdAt ryanEmployeeCode isSuperAdmin';
 
 // GET /api/employees
 router.get('/', protect, isManager, async (req, res) => {
   try {
     const { search, page = 1, limit = 200 } = req.query;
-    const data = await cache.cached(['employees', 'list', search || '', page, limit], 120, async () => {
-      const filter = { role: 'employee', isDeleted: { $ne: true } };
+    const data = await cache.cached(['employees', 'list', scopeKey(req), search || '', page, limit], 120, async () => {
+      const filter = scoped(req, { role: 'employee', isDeleted: { $ne: true } }, '_id');
       if (search) {
         filter.$or = [
           { name: { $regex: search, $options: 'i' } },
@@ -44,9 +45,14 @@ router.get('/', protect, isManager, async (req, res) => {
 // Must be declared before GET /:id so it isn't swallowed by the param route.
 router.get('/tl-names', protect, isManager, async (req, res) => {
   try {
+    // A manager/TL's only team is their own.
+    if (req.teamIds) return res.json({ success: true, data: [req.user.name] });
     const names = await cache.cached(['employees', 'tl-names'], 300, async () => {
       const distinct = await User.distinct('tlName', { role: 'employee', tlName: { $ne: '' }, isDeleted: { $ne: true } });
-      return distinct.sort((a, b) => a.localeCompare(b));
+      // One entry per team even if spelled "Rahul" / "rahul " on different employees.
+      const seen = new Map();
+      for (const n of distinct) { const k = n.trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, n.trim()); }
+      return [...seen.values()].sort((a, b) => a.localeCompare(b));
     });
     return res.json({ success: true, data: names });
   } catch (err) {
@@ -55,16 +61,17 @@ router.get('/tl-names', protect, isManager, async (req, res) => {
 });
 
 // POST /api/employees
-router.post('/', protect, isManager, async (req, res) => {
+router.post('/', protect, requireFullAccess, async (req, res) => {
   try {
-    const { name, email, password, phone, deviceId, tlName, ryanEmployeeCode } = req.body;
+    const { name, email, password, phone, deviceId, tlName, ryanEmployeeCode, role = 'employee' } = req.body;
+    if (!ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Invalid role' });
     const existing = await User.findOne({ email });
     if (existing) return res.status(400).json({ success: false, error: 'Email already registered' });
     if (ryanEmployeeCode) {
       const dupe = await User.findOne({ ryanEmployeeCode });
       if (dupe) return res.status(400).json({ success: false, error: 'Employee ID already in use' });
     }
-    const user = await User.create({ name, email, password, role: 'employee', phone, deviceId, tlName, ryanEmployeeCode: ryanEmployeeCode || null });
+    const user = await User.create({ name, email, password, role, phone, deviceId, tlName, ryanEmployeeCode: ryanEmployeeCode || null });
     await invalidateEmployees();
     return res.status(201).json({ success: true, data: user.toJSON(), message: 'Employee created' });
   } catch (err) {
@@ -75,6 +82,7 @@ router.post('/', protect, isManager, async (req, res) => {
 // GET /api/employees/:id
 router.get('/:id', protect, isManager, async (req, res) => {
   try {
+    if (!canAccessEmployee(req, req.params.id)) return res.status(404).json({ success: false, error: 'Employee not found' });
     const employee = await User.findOne({ _id: req.params.id, role: 'employee' }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
     return res.json({ success: true, data: employee });
@@ -84,7 +92,7 @@ router.get('/:id', protect, isManager, async (req, res) => {
 });
 
 // PATCH /api/employees/:id/status
-router.patch('/:id/status', protect, isManager, async (req, res) => {
+router.patch('/:id/status', protect, requireFullAccess, async (req, res) => {
   try {
     const { isActive } = req.body;
     if (typeof isActive !== 'boolean') {
@@ -107,7 +115,7 @@ router.patch('/:id/status', protect, isManager, async (req, res) => {
 });
 
 // PATCH /api/employees/:id/target
-router.patch('/:id/target', protect, isManager, async (req, res) => {
+router.patch('/:id/target', protect, requireFullAccess, async (req, res) => {
   try {
     const { dailyTarget } = req.body;
     if (typeof dailyTarget !== 'number' || dailyTarget < 0) {
@@ -123,14 +131,15 @@ router.patch('/:id/target', protect, isManager, async (req, res) => {
 });
 
 // PUT /api/employees/:id
-router.put('/:id', protect, isManager, async (req, res) => {
+router.put('/:id', protect, requireFullAccess, async (req, res) => {
   try {
-    const { name, phone, deviceId, tlName, ryanEmployeeCode } = req.body;
+    const { name, phone, deviceId, tlName, ryanEmployeeCode, role } = req.body;
+    if (role !== undefined && !ROLES.includes(role)) return res.status(400).json({ success: false, error: 'Invalid role' });
     if (ryanEmployeeCode) {
       const dupe = await User.findOne({ ryanEmployeeCode, _id: { $ne: req.params.id } });
       if (dupe) return res.status(400).json({ success: false, error: 'Employee ID already in use' });
     }
-    const update = { name, phone, deviceId, tlName };
+    const update = { name, phone, deviceId, tlName, role };
     if (ryanEmployeeCode !== undefined) update.ryanEmployeeCode = ryanEmployeeCode || null;
     const employee = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select(SAFE_EMPLOYEE_FIELDS).lean();
     if (!employee) return res.status(404).json({ success: false, error: 'Employee not found' });
@@ -147,7 +156,7 @@ router.put('/:id', protect, isManager, async (req, res) => {
 // frontend can prompt the manager instead of silently orphaning leads.
 // Uses soft deletion: marks isDeleted=true and records deletedAt timestamp.
 // Historical call-log attribution is preserved via the stored employeeName field.
-router.delete('/:id', protect, isManager, async (req, res) => {
+router.delete('/:id', protect, requireFullAccess, async (req, res) => {
   try {
     const { reassignTo, deleteLeads } = req.body || {};
     const employee = await User.findOne({ _id: req.params.id, role: 'employee' });

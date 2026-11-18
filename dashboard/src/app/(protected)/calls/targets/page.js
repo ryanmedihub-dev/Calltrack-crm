@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
+import useIsAdmin from '../../../../lib/useIsAdmin';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { DataTable, TLFilter, Truncate } from '../../../../components/report-shared';
 
@@ -21,6 +22,7 @@ function ProgressBar({ value, max }) {
 }
 
 export default function DailyTargetsPage() {
+  const isAdmin = useIsAdmin();
   const [employees,  setEmployees]  = useState([]);
   const [callCounts, setCallCounts] = useState({});
   const [editId,     setEditId]     = useState(null);
@@ -108,10 +110,12 @@ export default function DailyTargetsPage() {
         </div>
         <div className="flex items-center gap-2">
           <TLFilter value={tlFilter} onChange={setTlFilter} />
+          {isAdmin && (<>
           <input type="number" min="1" max="500" value={defTarget}
             onChange={e=>setDefTarget(e.target.value)}
             className="form-input w-20 text-center"/>
           <button onClick={setAllTargets} className="btn-primary">Set All</button>
+          </>)}
         </div>
       </div>
 
@@ -157,7 +161,7 @@ export default function DailyTargetsPage() {
                   </div>
                 </div>
 
-                {editId===emp._id ? (
+                {!isAdmin ? null : editId===emp._id ? (
                   <div className="flex items-center gap-1.5">
                     <input type="number" autoFocus value={editVal}
                       onChange={e=>setEditVal(e.target.value)}
