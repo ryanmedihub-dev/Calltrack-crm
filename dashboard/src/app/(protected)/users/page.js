@@ -15,11 +15,11 @@ const TrashIco   = ({s=22}) => <Ico size={s}><polyline points="3 6 5 6 21 6"/><p
 const ReportIco  = ({s=22}) => <Ico size={s}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></Ico>;
 
 const NAV_CARDS = [
-  { href:'/users/overview',      label:'Overview',      desc:'See all system users at a glance', Icon:UsersIco,    color:'#2563EB', bg:'#EFF6FF' },
-  { href:'/users/active',        label:'Active Users',  desc:'View currently active and online users', Icon:ActivityIco, color:'#16A34A', bg:'#F0FDF4' },
-  { href:'/users/update-users',  label:'Update Users',  desc:'Edit user profiles, roles, and details', Icon:EditIco,     color:'#D97706', bg:'#FFFBEB' },
-  { href:'/users/remove-users',  label:'Remove Users',  desc:'Deactivate or permanently remove users', Icon:TrashIco,    color:'#DC2626', bg:'#FFF1F2' },
-  { href:'/reports/users',       label:'Users Report',  desc:'Detailed report on user accounts and roles', Icon:ReportIco,   color:'#7C3AED', bg:'#F5F3FF' },
+  { href:'/users/overview',      label:'Overview',      desc:'See all system users at a glance', Icon:UsersIco,    color:'#7C3AED', bg:'#F5F3FF' },
+  { href:'/users/active',        label:'Active Users',  desc:'View currently active and online users', Icon:ActivityIco, color:'#079455', bg:'#ECFDF3' },
+  { href:'/users/update-users',  label:'Update Users',  desc:'Edit user profiles, roles, and details', Icon:EditIco,     color:'#B54708', bg:'#FFFAEB' },
+  { href:'/users/remove-users',  label:'Remove Users',  desc:'Deactivate or permanently remove users', Icon:TrashIco,    color:'#D92D20', bg:'#FEF3F2' },
+  { href:'/reports/users',       label:'Users Report',  desc:'Detailed report on user accounts and roles', Icon:ReportIco,   color:'#524F63', bg:'#F4F3F8' },
 ];
 
 export default function UsersPage() {
@@ -43,12 +43,12 @@ export default function UsersPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="rounded-2xl p-6 text-white" style={{ background:'linear-gradient(135deg,#1E40AF 0%,#3B82F6 60%,#93C5FD 100%)' }}>
+      <div className="rounded-2xl p-6 text-white" style={{ background:'#6D28D9' }}>
         <div className="flex items-center gap-3 mb-1">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background:'rgba(255,255,255,0.15)' }}>
             <UsersIco s={20}/>
           </div>
-          <h2 className="text-xl font-extrabold" style={{ letterSpacing:'-0.02em' }}>Users</h2>
+          <h2 className="page-title">Users</h2>
         </div>
         <p className="text-sm mt-1" style={{ opacity:0.75 }}>Manage system users — roles, permissions, and account settings</p>
         <div className="flex gap-6 mt-4">
@@ -59,7 +59,7 @@ export default function UsersPage() {
           ].map(s=>(
             <div key={s.l}>
               <p className="text-2xl font-extrabold tabular-nums">{loading?'…':s.v}</p>
-              <p className="text-[11px] font-medium" style={{ opacity:0.7 }}>{s.l}</p>
+              <p className="text-xs font-medium" style={{ opacity:0.7 }}>{s.l}</p>
             </div>
           ))}
         </div>
@@ -76,10 +76,10 @@ export default function UsersPage() {
               <card.Icon s={22}/>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-bold text-sm" style={{ color:'#0F172A' }}>{card.label}</p>
-              <p className="text-xs mt-0.5 leading-relaxed" style={{ color:'#94A3B8' }}>{card.desc}</p>
+              <p className="font-bold text-sm" style={{ color:'#1A1726' }}>{card.label}</p>
+              <p className="text-xs mt-0.5 leading-relaxed" style={{ color: '#6B6880' }}>{card.desc}</p>
             </div>
-            <span className="text-lg flex-shrink-0 mt-0.5 transition-transform group-hover:translate-x-0.5" style={{ color:'#CBD5E1' }}>›</span>
+            <span className="text-lg flex-shrink-0 mt-0.5 transition-transform group-hover:translate-x-0.5" style={{ color:'#D5D2DE' }}>›</span>
           </Link>
         ))}
       </div>

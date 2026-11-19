@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FEATURES } from "../lib/features";
 import { isAdminUser } from "../lib/auth";
 
-function Icon({ children, size = 15 }) {
+function Icon({ children, size = 16 }) {
   return (
     <svg
       width={size}
@@ -222,113 +223,71 @@ const ic = {
   ),
 };
 
-const NAV = [
+// Every page has exactly one home in the nav (reports live under Reports, not repeated in
+// each section). `admin: true` entries are hidden from managers/TLs.
+export const NAV = [
   { href: "/dashboard", label: "Dashboard", Ic: ic.Dashboard },
   { href: "/analytics", label: "Analytics", Ic: ic.Analytics },
   { href: "/team", label: "Team", Ic: ic.Employees },
   null,
   {
-    href: "/calls",
-    label: "Calls",
-    Ic: ic.CallLogs,
+    href: "/calls", label: "Calls", Ic: ic.CallLogs,
     children: [
-      { href: "/calls/overview", label: "Overview", Ic: ic.Overview },
-      { href: "/calls/live", label: "Live Monitor", Ic: ic.Live, live: true },
-      {
-        href: "/calls/unsynced",
-        label: "Not Synced Calls",
-        Ic: ic.AlertCircle,
-      },
-      {
-        href: "/reports/Employess",
-        label: "Agents Report",
-        Ic: ic.AgentReport,
-      },
-      { href: "/reports/calllogs", label: "Calls Report", Ic: ic.LogsReport },
-      { href: "/reports/client", label: "Client Report", Ic: ic.Client },
+      { href: "/calls/overview", label: "Overview" },
+      { href: "/calls/live", label: "Live monitor", live: true },
+      { href: "/calls/unsynced", label: "Not synced" },
     ],
   },
-  null,
   {
-    href: "/employees",
-    label: "Employees",
-    Ic: ic.Employees,
+    href: "/leads", label: "Leads", Ic: ic.Leads,
     children: [
-      { href: "/employees/overview", label: "Overview", Ic: ic.Overview },
-      {
-        href: "/employees/leaderboard",
-        label: "Leaderboard",
-        Ic: ic.Leaderboard,
-      },
-      { href: "/calls/targets", label: "Daily Targets", Ic: ic.Targets },
-      { href: "/reports/lead", label: "Leads Report", Ic: ic.Leads },
-      {
-        href: "/employees/performance-report",
-        label: "Performance Report",
-        Ic: ic.AttemptReport,
-      },
-      {
-        href: "/reports/Employess",
-        label: "Workload Report",
-        Ic: ic.Activity,
-      },
+      { href: "/leads/overview", label: "Overview" },
+      { href: "/leads/live-data", label: "Live data", live: true, feature: "LEAD_POOL" },
+      { href: "/leads/pipeline", label: "Pipeline" },
+      { href: "/leads/follow-ups", label: "Follow-ups" },
+      { href: "/leads/assingned-leads", label: "Assigned leads" },
+      { href: "/leads/leads-logs", label: "Activity log" },
+      { href: "/leads/leads-uploads", label: "Import leads" },
     ],
   },
-  null,
   {
-    href: "/leads",
-    label: "Leads",
-    Ic: ic.Leads,
+    href: "/employees", label: "Employees", Ic: ic.AgentReport,
     children: [
-      { href: "/leads/live-data", label: "Live Data", Ic: ic.Live, live: true, feature: "LEAD_POOL" },
-      { href: "/leads/overview", label: "Overview", Ic: ic.Overview },
-      { href: "/leads/pipeline", label: "Pipeline", Ic: ic.Pipeline },
-      { href: "/leads/follow-ups", label: "Follow-ups", Ic: ic.Reports },
-      { href: "/leads/assingned-leads", label: "Assigned Leads", Ic: ic.Leads },
-      { href: "/leads/leads-logs", label: "Leads Logs", Ic: ic.LogsReport },
-      { href: "/leads/leads-uploads", label: "Leads Uploads", Ic: ic.Upload },
+      { href: "/employees/overview", label: "Overview" },
+      { href: "/employees/leaderboard", label: "Leaderboard" },
+      { href: "/calls/targets", label: "Daily targets" },
+      { href: "/employees/performance-report", label: "Performance" },
     ],
   },
-  null,
   {
-    href: "/users",
-    label: "Users",
-    admin: true,
-    Ic: ic.AgentReport,
+    href: "/reports", label: "Reports", Ic: ic.Reports,
     children: [
-      { href: "/users/overview", label: "Overview", Ic: ic.Overview },
-      { href: "/users/active", label: "Active Users", Ic: ic.UserCheck },
-      { href: "/users/update-users", label: "Update Users", Ic: ic.UserEdit },
-      { href: "/users/remove-users", label: "Remove Users", Ic: ic.UserMinus },
+      { href: "/reports", label: "Periodic reports", exact: true },
+      { href: "/reports/calllogs", label: "Calls report" },
+      { href: "/reports/lead", label: "Leads report" },
+      { href: "/reports/Employess", label: "Employees report" },
+      { href: "/reports/client", label: "Client report" },
+      { href: "/reports/users", label: "Users report", admin: true },
+      { href: "/reports/export", label: "Export center" },
     ],
   },
-
-  null,
   {
-    href: "/reports",
-    label: "Reports",
-    Ic: ic.Reports,
+    href: "/users", label: "Users", Ic: ic.UserEdit, admin: true,
     children: [
-      { href: "/reports/client", label: "Client", Ic: ic.Client },
-      { href: "/reports/lead", label: "Lead", Ic: ic.Leads },
-      { href: "/reports/Employess", label: "Employees", Ic: ic.Employees },
-      { href: "/reports/calllogs", label: "Call Logs", Ic: ic.CallLogs },
-      { href: "/reports/users", label: "Users", Ic: ic.AgentReport, admin: true },
-      { href: "/reports/export", label: "Export Center", Ic: ic.Export },
+      { href: "/users/overview", label: "Overview" },
+      { href: "/users/active", label: "Active users" },
+      { href: "/users/update-users", label: "Add & edit users" },
+      { href: "/users/remove-users", label: "Remove users" },
     ],
   },
   null,
   { href: "/downloads", label: "Downloads", Ic: ic.Export },
   { href: "/notifications", label: "Notifications", Ic: ic.Bell },
-  { href: "/scripts", label: "Scripts", Ic: ic.Scripts },
-  null,
-  { href: "/activity", label: "Activity", Ic: ic.Activity, admin: true },
+  { href: "/scripts", label: "Call scripts", Ic: ic.Scripts },
+  { href: "/activity", label: "Audit log", Ic: ic.Activity, admin: true },
   { href: "/settings", label: "Settings", Ic: ic.Settings },
 ];
 
-// A child is hidden when it names a feature flag that is currently off. Centralised here so
-// the active-check, the flyout height calc and the flyout item list can never disagree about
-// which children are visible.
 // Managers/TLs never see admin-only entries (the API would refuse them anyway).
 function navFor(user) {
   if (isAdminUser(user)) return NAV;
@@ -342,480 +301,209 @@ function visibleChildren(item) {
   return item.children.filter((c) => !c.feature || FEATURES[c.feature]);
 }
 
-export default function Sidebar({
-  collapsed,
-  mobileOpen,
-  onMobileClose,
-  user,
-  onLogout,
-}) {
+const EASE_OUT = [0.23, 1, 0.32, 1];
+
+export default function Sidebar({ collapsed, mobileOpen, onMobileClose, user, onLogout }) {
   const pathname = usePathname();
-  const sidebarRef = useRef(null);
-  const popupRef = useRef(null);
+  const reduce = useReducedMotion();
+  const asideRef = useRef(null);
+  const flyRef = useRef(null);
+  const nav = navFor(user);
 
-  // popup = { item, anchorTop, anchorBottom }
-  const [popup, setPopup] = useState(null);
+  const isActive = (href, exact) =>
+    exact || href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(href + "/");
+  const groupActive = (item) => isActive(item.href) || visibleChildren(item).some((c) => isActive(c.href, c.exact));
 
-  const isActive = (href) => {
-    if (href === "/dashboard") return pathname === "/dashboard";
-    return pathname === href || pathname.startsWith(href + "/");
-  };
-
-  const handleParentClick = (item, e) => {
-    e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (popup?.item.href === item.href) {
-      setPopup(null);
-    } else {
-      setPopup({ item, anchorTop: rect.top, anchorBottom: rect.bottom });
-    }
-  };
-
-  // Close popup when clicking outside
+  // Expanded rail: groups open inline (accordion). The active group starts open.
+  const [open, setOpen] = useState(() => new Set());
   useEffect(() => {
-    if (!popup) return;
-    const handler = (e) => {
-      if (
-        popupRef.current &&
-        !popupRef.current.contains(e.target) &&
-        sidebarRef.current &&
-        !sidebarRef.current.contains(e.target)
-      ) {
-        setPopup(null);
-      }
+    const g = nav.find((i) => i?.children && groupActive(i));
+    if (g) setOpen((s) => (s.has(g.href) ? s : new Set(s).add(g.href)));
+    // `user` too: admin-only groups only join the nav once the user has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, user]);
+  const toggle = (href) => setOpen((s) => { const n = new Set(s); n.has(href) ? n.delete(href) : n.add(href); return n; });
+
+  // Collapsed rail: groups open a flyout anchored to the item.
+  const [fly, setFly] = useState(null);
+  useEffect(() => setFly(null), [pathname, collapsed]);
+  useEffect(() => {
+    if (!fly) return;
+    const onDown = (e) => {
+      if (flyRef.current?.contains(e.target) || asideRef.current?.contains(e.target)) return;
+      setFly(null);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [popup]);
+    const onKey = (e) => e.key === "Escape" && setFly(null);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [fly]);
 
-  // Close on route change
-  useEffect(() => {
-    setPopup(null);
-  }, [pathname]);
+  const initials = (user?.name || "?").split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const roleLabel = isAdminUser(user) ? "Admin" : user?.role === "tl" ? "Team lead" : user?.role ? user.role[0].toUpperCase() + user.role.slice(1) : "";
 
-  const initials = user?.name
-    ? user.name
-        .split(" ")
-        .map((w) => w[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
-    : "?";
-
-  // Compute flyout panel top position (keep within viewport)
-  const getPopupTop = () => {
-    if (!popup) return 0;
-    const POPUP_ITEM_H = 42;
-    const POPUP_HEADER = 52;
-    const POPUP_PAD = 16;
-    const totalH =
-      POPUP_HEADER + visibleChildren(popup.item).length * POPUP_ITEM_H + POPUP_PAD;
-    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-    let top = popup.anchorTop;
-    if (top + totalH > vh - 12) top = Math.max(12, vh - totalH - 12);
-    return top;
-  };
-
-  const sidebarW = collapsed ? 56 : 196;
+  const itemBase =
+    "group/nav relative flex items-center w-full h-9 rounded-lg text-[13.5px] transition-colors duration-150";
+  const itemState = (active) =>
+    active
+      ? "bg-[var(--blue-50)] text-[var(--blue-600)] font-medium"
+      : "text-ink-2 hover:bg-[#F4F3F8] hover:text-ink";
+  const rail = collapsed ? "lg:justify-center lg:px-0 px-2.5 gap-2.5" : "px-2.5 gap-2.5";
 
   return (
     <>
       <aside
-        ref={sidebarRef}
+        ref={asideRef}
+        aria-label="Main navigation"
         className={[
-          "flex flex-col fixed left-0 top-0 bottom-0 z-40 select-none",
-          "transition-all duration-300 ease-in-out overflow-hidden",
-          collapsed ? "lg:w-14" : "lg:w-[225px]",
-          "w-[196px]",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:translate-x-0",
+          "fixed left-0 top-0 bottom-0 z-40 flex flex-col select-none bg-[var(--rail)] border-r border-line",
+          "w-[var(--sidebar-w)] transition-[width,transform] duration-200 ease-out motion-reduce:transition-none",
+          collapsed ? "lg:w-[var(--sidebar-w-collapsed)]" : "lg:w-[var(--sidebar-w)]",
+          mobileOpen ? "translate-x-0 shadow-xl" : "-translate-x-full",
+          "lg:translate-x-0 lg:shadow-none",
         ].join(" ")}
-        style={{ background: "#FAFBFC", borderRight: "1px solid #EAECF0" }}
       >
         {/* Brand */}
-        <div
-          className={`flex items-center h-[56px] flex-shrink-0 px-3 ${collapsed ? "lg:justify-center lg:px-0" : "gap-2.5"}`}
-          style={{ borderBottom: "1px solid #EAECF0" }}
-        >
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-            style={{ background: "linear-gradient(135deg,#2563EB,#60A5FA)" }}
-          >
-            <span className="text-white text-[9px] font-black tracking-tight">
-              CT
-            </span>
-          </div>
-          <div className={`flex-1 min-w-0 ${collapsed ? "lg:hidden" : ""}`}>
-            <p
-              className="text-[13px] font-bold leading-none"
-              style={{ color: "#0F172A" }}
-            >
-              CallTrack
-            </p>
-            <p className="text-[10px] mt-[3px]" style={{ color: "#94A3B8" }}>
-              Manager Panel
-            </p>
-          </div>
-          <button
-            onClick={onMobileClose}
-            className="lg:hidden p-1 rounded"
-            style={{ color: "#94A3B8" }}
-          >
+        <div className={`flex items-center h-[var(--topbar-h)] shrink-0 px-4 gap-2.5 ${collapsed ? "lg:justify-center lg:px-0" : ""}`}>
+          <span className="w-8 h-8 rounded-lg bg-[var(--blue)] text-white flex items-center justify-center text-xs font-bold tracking-tight shrink-0">CT</span>
+          <span className={`min-w-0 leading-tight ${collapsed ? "lg:hidden" : ""}`}>
+            <span className="block text-[14px] font-semibold text-ink tracking-tight">CallTrack</span>
+            <span className="block text-[11.5px] text-ink-3">{isAdminUser(user) ? "Admin console" : "Team console"}</span>
+          </span>
+          <button onClick={onMobileClose} aria-label="Close menu"
+            className="lg:hidden ml-auto w-8 h-8 rounded-lg flex items-center justify-center text-ink-3 hover:bg-[#F4F3F8]">
             <ic.Close />
           </button>
         </div>
 
         {/* Nav */}
-        <nav
-          className="flex-1 mt-5 overflow-y-auto py-2 px-2"
-          style={{ scrollbarWidth: "none" }}
-        >
-          {navFor(user).map((item, i) => {
-            if (item === null) {
-              return (
-                <div
-                  key={`div-${i}`}
-                  className={`my-1.5 ${collapsed ? "lg:mx-1" : "mx-1"}`}
-                  style={{ height: "1px", background: "#EAECF0" }}
-                />
-              );
-            }
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pt-2 pb-4" style={{ scrollbarWidth: "none" }}>
+          <ul className="space-y-0.5">
+            {nav.map((item, i) => {
+              if (item === null) return <li key={`sep-${i}`} aria-hidden className="h-3" />;
 
-            if (item.children) {
-              const kids = visibleChildren(item);
-              if (kids.length === 0) return null;
-              const parentActive =
-                isActive(item.href) ||
-                kids.some((c) => isActive(c.href));
-              const isOpen = popup?.item.href === item.href;
-
-              return (
-                <button
-                  key={item.href}
-                  onClick={(e) => handleParentClick(item, e)}
-                  title={collapsed ? item.label : undefined}
-                  className={[
-                    "w-full flex items-center rounded-lg text-[13.5px] font-medium transition-colors duration-100 mt-0.5",
-                    collapsed
-                      ? "lg:justify-center lg:p-2.5 px-2.5 py-[7px] gap-2"
-                      : "px-2.5 py-[9px] gap-2",
-                  ].join(" ")}
-                  style={
-                    isOpen
-                      ? { background: "#EFF6FF", color: "#2563EB" }
-                      : parentActive
-                        ? { background: "#EFF6FF", color: "#2563EB" }
-                        : { color: "#64748B" }
-                  }
-                  onMouseEnter={(e) => {
-                    if (!parentActive && !isOpen) {
-                      e.currentTarget.style.background = "#F1F5F9";
-                      e.currentTarget.style.color = "#334155";
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!parentActive && !isOpen) {
-                      e.currentTarget.style.background = "";
-                      e.currentTarget.style.color = "#64748B";
-                    }
-                  }}
-                >
-                  <span className="flex-shrink-0">
-                    <item.Ic />
-                  </span>
-                  <span
-                    className={`flex-1 text-left truncate ${collapsed ? "lg:hidden" : ""}`}
-                  >
-                    {item.label}
-                  </span>
-                  {!collapsed && (
-                    <span
-                      className="flex-shrink-0 transition-transform duration-200"
-                      style={{
-                        transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-                        opacity: 0.45,
+              if (item.children) {
+                const kids = visibleChildren(item);
+                if (!kids.length) return null;
+                const active = groupActive(item);
+                const isOpen = open.has(item.href);
+                const flyOpen = fly?.item.href === item.href;
+                return (
+                  <li key={item.href}>
+                    <button
+                      title={collapsed ? item.label : undefined}
+                      aria-expanded={collapsed ? flyOpen : isOpen}
+                      onClick={(e) => {
+                        if (collapsed && window.matchMedia("(min-width: 1024px)").matches) {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setFly(flyOpen ? null : { item, top: r.top });
+                        } else toggle(item.href);
                       }}
+                      className={`${itemBase} ${rail} ${collapsed && active ? itemState(true) : active && !isOpen ? "text-ink font-medium hover:bg-[#F4F3F8]" : itemState(false)}`}
                     >
-                      <ic.ChevronRight />
-                    </span>
-                  )}
-                </button>
-              );
-            }
+                      <span className={`shrink-0 ${active ? "text-[var(--blue)]" : "text-ink-3 group-hover/nav:text-ink-2"}`}><item.Ic /></span>
+                      <span className={`flex-1 text-left truncate ${collapsed ? "lg:hidden" : ""}`}>{item.label}</span>
+                      <span className={`shrink-0 text-ink-4 transition-transform duration-200 ease-out ${isOpen ? "rotate-90" : ""} ${collapsed ? "lg:hidden" : ""}`}>
+                        <ic.ChevronRight />
+                      </span>
+                    </button>
 
-            const active = isActive(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onMobileClose}
-                title={collapsed ? item.label : undefined}
-                className={[
-                  "flex items-center rounded-lg text-[13.5px] font-medium transition-colors duration-100 mt-0.5",
-                  collapsed
-                    ? "lg:justify-center lg:p-2.5 px-2.5 py-[9px] gap-2"
-                    : "px-2.5 py-[9px] gap-2",
-                ].join(" ")}
-                style={
-                  active
-                    ? { background: "#EFF6FF", color: "#2563EB" }
-                    : { color: "#64748B" }
-                }
-                onMouseEnter={(e) => {
-                  if (!active) {
-                    e.currentTarget.style.background = "#F1F5F9";
-                    e.currentTarget.style.color = "#334155";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) {
-                    e.currentTarget.style.background = "";
-                    e.currentTarget.style.color = "#64748B";
-                  }
-                }}
-              >
-                <span
-                  className="flex-shrink-0"
-                  style={{ color: active ? "#2563EB" : "inherit" }}
-                >
-                  <item.Ic />
-                </span>
-                <span
-                  className={`flex-1 truncate ${collapsed ? "lg:hidden" : ""}`}
-                >
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
+                    {/* Inline children (expanded rail, and always on the mobile drawer) */}
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.ul
+                          key="kids"
+                          initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                          animate={reduce ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+                          exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: EASE_OUT }}
+                          className={`overflow-hidden ${collapsed ? "lg:hidden" : ""}`}
+                        >
+                          <div className="relative ml-[19px] pl-3 py-1 border-l border-line space-y-0.5">
+                            {kids.map((c) => {
+                              const a = isActive(c.href, c.exact);
+                              return (
+                                <Link key={c.href} href={c.href} onClick={onMobileClose} aria-current={a ? "page" : undefined}
+                                  className={`flex items-center gap-2 h-8 px-2.5 rounded-md text-[13px] transition-colors duration-150 ${a ? "bg-[var(--blue-50)] text-[var(--blue-600)] font-medium" : "text-ink-3 hover:text-ink hover:bg-[#F4F3F8]"}`}>
+                                  <span className="flex-1 truncate">{c.label}</span>
+                                  {c.live && <span className="live-dot" aria-label="Live" />}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </motion.ul>
+                      )}
+                    </AnimatePresence>
+                  </li>
+                );
+              }
+
+              const active = isActive(item.href);
+              return (
+                <li key={item.href}>
+                  <Link href={item.href} onClick={onMobileClose} title={collapsed ? item.label : undefined}
+                    aria-current={active ? "page" : undefined}
+                    className={`${itemBase} ${rail} ${itemState(active)}`}>
+                    <span className={`shrink-0 ${active ? "text-[var(--blue)]" : "text-ink-3 group-hover/nav:text-ink-2"}`}><item.Ic /></span>
+                    <span className={`flex-1 truncate ${collapsed ? "lg:hidden" : ""}`}>{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
 
-        {/* User footer */}
-        <div
-          className="flex-shrink-0 p-2"
-          style={{ borderTop: "1px solid #EAECF0" }}
-        >
-          {collapsed ? (
-            <div className="flex flex-col items-center gap-2">
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[11px] font-bold"
-                style={{
-                  background: "linear-gradient(135deg,#2563EB,#60A5FA)",
-                }}
-              >
-                {initials}
-              </div>
-              <button
-                onClick={onLogout}
-                title="Logout"
-                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                style={{ color: "#94A3B8" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#FFF1F2";
-                  e.currentTarget.style.color = "#EF4444";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "";
-                  e.currentTarget.style.color = "#94A3B8";
-                }}
-              >
-                <ic.Logout />
-              </button>
-            </div>
-          ) : (
-            <div
-              className="flex items-center gap-2 px-1 py-1 rounded-lg"
-              style={{ background: "#F1F5F9" }}
-            >
-              <div
-                className="w-7 h-7 rounded-md flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                style={{
-                  background: "linear-gradient(135deg,#2563EB,#60A5FA)",
-                }}
-              >
-                {initials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p
-                  className="text-[12px] font-semibold leading-none truncate"
-                  style={{ color: "#0F172A" }}
-                >
-                  {user?.name || "User"}
-                </p>
-                <p
-                  className="text-[10.5px] mt-0.5 capitalize truncate"
-                  style={{ color: "#94A3B8" }}
-                >
-                  {user?.role || ""}
-                </p>
-              </div>
-              <button
-                onClick={onLogout}
-                title="Logout"
-                className="flex-shrink-0 p-1.5 rounded-md transition-colors"
-                style={{ color: "#94A3B8" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#FFF1F2";
-                  e.currentTarget.style.color = "#EF4444";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "";
-                  e.currentTarget.style.color = "#94A3B8";
-                }}
-              >
-                <ic.Logout />
-              </button>
-            </div>
-          )}
+        {/* Account */}
+        <div className="shrink-0 border-t border-line p-3">
+          <div className={`flex items-center gap-2.5 ${collapsed ? "lg:flex-col lg:gap-2" : ""}`}>
+            <span className="w-8 h-8 rounded-full bg-[var(--blue-100)] text-[var(--blue-600)] flex items-center justify-center text-xs font-semibold shrink-0" title={user?.name}>
+              {initials}
+            </span>
+            <span className={`flex-1 min-w-0 leading-tight ${collapsed ? "lg:hidden" : ""}`}>
+              <span className="block text-[13px] font-medium text-ink truncate">{user?.name || "…"}</span>
+              <span className="block text-[11.5px] text-ink-3 truncate">{roleLabel}</span>
+            </span>
+            <button onClick={onLogout} title="Sign out" aria-label="Sign out"
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-3 hover:text-behind hover:bg-[var(--behind-50)] transition-colors duration-150 shrink-0">
+              <ic.Logout />
+            </button>
+          </div>
         </div>
       </aside>
 
-      {/* Flyout popup panel */}
-      {popup && (
-        <>
-          {/* Invisible backdrop to detect outside clicks on mobile */}
-          <div
-            className="fixed inset-0 z-[45] lg:hidden"
-            onClick={() => setPopup(null)}
-          />
-
-          <div
-            ref={popupRef}
-            className="fixed z-50"
+      {/* Collapsed-rail flyout — scales out of the item it belongs to */}
+      <AnimatePresence>
+        {fly && (
+          <motion.div
+            key={fly.item.href}
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: EASE_OUT }}
             style={{
-              left: sidebarW + 8,
-              top: getPopupTop(),
-              width: 272,
-              /* entry animation */
-              animation: "slideInLeft 0.18s cubic-bezier(0.16,1,0.3,1) both",
+              left: "calc(var(--sidebar-w-collapsed) + 8px)",
+              top: Math.min(fly.top, (typeof window !== "undefined" ? window.innerHeight : 800) - (visibleChildren(fly.item).length * 32 + 56)),
+              transformOrigin: "left top",
             }}
+            className="fixed z-50 w-56 bg-white border border-line rounded-xl shadow-lg"
           >
-            {/* Arrow pointing left */}
-            <div
-              style={{
-                position: "absolute",
-                left: -6,
-                top: 18,
-                width: 0,
-                height: 0,
-                borderTop: "6px solid transparent",
-                borderBottom: "6px solid transparent",
-                borderRight: "6px solid #fff",
-                filter: "drop-shadow(-2px 0 2px rgba(0,0,0,0.06))",
-              }}
-            />
-
-            {/* Panel */}
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 14,
-                boxShadow:
-                  "0 8px 40px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.06)",
-                border: "1px solid #E2E8F0",
-                overflow: "hidden",
-              }}
-            >
-              {/* Header */}
-              <div
-                className="flex items-center gap-2.5 px-4 py-3"
-                style={{
-                  borderBottom: "1px solid #F1F5F9",
-                  background: "#FAFBFC",
-                }}
-              >
-                <div
-                  className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: "#EFF6FF", color: "#2563EB" }}
-                >
-                  <popup.item.Ic />
-                </div>
-                <p
-                  className="font-bold text-[13px]"
-                  style={{ color: "#0F172A" }}
-                >
-                  {popup.item.label}
-                </p>
-              </div>
-
-              {/* Items */}
-              <div>
-                {visibleChildren(popup.item).map((child, idx, arr) => {
-                  const active = isActive(child.href);
-                  return (
-                    <Link
-                      key={child.href}
-                      href={child.href}
-                      onClick={() => {
-                        setPopup(null);
-                        onMobileClose?.();
-                      }}
-                      className="flex items-center gap-3 px-4 py-2.5 transition-colors"
-                      style={{
-                        borderBottom:
-                          idx < arr.length - 1
-                            ? "1px solid #F8FAFC"
-                            : "none",
-                        background: active ? "#EFF6FF" : "transparent",
-                        textDecoration: "none",
-                        color: active ? "#2563EB" : "#374151",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!active) {
-                          e.currentTarget.style.background = "#F8FAFC";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!active) {
-                          e.currentTarget.style.background = "transparent";
-                        }
-                      }}
-                    >
-                      <span
-                        className="flex-shrink-0"
-                        style={{ color: active ? "#2563EB" : "#94A3B8" }}
-                      >
-                        <child.Ic />
-                      </span>
-                      <span className="flex-1 text-[13px] font-medium">
-                        {child.label}
-                      </span>
-                      {child.live && (
-                        <span
-                          className="flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                          style={{
-                            background: "rgba(22,163,74,0.10)",
-                            color: "#16A34A",
-                            border: "1px solid rgba(22,163,74,0.20)",
-                          }}
-                        >
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                          LIVE
-                        </span>
-                      )}
-                      {active && (
-                        <span
-                          className="flex-shrink-0"
-                          style={{ color: "#2563EB" }}
-                        >
-                          <ic.ChevronRight />
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </div>
+            {/* ref on an inner element: a ref directly on AnimatePresence's child trips a React warning */}
+            <div ref={flyRef} className="p-1.5">
+            <p className="px-2.5 pt-1.5 pb-1 text-xs font-medium text-ink-3">{fly.item.label}</p>
+            {visibleChildren(fly.item).map((c) => {
+              const a = isActive(c.href, c.exact);
+              return (
+                <Link key={c.href} href={c.href} onClick={() => setFly(null)} aria-current={a ? "page" : undefined}
+                  className={`flex items-center gap-2 h-8 px-2.5 rounded-md text-[13px] transition-colors duration-150 ${a ? "bg-[var(--blue-50)] text-[var(--blue)] font-medium" : "text-ink-2 hover:bg-gray-100 hover:text-ink"}`}>
+                  <span className="flex-1 truncate">{c.label}</span>
+                  {c.live && <span className="live-dot" aria-label="Live" />}
+                </Link>
+              );
+            })}
             </div>
-          </div>
-
-          <style>{`
-            @keyframes slideInLeft {
-              from { opacity: 0; transform: translateX(-10px) scale(0.97); }
-              to   { opacity: 1; transform: translateX(0)   scale(1);    }
-            }
-          `}</style>
-        </>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

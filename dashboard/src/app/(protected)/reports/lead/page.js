@@ -1,4 +1,5 @@
 "use client";
+import { STATUSES, STATUS_LABELS, STATUS_STYLES, statusStyle, statusLabel } from "../../../../lib/leadStatus";
 import { Suspense, useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import {
@@ -23,7 +24,8 @@ import { useReportData, invalidateReportCache } from "../../../../lib/useReportD
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
-import { DataTable, TLFilter, Truncate } from "../../../../components/report-shared";
+import { DataTable, TLFilter, Truncate, InfoDot, ChartTip, StatCard, Skeleton, EmptyState, InsightCard, Field, LeadStatusBadge } from "../../../../components/report-shared";
+import MultiSelect from '../../../../components/MultiSelect';
 import {
   ArrowUp,
   ArrowDown,
@@ -242,22 +244,8 @@ const GaugeIco = () => (
 ──────────────────────────────────────────────────────────── */
 // Talk-time bands (not_connected .. high_engagement) ride a cold -> hot ramp; mirrors
 // backend/lib/engagement.js.
-const STATUS_META = {
-  new: { label: "New", color: "#2563EB", bg: "#EFF6FF" },
-  not_connected: { label: "Not Connected", color: "#94A3B8", bg: "#F8FAFC" },
-  low: { label: "Low", color: "#64748B", bg: "#F1F5F9" },
-  contacted: { label: "Contacted", color: "#0891B2", bg: "#ECFEFF" },
-  engaged: { label: "Engaged", color: "#2563EB", bg: "#EFF6FF" },
-  interested: { label: "Interested", color: "#0D9488", bg: "#F0FDFA" },
-  warm: { label: "Warm / Strong Interest", color: "#D97706", bg: "#FFFBEB" },
-  hot: { label: "Hot", color: "#EA580C", bg: "#FFF7ED" },
-  high_engagement: { label: "High Engagement", color: "#DC2626", bg: "#FEF2F2" },
-  not_interested: { label: "Not Interested", color: "#94A3B8", bg: "#F8FAFC" },
-  follow_up: { label: "Follow-up", color: "#D97706", bg: "#FFFBEB" },
-  booking_done: { label: "Booking Done", color: "#7C3AED", bg: "#F5F3FF" },
-  converted: { label: "Converted", color: "#16A34A", bg: "#F0FDF4" },
-  lost: { label: "Lost", color: "#B91C1C", bg: "#FEF2F2" },
-};
+// Derived from lib/leadStatus.js so this report uses the same status colours as every other page.
+const STATUS_META = Object.fromEntries(STATUSES.map((k) => [k, { label: STATUS_LABELS[k], color: STATUS_STYLES[k].hex }]));
 const STATUS_KEYS = Object.keys(STATUS_META);
 
 const TABS = [
@@ -290,113 +278,7 @@ const TABS = [
    SMALL UI PRIMITIVES
 ──────────────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
-  const m = STATUS_META[status] || STATUS_META.new;
-  return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-      style={{ color: m.color, background: m.bg }}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full"
-        style={{ background: m.color }}
-      />
-      {m.label}
-    </span>
-  );
-}
-
-function InfoDot({ text }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      className="relative inline-flex ml-1 cursor-help"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold flex items-center justify-center">
-        i
-      </span>
-      <AnimatePresence>
-        {open && (
-          <motion.span
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute z-20 left-1/2 -translate-x-1/2 top-6 w-56 bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl"
-          >
-            {text}
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </span>
-  );
-}
-
-function ChartTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white rounded-lg px-3 py-2 text-xs shadow-lg border border-gray-200">
-      <p className="text-gray-500 font-medium mb-1">{label}</p>
-      {payload.map((p, i) => (
-        <p
-          key={i}
-          className="font-semibold flex items-center gap-1.5"
-          style={{ color: p.color || p.fill }}
-        >
-          <span
-            className="w-2 h-2 rounded-full"
-            style={{ background: p.color || p.fill }}
-          />
-          {p.name}: {p.value?.toLocaleString?.() ?? p.value}
-        </p>
-      ))}
-    </div>
-  );
-}
-
-function StatCard({ label, value, sub, color, icon }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="relative bg-white rounded-xl border border-gray-200 p-4 overflow-hidden group hover:border-gray-300 hover:shadow-sm transition-all"
-    >
-      <div
-        className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-[0.06] group-hover:opacity-[0.1] transition-opacity"
-        style={{ background: color }}
-      />
-      <div className="flex items-start justify-between">
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center"
-          style={{ background: `${color}14`, color }}
-        >
-          {icon}
-        </div>
-      </div>
-      <p className="text-2xl font-bold text-gray-900 mt-3 tabular-nums">
-        {value}
-      </p>
-      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-      {sub && <p className="text-[11px] text-gray-400 mt-1">{sub}</p>}
-    </motion.div>
-  );
-}
-
-function Skeleton({ className = "" }) {
-  return <div className={`bg-gray-100 rounded animate-pulse ${className}`} />;
-}
-
-function EmptyState({
-  title = "No records found",
-  hint = "Try widening your date range or clearing filters.",
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-      <InboxIco />
-      <p className="mt-3 text-sm font-medium text-gray-600">{title}</p>
-      <p className="text-xs text-gray-400 mt-1">{hint}</p>
-    </div>
-  );
+  return <LeadStatusBadge status={status} style={statusStyle(status)} label={statusLabel(status)} />;
 }
 
 /* Pin toggle used in Lead List "Contact Number" column — persisted in localStorage
@@ -404,7 +286,7 @@ function EmptyState({
 function PinnedNumber({ number, pinned, onToggle }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-amber-600 font-medium">{number}</span>
+      <span className="text-ink font-medium tabular-nums">{number}</span>
       <button
         type="button"
         onClick={onToggle}
@@ -462,28 +344,6 @@ function EditableCell({ initial, onSave, placeholder = "Add note" }) {
 }
 
 /* Highlight card used in Analysis tab */
-function InsightCard({ icon, title, rows }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h4 className="text-sm font-bold text-gray-900">{title}</h4>
-      </div>
-      <div className="space-y-4">
-        {rows.map((r, i) => (
-          <div key={i} className={i > 0 ? "pt-3 border-t border-gray-100" : ""}>
-            <p className="text-xs text-gray-400">{r.label}</p>
-            <p className="text-sm font-semibold text-gray-900 mt-0.5">
-              {r.value}
-            </p>
-            {r.sub && <p className="text-xs text-gray-500 mt-0.5">{r.sub}</p>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ────────────────────────────────────────────────────────────
    FILTER CHIP BAR
 ──────────────────────────────────────────────────────────── */
@@ -504,17 +364,17 @@ function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
       {entries.map(([k, v]) => (
         <span
           key={k}
-          className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs font-medium pl-2.5 pr-1.5 py-1 rounded-full"
+          className="inline-flex items-center gap-1.5 h-7 bg-white text-ink-2 text-xs pl-2.5 pr-1 rounded-md border border-line"
         >
           {FILTER_LABELS[k] || k}:{" "}
           {k === "employee"
             ? employeeName || v
             : k === "status"
-              ? STATUS_META[v]?.label || v
-              : v}
+              ? String(v).split(",").map((s) => STATUS_META[s]?.label || s).join(", ")
+              : String(v).split(",").join(", ")}
           <button
             onClick={() => onClear(k)}
-            className="hover:bg-blue-100 rounded-full p-0.5"
+            className="w-5 h-5 rounded flex items-center justify-center text-ink-3 hover:bg-gray-100 hover:text-ink transition-colors"
           >
             <XIco />
           </button>
@@ -522,21 +382,10 @@ function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
       ))}
       <button
         onClick={onClearAll}
-        className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
+        className="text-xs font-medium text-ink-3 hover:text-ink px-1 transition-colors"
       >
         Clear all
       </button>
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-gray-500 mb-1.5">
-        {label}
-      </label>
-      {children}
     </div>
   );
 }
@@ -655,7 +504,7 @@ function LeadReportsPageContent() {
       filename: `leads-${filters.fromDate || "all"}_${filters.toDate || "today"}.csv`,
     });
 
-  const employeeName = employees.find((e) => e._id === filters.employee)?.name;
+  const employeeName = filters.employee ? filters.employee.split(',').map((id) => employees.find((e) => e._id === id)?.name || id).join(', ') : undefined;
   const clearFilter = (key) => setFilters((f) => ({ ...f, [key]: "" }));
   const clearAllFilters = () =>
     setFilters({
@@ -734,13 +583,8 @@ function LeadReportsPageContent() {
         {/* ── Header ── */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-gray-400 flex items-center gap-1.5">
-              Reports <span className="text-gray-300">/</span>{" "}
-              <span className="text-gray-500">Lead Reports</span>
-            </p>
-            <h1 className="text-xl font-bold text-gray-900 mt-0.5">
-              {report?.dateLabel || "Lead Reports"}
-            </h1>
+            <h1 className="page-title">Leads report</h1>
+            <p className="page-subtitle">{report?.dateLabel ? `Lead status and movement · ${report.dateLabel}` : "Lead status and movement, by period"}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -751,7 +595,7 @@ function LeadReportsPageContent() {
             </button>
             <button
               onClick={handleExport}
-              className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm"
+              className="flex items-center gap-2 px-3.5 py-2 bg-[var(--blue)] text-white rounded-lg hover:bg-[var(--blue-600)] transition-colors text-sm font-medium shadow-sm"
             >
               <DownloadIco /> Export
             </button>
@@ -768,7 +612,7 @@ function LeadReportsPageContent() {
               <span className="text-sm font-semibold text-gray-800">
                 Filters
               </span>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-500">
                 {filters.fromDate || "Any date"} – {filters.toDate || "today"}
               </span>
             </div>
@@ -789,7 +633,7 @@ function LeadReportsPageContent() {
                       <div className="relative">
                         <input
                           type="date"
-                          className="input pl-9"
+                          className="form-input pl-9"
                           value={filters.fromDate}
                           onChange={(e) =>
                             setFilters({ ...filters, fromDate: e.target.value })
@@ -801,7 +645,7 @@ function LeadReportsPageContent() {
                       <div className="relative">
                         <input
                           type="date"
-                          className="input pl-9"
+                          className="form-input pl-9"
                           value={filters.toDate}
                           onChange={(e) =>
                             setFilters({ ...filters, toDate: e.target.value })
@@ -810,42 +654,19 @@ function LeadReportsPageContent() {
                       </div>
                     </Field>
                     <Field label="Employee">
-                      <select
-                        className="input"
-                        value={filters.employee}
-                        onChange={(e) =>
-                          setFilters({ ...filters, employee: e.target.value })
-                        }
-                      >
-                        <option value="">All employees</option>
-                        {employees.map((e) => (
-                          <option key={e._id} value={e._id}>
-                            {e.name}
-                          </option>
-                        ))}
-                      </select>
+                      <MultiSelect value={filters.employee} onChange={(v) => setFilters({ ...filters, employee: v })}
+                        placeholder="All employees" noun="employees" ariaLabel="Employee" options={employees.map((e) => [e._id, e.name])} />
                     </Field>
                     <Field label="Status">
-                      <select
-                        className="input"
-                        value={filters.status}
-                        onChange={(e) =>
-                          setFilters({ ...filters, status: e.target.value })
-                        }
-                      >
-                        <option value="">All statuses</option>
-                        {STATUS_KEYS.map((k) => (
-                          <option key={k} value={k}>
-                            {STATUS_META[k].label}
-                          </option>
-                        ))}
-                      </select>
+                      <MultiSelect value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })}
+                        placeholder="All statuses" noun="statuses" ariaLabel="Status"
+                        options={STATUS_KEYS.map((k) => [k, STATUS_META[k].label])} />
                     </Field>
                     <Field label="Source">
                       <input
                         type="text"
                         placeholder="e.g. Facebook, Walk-in"
-                        className="input"
+                        className="form-input"
                         value={filters.source}
                         onChange={(e) =>
                           setFilters({ ...filters, source: e.target.value })
@@ -853,18 +674,9 @@ function LeadReportsPageContent() {
                       />
                     </Field>
                     <Field label="Lead Time">
-                      <select
-                        className="input"
-                        value={filters.leadTime}
-                        onChange={(e) =>
-                          setFilters({ ...filters, leadTime: e.target.value })
-                        }
-                      >
-                        <option value="">Any time</option>
-                        <option value="morning">Morning (6AM–12PM)</option>
-                        <option value="afternoon">Afternoon (12PM–6PM)</option>
-                        <option value="evening">Evening (6PM–12AM)</option>
-                      </select>
+                      <MultiSelect value={filters.leadTime} onChange={(v) => setFilters({ ...filters, leadTime: v })}
+                        placeholder="Any time" noun="windows" ariaLabel="Lead time"
+                        options={[['morning', 'Morning (6AM–12PM)'], ['afternoon', 'Afternoon (12PM–6PM)'], ['evening', 'Evening (6PM–12AM)']]} />
                     </Field>
                     <Field label="Team Lead">
                       <TLFilter
@@ -912,10 +724,10 @@ function LeadReportsPageContent() {
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`relative px-2 py-3.5 text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                  activeTab === tab.key
-                    ? "text-blue-600"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
+ activeTab === tab.key
+ ? "text-blue-600"
+ : "text-gray-600 hover:text-gray-900"
+ }`}
               >
                 <span
                   className={`flex items-center justify-center transition-transform ${activeTab === tab.key ? "scale-110" : ""}`}
@@ -947,194 +759,77 @@ function LeadReportsPageContent() {
           >
             {/* ═══════════════ SUMMARY ═══════════════ */}
             {activeTab === "summary" && (
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                <div className="lg:col-span-2 grid grid-cols-2 gap-3 auto-rows-min">
-                  <StatCard
-                    label="Total Leads"
-                    value={grandTotal.toLocaleString()}
-                    color="#2563EB"
-                    icon={<UsersIco />}
-                  />
-                  <StatCard
-                    label="Converted Leads"
-                    value={(
-                      report?.sidebarStats?.converted ?? 0
-                    ).toLocaleString()}
-                    color="#16A34A"
-                    icon={<CheckIco />}
-                  />
-                  <StatCard
-                    label="Unique Sources"
-                    value={(
-                      report?.sidebarStats?.uniqueSources ?? 0
-                    ).toLocaleString()}
-                    color="#7C3AED"
-                    icon={<TagIco />}
-                  />
-                  <StatCard
-                    label="Follow-ups Due"
-                    value={(
-                      report?.sidebarStats?.followUpsDue ?? 0
-                    ).toLocaleString()}
-                    color="#D97706"
-                    icon={<ClockIco />}
-                  />
-                </div>
-
-                <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-1">
-                    Leads
-                  </h3>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Overall split by status
-                  </p>
-                  {loading ? (
-                    <Skeleton className="h-56 w-full" />
-                  ) : (
-                    <div className="relative">
-                      <ResponsiveContainer width="100%" height={200}>
-                        <PieChart>
-                          <Pie
-                            data={pieData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={54}
-                            outerRadius={80}
-                            paddingAngle={4}
-                            dataKey="value"
-                          >
-                            {pieData.map((e, i) => (
-                              <Cell key={i} fill={e.color} stroke="none" />
-                            ))}
-                          </Pie>
-                          <Tooltip content={<ChartTip />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div
-                        className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
-                        style={{ top: -8 }}
-                      >
-                        <p className="text-2xl font-bold text-gray-900">
-                          {grandTotal.toLocaleString()}
-                        </p>
-                        <p className="text-xs text-gray-400">Leads</p>
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                <section className="lg:col-span-5 panel overflow-hidden" aria-label="Summary">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 [&>*]:border-line-2 [&>*]:border-b xl:[&>*]:border-b-0 xl:divide-x divide-line-2">
+                    {[
+                      { label: "Total leads", value: grandTotal },
+                      { label: "Converted", value: report?.sidebarStats?.converted ?? 0, sub: grandTotal ? `${(((report?.sidebarStats?.converted ?? 0) / grandTotal) * 100).toFixed(1)}% of leads` : null, tone: (report?.sidebarStats?.converted ?? 0) > 0 ? "met" : null },
+                      { label: "Never called", value: report?.sidebarStats?.uncontacted ?? 0, sub: "Zero call attempts", tone: (report?.sidebarStats?.uncontacted ?? 0) > 0 ? "behind" : null },
+                      { label: "Not connected", value: report?.sidebarStats?.notConnected ?? 0, sub: "Called, never reached" },
+                      { label: "Follow-ups due", value: report?.sidebarStats?.followUpsDue ?? 0, sub: "Waiting on a call back" },
+                      { label: "Sources", value: report?.sidebarStats?.uniqueSources ?? 0, sub: "Distinct lead sources" },
+                    ].map((s) => (
+                      <div key={s.label} className="px-5 py-4 min-w-0">
+                        <p className="stat-label truncate">{s.label}</p>
+                        {loading ? <Skeleton className="h-7 w-20 mt-2" /> : (
+                          <p className={`stat-number mt-1 ${s.tone === "met" ? "text-met" : s.tone === "behind" ? "text-behind" : ""}`}>{Number(s.value).toLocaleString("en-IN")}</p>
+                        )}
+                        {s.sub && <p className="text-xs text-ink-3 mt-1 truncate">{s.sub}</p>}
                       </div>
-                      <div className="flex justify-center gap-4 mt-2 flex-wrap">
-                        {pieData.map((d, i) => (
-                          <span
-                            key={i}
-                            className="flex items-center gap-1.5 text-xs text-gray-500"
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full"
-                              style={{ background: d.color }}
-                            />{" "}
-                            {d.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    ))}
+                  </div>
+                </section>
 
-                <div className="lg:col-span-5 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-7">
-                    Lead Status Breakdown
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2  gap-20">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-xs uppercase">
-                          <th className="text-left pb-2 px-4">Status</th>
-                          <th className="text-right pb-2 px-4">Leads</th>
-                          <th className="text-right pb-2 px-4">Avg Attempts</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-black ">
-                        {STATUS_KEYS.map((k) => (
-                          <tr key={k}>
-                            <td className="py-2.5 px-4">
-                              <StatusBadge status={k} />
-                            </td>
-                            <td className="py-2.5 px-4 text-right font-semibold text-gray-900">
-                              {(
-                                report?.summary?.[k]?.leads ?? 0
-                              ).toLocaleString()}
-                            </td>
-                            <td className="py-2.5 px-4 text-right text-gray-500">
-                              {report?.summary?.[k]?.avgAttempts ?? "—"}
-                            </td>
-                          </tr>
-                        ))}
-                        <tr className="border-t-2 border-gray-100">
-                          <td className="py-2.5 px-4 font-bold text-gray-900">
-                            Total
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-gray-900">
-                            {grandTotal.toLocaleString()}
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-gray-900">
-                            {report?.summary?.total?.avgAttempts ?? 0}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    <div className="grid grid-cols-2 md:grid-cols-2 gap-3 border-t border-gray-100">
-                      {[
-                        {
-                          label: "Uncontacted",
-                          value: report?.sidebarStats?.uncontacted ?? 0,
-                          color: "#DC2626",
-                        },
-                        {
-                          label: "Not Connected",
-                          value: report?.sidebarStats?.notConnected ?? 0,
-                          color: "#EA580C",
-                        },
-                        {
-                          label: "Contacted",
-                          value: report?.sidebarStats?.contacted ?? 0,
-                          color: "#16A34A",
-                        },
-                        {
-                          label: "Converted",
-                          value: report?.sidebarStats?.converted ?? 0,
-                          color: "#0891B2",
-                        },
-                        {
-                          label: "Unique Sources",
-                          value: report?.sidebarStats?.uniqueSources ?? 0,
-                          color: "#7C3AED",
-                        },
-                        {
-                          label: "Follow-ups Due",
-                          value: report?.sidebarStats?.followUpsDue ?? 0,
-                          color: "#D97706",
-                        },
-                      ].map((s, i) => (
-                        <div key={i} className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-400">{s.label}</p>
-                          <p
-                            className="text-sm font-bold mt-0.5"
-                            style={{ color: s.color }}
-                          >
-                            {s.value.toLocaleString?.() ?? s.value}
-                          </p>
-                        </div>
-                      ))}
+                <section className="lg:col-span-5 panel" aria-label="By status">
+                  <div className="panel-head">
+                    <div>
+                      <h3 className="panel-title">By status</h3>
+                      <p className="panel-sub">Talk-time stages first, then outcomes set by a person</p>
                     </div>
                   </div>
-                </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th className="w-[40%] hidden md:table-cell">Share</th>
+                        <th className="!text-right">Leads</th>
+                        <th className="!text-right">Avg attempts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {STATUS_KEYS.map((k) => {
+                        const n = report?.summary?.[k]?.leads ?? 0;
+                        const pct = grandTotal ? (n / grandTotal) * 100 : 0;
+                        return (
+                          <tr key={k}>
+                            <td><StatusBadge status={k} /></td>
+                            <td className="hidden md:table-cell">
+                              <div className="flex items-center gap-3">
+                                <span className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                                  <span className="block h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: n ? `${Math.max(1, pct)}%` : 0, background: STATUS_META[k].color }} />
+                                </span>
+                                <span className="w-12 text-right text-xs text-ink-3 tabular-nums">{pct < 1 && n ? "<1" : Math.round(pct)}%</span>
+                              </div>
+                            </td>
+                            <td className="text-right font-medium text-ink tabular-nums">{loading ? <Skeleton className="h-3.5 w-12 ml-auto" /> : n.toLocaleString("en-IN")}</td>
+                            <td className="text-right tabular-nums">{report?.summary?.[k]?.avgAttempts ?? "—"}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className="bg-gray-50">
+                        <td className="font-semibold text-ink">Total</td>
+                        <td className="hidden md:table-cell" />
+                        <td className="text-right font-semibold text-ink tabular-nums">{grandTotal.toLocaleString("en-IN")}</td>
+                        <td className="text-right font-semibold text-ink tabular-nums">{report?.summary?.total?.avgAttempts ?? 0}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
 
-                <div className="lg:col-span-5 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-1">
-                    Employee Summary
-                  </h3>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Per-employee lead performance
-                  </p>
+                <div className="lg:col-span-5 panel p-4">
+                  <h3 className="panel-title px-1">By employee</h3>
+                  <p className="panel-sub px-1 mb-3">Per-employee lead performance</p>
                   <DataTable
                     loading={loading}
                     footer={employeeSummaryFooter}
@@ -1221,7 +916,7 @@ function LeadReportsPageContent() {
                       <h3 className="text-sm font-bold text-gray-900">
                         Leads vs. Contacted — Hourly
                       </h3>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-gray-500">
                         Bars = leads created · Line = leads contacted (attempts
                         &gt; 0)
                       </p>
@@ -1253,30 +948,30 @@ function LeadReportsPageContent() {
                           >
                             <stop
                               offset="0%"
-                              stopColor="#2563EB"
+                              stopColor="#7C3AED"
                               stopOpacity={0.9}
                             />
                             <stop
                               offset="100%"
-                              stopColor="#2563EB"
+                              stopColor="#7C3AED"
                               stopOpacity={0.25}
                             />
                           </linearGradient>
                         </defs>
                         <CartesianGrid
                           strokeDasharray="3 3"
-                          stroke="#F1F5F9"
+                          stroke="#F4F3F8"
                           vertical={false}
                         />
                         <XAxis
                           dataKey="hour"
-                          tick={{ fill: "#94A3B8", fontSize: 10 }}
+                          tick={{ fill: "#A19DB2", fontSize: 10 }}
                           tickLine={false}
                           axisLine={false}
                           interval={1}
                         />
                         <YAxis
-                          tick={{ fill: "#94A3B8", fontSize: 10 }}
+                          tick={{ fill: "#A19DB2", fontSize: 10 }}
                           tickLine={false}
                           axisLine={false}
                           width={32}
@@ -1295,9 +990,9 @@ function LeadReportsPageContent() {
                             type="monotone"
                             dataKey="contacted"
                             name="Contacted"
-                            stroke="#16A34A"
+                            stroke="#079455"
                             strokeWidth={2}
-                            dot={{ r: 3, fill: "#16A34A" }}
+                            dot={{ r: 3, fill: "#079455" }}
                           />
                         )}
                       </ComposedChart>
@@ -1403,7 +1098,7 @@ function LeadReportsPageContent() {
                     ))}
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Daily lead volume within the selected date range
                 </p>
 
@@ -1454,17 +1149,17 @@ function LeadReportsPageContent() {
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
-                            stroke="#F1F5F9"
+                            stroke="#F4F3F8"
                             vertical={false}
                           />
                           <XAxis
                             dataKey="day"
-                            tick={{ fill: "#94A3B8", fontSize: 11 }}
+                            tick={{ fill: "#A19DB2", fontSize: 11 }}
                             tickLine={false}
                             axisLine={false}
                           />
                           <YAxis
-                            tick={{ fill: "#94A3B8", fontSize: 10 }}
+                            tick={{ fill: "#A19DB2", fontSize: 10 }}
                             tickLine={false}
                             axisLine={false}
                             width={40}
@@ -1473,13 +1168,13 @@ function LeadReportsPageContent() {
                           <Bar
                             dataKey="total"
                             name="Total Leads"
-                            fill="#2563EB"
+                            fill="#7C3AED"
                             radius={[4, 4, 0, 0]}
                           />
                           <Bar
                             dataKey="converted"
                             name="Converted"
-                            fill="#16A34A"
+                            fill="#079455"
                             radius={[4, 4, 0, 0]}
                           />
                         </BarChart>
@@ -1493,17 +1188,17 @@ function LeadReportsPageContent() {
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
-                            stroke="#F1F5F9"
+                            stroke="#F4F3F8"
                             vertical={false}
                           />
                           <XAxis
                             dataKey="day"
-                            tick={{ fill: "#94A3B8", fontSize: 11 }}
+                            tick={{ fill: "#A19DB2", fontSize: 11 }}
                             tickLine={false}
                             axisLine={false}
                           />
                           <YAxis
-                            tick={{ fill: "#94A3B8", fontSize: 10 }}
+                            tick={{ fill: "#A19DB2", fontSize: 10 }}
                             tickLine={false}
                             axisLine={false}
                             width={40}
@@ -1513,7 +1208,7 @@ function LeadReportsPageContent() {
                             type="monotone"
                             dataKey="total"
                             name="Total Leads"
-                            stroke="#2563EB"
+                            stroke="#7C3AED"
                             strokeWidth={2}
                             dot={{ r: 3 }}
                           />
@@ -1521,7 +1216,7 @@ function LeadReportsPageContent() {
                             type="monotone"
                             dataKey="converted"
                             name="Converted"
-                            stroke="#16A34A"
+                            stroke="#079455"
                             strokeWidth={2}
                             dot={{ r: 3 }}
                           />
@@ -1539,7 +1234,7 @@ function LeadReportsPageContent() {
                 <h3 className="text-sm font-bold text-gray-900 mb-1">
                   Hourly Time Slots
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Share of total lead volume by hour created (IST)
                 </p>
                 <DataTable
@@ -1597,13 +1292,13 @@ function LeadReportsPageContent() {
                   Uncontacted Leads{" "}
                   <InfoDot text="Leads with zero call attempts logged so far." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Leads that have never been called
                 </p>
                 <DataTable
                   loading={loading}
                   showRowNumber
-                  emptyTitle="Everyone's been contacted 🎉"
+                  emptyTitle="Everyone's been contacted"
                   capNotice={
                     report?.total > uncontactedRows.length
                       ? `Showing ${uncontactedRows.length.toLocaleString()} of ${report.total.toLocaleString()} — narrow the date range or filters to see the rest.`
@@ -1619,7 +1314,7 @@ function LeadReportsPageContent() {
                           <p className="font-medium text-gray-900 truncate">
                             {r.name}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {r.phone}
                           </p>
                         </div>
@@ -1659,7 +1354,7 @@ function LeadReportsPageContent() {
                   Not Connected Leads{" "}
                   <InfoDot text="Leads currently marked as not connected after being called." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Attempted but never connected
                 </p>
                 <DataTable
@@ -1681,7 +1376,7 @@ function LeadReportsPageContent() {
                           <p className="font-medium text-gray-900 truncate">
                             {r.name}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {r.phone}
                           </p>
                         </div>
@@ -1722,7 +1417,7 @@ function LeadReportsPageContent() {
                   Lead Sources{" "}
                   <InfoDot text="Every lead source, grouped, with conversion performance." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Where leads are coming from, and how well each source converts
                 </p>
                 <DataTable
@@ -1802,7 +1497,7 @@ function LeadReportsPageContent() {
                       render: (r) => (
                         <div>
                           <p><Truncate text={r.employeeName} /></p>
-                          {r.tlName && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.tlName} max={14} /></p>}
+                          {r.tlName && <p className="text-xs text-gray-500">TL: <Truncate text={r.tlName} max={14} /></p>}
                         </div>
                       ),
                     },
@@ -1875,23 +1570,6 @@ function LeadReportsPageContent() {
           </motion.div>
         </AnimatePresence>
       </div>
-
-      <style jsx global>{`
-        .input {
-          width: 100%;
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.5rem;
-          border: 1px solid #e5e7eb;
-          font-size: 0.8125rem;
-          outline: none;
-          background: white;
-          transition: border-color 0.15s;
-        }
-        .input:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-      `}</style>
     </div>
   );
 }

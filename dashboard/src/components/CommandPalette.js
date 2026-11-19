@@ -78,9 +78,9 @@ export default function CommandPalette({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-[rgba(26,23,38,0.45)]" />
       <div
-        className="relative bg-white border border-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+        className="relative bg-white border border-border rounded-xl shadow-2xl w-full max-w-lg overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Input */}
@@ -94,7 +94,7 @@ export default function CommandPalette({ open, onClose }) {
             placeholder="Search pages and actions…"
             className="flex-1 text-sm text-textPrimary placeholder:text-textMuted outline-none bg-transparent"
           />
-          <kbd className="text-[10px] text-textMuted border border-border rounded px-1.5 py-0.5 font-mono flex-shrink-0">
+          <kbd className="text-xs text-textMuted border border-border rounded px-1.5 py-0.5 font-mono flex-shrink-0">
             Esc
           </kbd>
         </div>
@@ -118,7 +118,7 @@ export default function CommandPalette({ open, onClose }) {
           {/* Grouped list (no query) */}
           {!query.trim() && groups && Object.entries(groups).map(([section, items]) => (
             <div key={section}>
-              <p className="px-4 pt-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-textMuted">{section}</p>
+              <p className="px-4 pt-3 pb-1 text-xs font-bold text-textMuted">{section}</p>
               {items.map((cmd, i) => {
                 const globalIdx = COMMANDS.indexOf(cmd);
                 return (
@@ -135,7 +135,7 @@ export default function CommandPalette({ open, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border px-4 py-2.5 flex items-center gap-5 text-[11px] text-textMuted">
+        <div className="border-t border-border px-4 py-2.5 flex items-center gap-5 text-xs text-textMuted">
           <span><kbd className="font-mono border border-border rounded px-1 mr-1">↑↓</kbd>navigate</span>
           <span><kbd className="font-mono border border-border rounded px-1 mr-1">↵</kbd>open</span>
           <span><kbd className="font-mono border border-border rounded px-1 mr-1">Esc</kbd>close</span>

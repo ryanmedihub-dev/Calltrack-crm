@@ -9,6 +9,7 @@ import {
   CalendarIco, DownloadIco, ChevronIco,
 } from '../../../../components/report-shared';
 import EngagementBadge from '../../../../components/EngagementBadge';
+import MultiSelect from '../../../../components/MultiSelect';
 
 const ENGAGEMENT_OPTIONS = [
   ['', 'All Bands'],
@@ -42,10 +43,10 @@ function fmtTime(ts) {
 }
 
 const TYPE_COLORS = {
-  incoming: { bg: 'rgba(22,163,74,0.08)', color: '#16A34A' },
-  outgoing: { bg: 'rgba(217,119,6,0.08)', color: '#D97706' },
-  missed: { bg: 'rgba(220,38,38,0.08)', color: '#DC2626' },
-  rejected: { bg: 'rgba(124,58,237,0.08)', color: '#7C3AED' },
+  incoming: { bg: 'rgba(7,148,85,0.08)', color: '#079455' },
+  outgoing: { bg: 'rgba(181,71,8,0.08)', color: '#B54708' },
+  missed: { bg: 'rgba(217,45,32,0.08)', color: '#D92D20' },
+  rejected: { bg: 'rgba(71,84,103,0.08)', color: '#524F63' },
 };
 
 export default function LogsReportPage() {
@@ -99,10 +100,10 @@ export default function LogsReportPage() {
 
   const today_d = stats?.today;
   const summaryStats = [
-    { label: 'Total in Range', value: total, color: '#2563EB' },
-    { label: 'Today Total', value: today_d?.totalCalls ?? '—', color: '#0F172A' },
-    { label: 'Today Connected', value: today_d?.connectedCalls ?? '—', color: '#16A34A' },
-    { label: 'Today Missed', value: today_d?.missed ?? '—', color: '#DC2626' },
+    { label: 'Total in Range', value: total, color: '#7C3AED' },
+    { label: 'Today Total', value: today_d?.totalCalls ?? '—', color: '#1A1726' },
+    { label: 'Today Connected', value: today_d?.connectedCalls ?? '—', color: '#079455' },
+    { label: 'Today Missed', value: today_d?.missed ?? '—', color: '#D92D20' },
   ];
 
   const rows = calls.map((log, idx) => ({ ...log, id: log._id, rowNum: (page - 1) * 25 + idx + 1 }));
@@ -114,17 +115,14 @@ export default function LogsReportPage() {
         {/* ── Header ── */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-gray-400 flex items-center gap-1.5">
-              Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Logs Report</span>
-            </p>
-            <h1 className="text-xl font-bold text-gray-900 mt-0.5">Logs Report</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Detailed call log report with full metrics · IST timezone</p>
+            <h1 className="page-title">Logs Report</h1>
+            <p className="text-xs text-gray-500 mt-0.5">Detailed call log report with full metrics · IST timezone</p>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => window.print()} className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
               <PrintIco /> Print
             </button>
-            <button onClick={handleExport} className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm">
+            <button onClick={handleExport} className="flex items-center gap-2 px-3.5 py-2 bg-[var(--blue)] text-white rounded-lg hover:bg-[var(--blue-600)] transition-colors text-sm font-medium shadow-sm">
               <DownloadIco /> Export CSV
             </button>
           </div>
@@ -142,7 +140,7 @@ export default function LogsReportPage() {
           <button onClick={() => setFiltersOpen((o) => !o)} className="w-full flex items-center justify-between px-5 py-3.5">
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-gray-800">Filters</span>
-              <span className="text-xs text-gray-400">{startDate} – {endDate}</span>
+              <span className="text-xs text-gray-500">{startDate} – {endDate}</span>
             </div>
             <ChevronIco open={filtersOpen} />
           </button>
@@ -152,33 +150,25 @@ export default function LogsReportPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <Field label="From Date">
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><CalendarIco s={14} /></span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"><CalendarIco s={14} /></span>
                     <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
                   </div>
                 </Field>
                 <Field label="To Date">
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><CalendarIco s={14} /></span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"><CalendarIco s={14} /></span>
                     <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
                       className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
                   </div>
                 </Field>
                 <Field label="Call Type">
-                  <select value={callType} onChange={(e) => setCallType(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-white">
-                    <option value="">All Types</option>
-                    <option value="incoming">Incoming</option>
-                    <option value="outgoing">Outgoing</option>
-                    <option value="missed">Missed</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
+                  <MultiSelect value={callType} onChange={setCallType} placeholder="All types" noun="types" ariaLabel="Call type"
+                    options={[['incoming', 'Incoming'], ['outgoing', 'Outgoing'], ['missed', 'Missed'], ['rejected', 'Rejected']]} />
                 </Field>
                 <Field label="Engagement">
-                  <select value={engagement} onChange={(e) => setEngagement(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-white">
-                    {ENGAGEMENT_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                  </select>
+                  <MultiSelect value={engagement} onChange={setEngagement} placeholder="All bands" noun="bands" ariaLabel="Engagement"
+                    options={ENGAGEMENT_OPTIONS.filter(([v]) => v)} />
                 </Field>
               </div>
 
@@ -208,7 +198,7 @@ export default function LogsReportPage() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Call Records</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{total.toLocaleString()} records · {startDate} to {endDate}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{total.toLocaleString()} records · {startDate} to {endDate}</p>
             </div>
           </div>
 
@@ -224,7 +214,7 @@ export default function LogsReportPage() {
                 key: 'employeeName', label: 'Agent',
                 render: (r) => (
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold shrink-0 bg-blue-600">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0 bg-blue-600">
                       {(r.employeeName || '?')[0].toUpperCase()}
                     </div>
                     <span className="text-xs font-medium text-gray-900">{r.employeeName}</span>
@@ -232,12 +222,12 @@ export default function LogsReportPage() {
                 ),
               },
               { key: 'contactName', label: 'Contact', render: (r) => (r.contactName && r.contactName !== 'Unknown' ? r.contactName : '—') },
-              { key: 'contactNumber', label: 'Number', render: (r) => <span className="font-mono text-gray-600">{r.contactNumber}</span> },
+              { key: 'contactNumber', label: 'Number', render: (r) => <span className="tabular-nums text-gray-600">{r.contactNumber}</span> },
               {
                 key: 'callType', label: 'Type', searchable: false,
                 render: (r) => (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium capitalize"
-                    style={{ background: TYPE_COLORS[r.callType]?.bg || '#F1F5F9', color: TYPE_COLORS[r.callType]?.color || '#64748B' }}>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium capitalize"
+                    style={{ background: TYPE_COLORS[r.callType]?.bg || '#F4F3F8', color: TYPE_COLORS[r.callType]?.color || '#6B6880' }}>
                     {r.callType}
                   </span>
                 ),

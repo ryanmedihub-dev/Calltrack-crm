@@ -5,7 +5,8 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Mongo condition matching tlName case-insensitively and ignoring surrounding spaces,
 // so "Rahul", " rahul" and "RAHUL" are the same team everywhere. Accepts one name or a list.
 function tlNameMatch(names) {
-  const list = (Array.isArray(names) ? names : [names]).map((n) => String(n ?? '').trim()).filter(Boolean);
+  // A string may carry several names from the multi-select ("Rahul,Priya").
+  const list = (Array.isArray(names) ? names : String(names ?? '').split(',')).map((n) => String(n ?? '').trim()).filter(Boolean);
   return { $in: list.map((n) => new RegExp(`^\\s*${escapeRe(n)}\\s*$`, 'i')) };
 }
 

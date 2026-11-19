@@ -1,4 +1,5 @@
 const express = require('express');
+const { list, anyOf, oidsOf } = require('../lib/multi');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
@@ -186,11 +187,12 @@ router.get('/', protect, isManager, async (req, res) => {
   try {
     const {
       status, assignedTo, search, tags, tlName, source, attemptsMin, attemptsMax, engagement,
-      page = 1, limit = 20, sortBy = 'createdAt', sortDir = '-1', range, startDate, endDate,
+      page = 1, limit = 20, range, startDate, endDate, followUp, dueSoon,
     } = req.query;
+    let { sortBy = 'createdAt', sortDir = '-1' } = req.query;
     const filter = scoped(req, {}, 'assignedTo');
     if (status) filter.status = { $in: status.split(',') };
-    if (assignedTo) filter.assignedTo = assignedTo;
+    if (assignedTo) filter.assignedTo = anyOf(assignedTo);
     else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (tags) filter.tags = { $in: tags.split(',') };
     if (engagement) filter.engagement = { $in: engagement.split(',') };
@@ -206,6 +208,15 @@ router.get('/', protect, isManager, async (req, res) => {
         { phone: { $regex: search, $options: 'i' } },
         { email: { $regex: search, $options: 'i' } },
       ];
+    }
+    // Follow-ups page: only leads that actually have a follow-up date. The page always sent these
+    // params but they were ignored, so it listed every lead. Soonest due first.
+    // Assigned-leads page: only leads that have an owner (also previously ignored).
+    if (req.query.assigned === 'true' && !filter.assignedTo) filter.assignedTo = { $ne: null };
+    if (followUp === 'true') {
+      filter.followUpDate = { $ne: null };
+      if (dueSoon === 'true') filter.followUpDate.$lte = new Date(Date.now() + 2 * 86400000);
+      if (!req.query.sortBy) { sortBy = 'followUpDate'; sortDir = '1'; }
     }
     let latestTs = null;
     if (range && range !== 'all') {
@@ -282,10 +293,9 @@ router.get('/logs', protect, isManager, async (req, res) => {
     }
 
     const changelogMatch = {};
-    if (action) changelogMatch['changelog.action'] = action;
-    if (employee && mongoose.Types.ObjectId.isValid(employee)) {
-      changelogMatch['changelog.changedBy'] = new mongoose.Types.ObjectId(employee);
-    }
+    if (action) changelogMatch['changelog.action'] = anyOf(action);
+    const byIds = employee ? oidsOf(employee) : null;
+    if (byIds) changelogMatch['changelog.changedBy'] = byIds;
 
     const basePipeline = [
       ...(Object.keys(leadMatch).length ? [{ $match: leadMatch }] : []),
@@ -616,8 +626,8 @@ router.get('/export', protect, isManager, async (req, res) => {
   try {
     const { status, assignedTo, startDate, endDate, search, tags, tlName } = req.query;
     const filter = scoped(req, {}, 'assignedTo');
-    if (status)     filter.status     = status;
-    if (assignedTo) filter.assignedTo = assignedTo;
+    if (status)     filter.status     = anyOf(status);
+    if (assignedTo) filter.assignedTo = anyOf(assignedTo);
     else if (tlName) filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     if (tags)       filter.tags = { $in: tags.split(',') };
     if (search) {

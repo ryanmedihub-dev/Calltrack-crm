@@ -141,104 +141,90 @@ export default function DateRangeFilter({ value, onChange, className = '', inclu
     setOpen(false);
   };
 
-  const quickPick = (label, start, end) => (
-    <button
-      key={label}
-      onClick={() => { setCustomStart(start); setCustomEnd(end); }}
-      className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-600 transition-colors duration-150"
-    >
-      {label}
-    </button>
-  );
+  const quickPick = (label, start, end) => {
+    const on = customStart === start && customEnd === end;
+    return (
+      <button
+        key={label}
+        type="button"
+        onClick={() => { setCustomStart(start); setCustomEnd(end); }}
+        className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors duration-150 ${on ? 'bg-[var(--blue-50)] text-[var(--blue)]' : 'bg-white border border-line text-ink-2 hover:border-gray-300'}`}
+      >
+        {label}
+      </button>
+    );
+  };
 
   const today = todayIST();
+  const isActive = (k) => value?.range === k;
+  const itemCls = (on) =>
+    `w-full flex items-center justify-between h-9 px-3 rounded-lg text-[13px] transition-colors duration-150 ${on ? 'bg-[var(--blue-50)] text-[var(--blue)] font-medium' : 'text-ink-2 hover:bg-gray-100 hover:text-ink'}`;
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
     <div className={`relative ${className}`} ref={wrapRef}>
       <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-4 py-2 bg-gray-50 hover:bg-gray-100 rounded-xl text-sm font-medium text-gray-700 transition-colors duration-200"
+        className="btn-secondary gap-2 pl-3 pr-2.5"
       >
-        <CalendarIco />
-        <span>{formatRangeLabel(value)}</span>
-        <ChevronIco />
+        <span className="text-ink-3"><CalendarIco /></span>
+        <span className="text-ink">{formatRangeLabel(value)}</span>
+        <span className={`text-ink-3 transition-transform duration-200 ease-out ${open ? 'rotate-180' : ''}`}><ChevronIco /></span>
       </button>
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="absolute right-0 top-full mt-2 z-30 bg-white rounded-xl shadow-2xl border border-gray-100 min-w-[260px] overflow-hidden"
+            role="menu"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
+            style={{ transformOrigin: 'top right' }}
+            className="absolute right-0 top-full mt-1.5 z-40 bg-white rounded-xl shadow-lg border border-line w-[280px] p-1.5"
           >
             {options.map((o) => (
-              <button
-                key={o.key}
-                onClick={() => select(o.key)}
-                className={`w-full text-left px-4 py-3 text-sm transition-colors duration-150 ${
-                  value?.range === o.key
-                    ? 'bg-blue-50 text-blue-600 font-semibold'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
+              <button key={o.key} role="menuitemradio" aria-checked={isActive(o.key)} onClick={() => select(o.key)} className={itemCls(isActive(o.key))}>
                 {o.label}
+                {isActive(o.key) && (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                )}
               </button>
             ))}
-            <button
-              onClick={openCustom}
-              className={`w-full text-left px-4 py-3 text-sm border-t border-gray-100 transition-colors duration-150 ${
-                value?.range === 'custom'
-                  ? 'bg-blue-50 text-blue-600 font-semibold'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              Custom Range
+            <button role="menuitemradio" aria-checked={isActive('custom')} onClick={openCustom} className={itemCls(isActive('custom') || showCustom)}>
+              Custom range…
             </button>
             {showCustom && (
-              <div className="p-4 border-t border-gray-100 bg-gray-50/60 space-y-3">
+              <div className="mt-1.5 p-3 rounded-lg bg-gray-50 border border-line-2 space-y-3">
                 <div className="flex flex-wrap gap-1.5">
                   {quickPick('Last 7 days', addDays(today, -6), today)}
                   {quickPick('Last 30 days', addDays(today, -29), today)}
                   {quickPick('This month', today.slice(0, 8) + '01', today)}
-                  {quickPick('This week', mondayOf(today), today)}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">
-                      From
-                    </label>
-                    <input
-                      type="date"
-                      value={customStart}
-                      max={customEnd || undefined}
-                      onChange={(e) => setCustomStart(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all duration-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1">
-                      To
-                    </label>
-                    <input
-                      type="date"
-                      value={customEnd}
-                      min={customStart || undefined}
-                      onChange={(e) => setCustomEnd(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all duration-200"
-                    />
-                  </div>
+                  <label className="block">
+                    <span className="block text-xs text-ink-3 mb-1">From</span>
+                    <input type="date" value={customStart} max={customEnd || undefined}
+                      onChange={(e) => setCustomStart(e.target.value)} className="form-input h-8 text-xs px-2" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-ink-3 mb-1">To</span>
+                    <input type="date" value={customEnd} min={customStart || undefined}
+                      onChange={(e) => setCustomEnd(e.target.value)} className="form-input h-8 text-xs px-2" />
+                  </label>
                 </div>
-                <button
-                  onClick={applyCustom}
-                  className="w-full px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors duration-200"
-                >
-                  Apply
-                </button>
+                <button onClick={applyCustom} className="btn-primary btn-sm w-full">Apply range</button>
               </div>
             )}
-            <div className="px-4 py-2 border-t border-gray-100 bg-gray-50/60">
-              <p className="text-[10px] text-gray-400 font-medium">All dates in IST (Asia/Kolkata)</p>
-            </div>
+            <p className="px-3 pt-2 pb-1 text-[11.5px] text-ink-3">Dates are in IST</p>
           </motion.div>
         )}
       </AnimatePresence>

@@ -7,27 +7,27 @@ import useIsAdmin from '../../../lib/useIsAdmin';
 const CATEGORIES = ['All', 'Intro', 'Follow-Up', 'Objection', 'Closing', 'Custom'];
 
 const CAT_COLORS = {
-  Intro:       { color:'#2563EB', bg:'#EFF6FF' },
-  'Follow-Up': { color:'#16A34A', bg:'#F0FDF4' },
-  Objection:   { color:'#D97706', bg:'#FFFBEB' },
-  Closing:     { color:'#7C3AED', bg:'#F5F3FF' },
-  Custom:      { color:'#64748B', bg:'#F8FAFC' },
+  Intro:       { color:'#7C3AED', bg:'#F5F3FF' },
+  'Follow-Up': { color:'#079455', bg:'#ECFDF3' },
+  Objection:   { color:'#B54708', bg:'#FFFAEB' },
+  Closing:     { color:'#524F63', bg:'#F4F3F8' },
+  Custom:      { color:'#6B6880', bg:'#FAF9FC' },
 };
 
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4"
-      style={{ background:'rgba(0,0,0,0.50)', backdropFilter:'blur(5px)' }}>
+      style={{ background:'rgba(26,23,38,0.50)', backdropFilter:'blur(5px)' }}>
       <div className="rounded-xl w-full max-w-lg max-h-[90vh] flex flex-col"
-        style={{ background:'#fff', border:'1px solid #E2E8F0', boxShadow:'0 20px 60px rgba(0,0,0,0.18)' }}>
-        <div className="flex items-center justify-between p-5 flex-shrink-0" style={{ borderBottom:'1px solid #E2E8F0' }}>
-          <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>{title}</h3>
+        style={{ background:'#fff', border:'1px solid #E9E7EF', boxShadow:'0 20px 60px rgba(26,23,38,0.18)' }}>
+        <div className="flex items-center justify-between p-5 flex-shrink-0" style={{ borderBottom:'1px solid #E9E7EF' }}>
+          <h3 className="font-bold text-sm" style={{ color:'#1A1726' }}>{title}</h3>
           <button onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg text-lg"
-            style={{ color:'#94A3B8' }}
-            onMouseEnter={e=>{ e.currentTarget.style.background='#FFF1F2'; e.currentTarget.style.color='#EF4444'; }}
-            onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#94A3B8'; }}>
-            ✕
+            style={{ color: '#6B6880' }}
+            onMouseEnter={e=>{ e.currentTarget.style.background='#FEF3F2'; e.currentTarget.style.color='#D92D20'; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#A19DB2'; }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
         <div className="overflow-y-auto flex-1">{children}</div>
@@ -52,21 +52,21 @@ function ScriptForm({ initial, onSave, onClose, saving }) {
   return (
     <div className="p-5 space-y-4">
       <div>
-        <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color:'#64748B' }}>Title</label>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color:'#6B6880' }}>Title</label>
         <input value={form.title} onChange={e=>setForm({...form,title:e.target.value})}
           placeholder="e.g. Cold Call Opener" className="form-input"/>
       </div>
       <div>
-        <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color:'#64748B' }}>Category</label>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color:'#6B6880' }}>Category</label>
         <select value={form.category} onChange={e=>setForm({...form,category:e.target.value})} className="form-input">
           {CATEGORIES.filter(c=>c!=='All').map(c=><option key={c}>{c}</option>)}
         </select>
       </div>
       <div>
-        <label className="block text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color:'#64748B' }}>Script Content</label>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color:'#6B6880' }}>Script Content</label>
         <textarea value={form.content} onChange={e=>setForm({...form,content:e.target.value})}
           rows={10} placeholder="Write your script here. Use [placeholders] for dynamic values."
-          className="form-input resize-none font-mono text-xs leading-relaxed"/>
+          className="form-input resize-none tabular-nums text-xs leading-relaxed"/>
       </div>
       <div className="flex gap-3 pt-1">
         <button onClick={onClose} className="btn-secondary flex-1 justify-center">Cancel</button>
@@ -142,8 +142,8 @@ export default function ScriptsPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>Call Scripts</h2>
-          <p className="text-sm mt-0.5" style={{ color:'#94A3B8' }}>{scripts.length} script{scripts.length!==1?'s':''}</p>
+          <h2 className="page-title">Call Scripts</h2>
+          <p className="page-subtitle">{scripts.length} script{scripts.length!==1?'s':''}</p>
         </div>
         {isAdmin && <button onClick={()=>setCreating(true)} className="btn-primary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -159,10 +159,10 @@ export default function ScriptsPage() {
             <button key={cat} onClick={()=>setFilter(cat)}
               className="px-3.5 h-8 flex items-center rounded-full text-xs font-semibold transition-all"
               style={active
-                ? { background:'#2563EB', color:'#fff', border:'1px solid #2563EB' }
-                : { background:'#fff', color:'#64748B', border:'1px solid #E2E8F0' }}
-              onMouseEnter={e=>{ if(!active){ e.currentTarget.style.borderColor='#BFDBFE'; e.currentTarget.style.color='#2563EB'; } }}
-              onMouseLeave={e=>{ if(!active){ e.currentTarget.style.borderColor='#E2E8F0'; e.currentTarget.style.color='#64748B'; } }}>
+                ? { background:'#7C3AED', color:'#fff', border:'1px solid #7C3AED' }
+                : { background:'#fff', color:'#6B6880', border:'1px solid #E9E7EF' }}
+              onMouseEnter={e=>{ if(!active){ e.currentTarget.style.borderColor='#EDE9FE'; e.currentTarget.style.color='#7C3AED'; } }}
+              onMouseLeave={e=>{ if(!active){ e.currentTarget.style.borderColor='#E9E7EF'; e.currentTarget.style.color='#6B6880'; } }}>
               {cat}
               {cat!=='All'&&<span className="ml-1.5 opacity-60">{scripts.filter(s=>s.category===cat).length}</span>}
             </button>
@@ -173,8 +173,8 @@ export default function ScriptsPage() {
       {/* Scripts grid */}
       {visible.length === 0 ? (
         <div className="page-card p-12 text-center">
-          <p className="text-sm" style={{ color:'#94A3B8' }}>No scripts in this category.</p>
-          {isAdmin && <button onClick={()=>setCreating(true)} className="mt-3 text-sm font-semibold" style={{ color:'#2563EB' }}>Create one</button>}
+          <p className="text-sm" style={{ color: '#6B6880' }}>No scripts in this category.</p>
+          {isAdmin && <button onClick={()=>setCreating(true)} className="mt-3 text-sm font-semibold" style={{ color:'#7C3AED' }}>Create one</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger">
@@ -182,13 +182,13 @@ export default function ScriptsPage() {
             const { color, bg } = CAT_COLORS[script.category]||CAT_COLORS.Custom;
             return (
               <div key={script._id} className="page-card p-5 flex flex-col gap-3"
-                onMouseEnter={e=>e.currentTarget.style.boxShadow='0 8px 24px rgba(0,0,0,0.10)'}
+                onMouseEnter={e=>e.currentTarget.style.boxShadow='0 8px 24px rgba(26,23,38,0.10)'}
                 onMouseLeave={e=>e.currentTarget.style.boxShadow=''}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-bold text-sm leading-tight" style={{ color:'#0F172A' }}>{script.title}</h3>
-                      <span className="badge text-[10px] font-bold flex-shrink-0" style={{ color, background:bg }}>
+                      <h3 className="font-bold text-sm leading-tight" style={{ color:'#1A1726' }}>{script.title}</h3>
+                      <span className="badge text-xs font-bold flex-shrink-0" style={{ color, background:bg }}>
                         {script.category}
                       </span>
                     </div>
@@ -202,9 +202,9 @@ export default function ScriptsPage() {
                     ].filter((btn)=>isAdmin || btn.title==='Preview' || btn.title==='Copy').map((btn,bi)=>(
                       <button key={bi} onClick={btn.onClick} title={btn.title}
                         className="p-1.5 rounded-lg transition-colors"
-                        style={{ color:'#94A3B8' }}
-                        onMouseEnter={e=>{ e.currentTarget.style.background=btn.danger?'#FFF1F2':'#EFF6FF'; e.currentTarget.style.color=btn.danger?'#EF4444':'#2563EB'; }}
-                        onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#94A3B8'; }}>
+                        style={{ color: '#6B6880' }}
+                        onMouseEnter={e=>{ e.currentTarget.style.background=btn.danger?'#FEF3F2':'#F5F3FF'; e.currentTarget.style.color=btn.danger?'#D92D20':'#7C3AED'; }}
+                        onMouseLeave={e=>{ e.currentTarget.style.background=''; e.currentTarget.style.color='#A19DB2'; }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d={btn.icon}/>{btn.extra}
                         </svg>
@@ -212,8 +212,8 @@ export default function ScriptsPage() {
                     ))}
                   </div>
                 </div>
-                <p className="text-xs leading-relaxed line-clamp-3 font-mono whitespace-pre-wrap" style={{ color:'#94A3B8' }}>{script.content}</p>
-                <button onClick={()=>setPreview(script)} className="text-xs font-medium text-left" style={{ color:'#2563EB' }}>
+                <p className="text-xs leading-relaxed line-clamp-3 font-mono whitespace-pre-wrap" style={{ color: '#6B6880' }}>{script.content}</p>
+                <button onClick={()=>setPreview(script)} className="text-xs font-medium text-left" style={{ color:'#7C3AED' }}>
                   Read full script →
                 </button>
               </div>
@@ -233,7 +233,7 @@ export default function ScriptsPage() {
               {preview.category}
             </span>
             <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed rounded-xl p-4"
-              style={{ color:'#0F172A', background:'#F8FAFC', border:'1px solid #E2E8F0' }}>
+              style={{ color:'#1A1726', background:'#FAF9FC', border:'1px solid #E9E7EF' }}>
               {preview.content}
             </pre>
             <button onClick={()=>copy(preview.content)} className="btn-primary w-full justify-center">

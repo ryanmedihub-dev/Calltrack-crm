@@ -8,6 +8,7 @@ import { fmtDate } from '../../../../lib/timezone';
 import { DataTable, LeadStatusBadge } from '../../../../components/report-shared';
 import EngagementBadge from '../../../../components/EngagementBadge';
 import { STATUSES, STATUS_LABELS, statusStyle, statusLabel } from '../../../../lib/leadStatus';
+import MultiSelect from '../../../../components/MultiSelect';
 
 const ENGAGEMENT_OPTIONS = [
   ['NOT_CONNECTED', 'Not Connected'], ['LOW', 'Low'], ['CONTACTED', 'Contacted'],
@@ -107,23 +108,23 @@ export default function AssignedLeadsPage() {
       label: 'Lead',
       render: (l) => (
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 bg-gradient-to-br from-blue-600 to-blue-400">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0 bg-gradient-to-br from-blue-600 to-blue-400">
             {(l.name||'?')[0].toUpperCase()}
           </div>
           <div>
             <p className="font-semibold text-xs text-gray-900">{l.name||'Unknown'}</p>
-            <p className="text-[11px] text-gray-400">{l.email||''}</p>
+            <p className="text-xs text-gray-500">{l.email||''}</p>
           </div>
         </div>
       ),
     },
-    { key: 'phone', label: 'Phone', render: (l) => <span className="font-mono text-xs text-gray-600">{l.phone||'—'}</span> },
+    { key: 'phone', label: 'Phone', render: (l) => <span className="tabular-nums text-xs text-gray-600">{l.phone||'—'}</span> },
     {
       key: 'assignedToName',
       label: 'Assigned To',
       render: (l) => (
         <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded flex items-center justify-center text-white text-[8px] font-bold flex-shrink-0 bg-blue-600">
+          <div className="w-5 h-5 rounded flex items-center justify-center text-white text-xs font-bold flex-shrink-0 bg-blue-600">
             {(l.assignedTo?.name||'?')[0]?.toUpperCase()||'?'}
           </div>
           <span className="text-xs font-medium text-gray-700">{l.assignedTo?.name||'Unknown'}</span>
@@ -141,13 +142,13 @@ export default function AssignedLeadsPage() {
       render: (l) => <EngagementBadge engagement={l.engagement} />,
     },
     { key: 'source', label: 'Source', render: (l) => l.source ? <span className="badge bg-gray-100 text-gray-500 border border-gray-300">{l.source}</span> : null },
-    { key: 'assignedAt', label: 'Assigned Date', render: (l) => <span className="text-xs text-gray-400">{fmt(l.assignedAt||l.updatedAt)}</span> },
+    { key: 'assignedAt', label: 'Assigned Date', render: (l) => <span className="text-xs text-gray-500">{fmt(l.assignedAt||l.updatedAt)}</span> },
     {
       key: 'actions', label: 'Actions', align: 'right', sortable: false, searchable: false,
       render: (l) => isAdmin && (
         <button
           onClick={()=>openReassign([l])}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors">
           <AssignIco s={11}/> Reassign
         </button>
       ),
@@ -158,39 +159,28 @@ export default function AssignedLeadsPage() {
     <div className="space-y-5 animate-fade-in">
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-50 text-blue-600">
-              <AssignIco s={16}/>
-            </div>
-            <h2 className="text-lg font-bold text-gray-900 tracking-tight">Assigned Leads</h2>
-          </div>
-          <p className="text-sm text-gray-400">Leads that have been assigned to an employee</p>
+          <h2 className="page-title">Assigned Leads</h2>
+          <p className="page-subtitle">Leads that have been assigned to an employee</p>
         </div>
         <div className="page-card px-4 py-2.5">
           <span className="text-lg font-extrabold tabular-nums text-blue-600">{total}</span>
-          <span className="text-xs font-medium ml-1.5 text-gray-400">Assigned leads</span>
+          <span className="text-xs font-medium ml-1.5 text-gray-500">Assigned leads</span>
         </div>
       </motion.div>
 
       {/* Filters */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="filter-bar flex flex-wrap gap-3">
+      <motion.div initial={false} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="filter-bar flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[180px]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><SearchIco/></span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"><SearchIco/></span>
           <input className="form-input pl-8 text-xs" placeholder="Search by name or phone…"
             value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
         </div>
-        <select className="form-input text-xs w-44" value={employee} onChange={e=>{setEmployee(e.target.value);setPage(1);}}>
-          <option value="">All Employees</option>
-          {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
-        </select>
-        <select className="form-input text-xs w-36" value={status} onChange={e=>{setStatus(e.target.value);setPage(1);}}>
-          <option value="">All Status</option>
-          {STATUSES.map(s=><option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-        </select>
-        <select className="form-input text-xs w-40" value={engagement} onChange={e=>{setEngagement(e.target.value);setPage(1);}}>
-          <option value="">All Engagement</option>
-          {ENGAGEMENT_OPTIONS.map(([v,label])=><option key={v} value={v}>{label}</option>)}
-        </select>
+        <MultiSelect className="w-48" ariaLabel="Employee" placeholder="All employees" noun="employees"
+          value={employee} onChange={(v)=>{setEmployee(v);setPage(1);}} options={employees.map((e) => [e._id, e.name])} />
+        <MultiSelect className="w-44" ariaLabel="Status" placeholder="All statuses" noun="statuses"
+          value={status} onChange={(v)=>{setStatus(v);setPage(1);}} options={STATUSES.map((s)=>[s, STATUS_LABELS[s]])} />
+        <MultiSelect className="w-44" ariaLabel="Engagement" placeholder="All engagement" noun="bands"
+          value={engagement} onChange={(v)=>{setEngagement(v);setPage(1);}} options={ENGAGEMENT_OPTIONS} />
         {(search||employee||status||engagement) && (
           <button className="btn-secondary text-xs py-2 px-3"
             onClick={()=>{setSearch('');setEmployee('');setStatus('');setEngagement('');setPage(1);}}>Clear</button>
@@ -244,7 +234,7 @@ export default function AssignedLeadsPage() {
       {/* Reassign modal */}
       {reassign && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/45">
-          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="page-card p-6 w-full max-w-sm">
+          <motion.div initial={false} animate={{ opacity: 1, y: 0 }} className="page-card p-6 w-full max-w-sm">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-50 text-blue-600 flex-shrink-0">
@@ -252,22 +242,22 @@ export default function AssignedLeadsPage() {
                 </div>
                 <div>
                   <p className="font-bold text-sm text-gray-900">Reassign Lead{reassign.leadIds.length===1?'':'s'}</p>
-                  <p className="text-xs text-gray-400">{reassign.leadIds.length} selected</p>
+                  <p className="text-xs text-gray-500">{reassign.leadIds.length} selected</p>
                 </div>
               </div>
-              <button onClick={()=>setReassign(null)} className="text-gray-400 hover:text-gray-600"><XIco/></button>
+              <button onClick={()=>setReassign(null)} className="text-gray-500 hover:text-gray-600"><XIco/></button>
             </div>
 
             <div className="mb-4 max-h-24 overflow-y-auto rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
               <p className="text-xs text-gray-500 leading-relaxed">{reassign.leadNames.join(', ')}</p>
             </div>
 
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Assign to</label>
-            <select className="form-input text-xs w-full mb-5" value={reassign.target}
-              onChange={(e)=>setReassign((r)=>({...r, target:e.target.value}))}>
-              <option value="">Select employee…</option>
-              {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
-            </select>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Assign to</label>
+            <div className="mb-5">
+              <MultiSelect multiple={false} placeholder="Select employee…" ariaLabel="Reassign to"
+                value={reassign.target} onChange={(v)=>setReassign((r)=>({...r, target:v}))}
+                options={employees.map((e)=>[e._id, e.name])} />
+            </div>
 
             <div className="flex gap-3">
               <button disabled={busy} onClick={confirmReassign}

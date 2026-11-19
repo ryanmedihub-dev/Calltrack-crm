@@ -1,9 +1,10 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import { isAdminUser } from '../../../lib/auth';
-import StatCard from '../../../components/StatCard';
+import { StatCard, PageHeader } from '../../../components/report-shared';
 import { todayIST } from '../../../components/DateRangeFilter';
 
 // Manager/TL: only their own team comes back (the backend scopes /employees-periodic by tlName).
@@ -40,51 +41,108 @@ function fmtDur(sec) {
 function TeamTable({ title, rows }) {
   const t = sum(rows);
   return (
-    <div className="bg-white rounded-2xl overflow-hidden" style={{ border: '1px solid #E2E8F4' }}>
+    <section className="panel overflow-hidden" aria-label={title || 'Team'}>
       {title && (
-        <div className="px-5 py-3 flex flex-wrap items-center justify-between gap-2" style={{ borderBottom: '1px solid #EAECF0', background: '#F8FAFC' }}>
-          <p className="text-sm font-bold" style={{ color: '#0F172A' }}>{title}</p>
-          <p className="text-xs tabular-nums" style={{ color: '#64748B' }}>
-            {rows.length} agents · {t.calls} calls · {pct(t.connected, t.calls)}% connected · {t.converted} converted
+        <div className="panel-head flex-wrap">
+          <h2 className="panel-title">{title}</h2>
+          <p className="text-xs text-ink-3 tabular-nums">
+            {rows.length} agents · {t.calls.toLocaleString('en-IN')} calls · {pct(t.connected, t.calls)}% connected · {t.converted} converted
           </p>
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="data-table min-w-[720px]">
           <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider" style={{ color: '#94A3B8' }}>
-              <th className="px-5 py-2.5 font-semibold">Employee</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Calls</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Connected</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Talk time</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Target</th>
-              <th className="px-3 py-2.5 font-semibold text-right">Leads</th>
-              <th className="px-5 py-2.5 font-semibold text-right">Converted</th>
+            <tr>
+              <th>Employee</th>
+              <th className="!text-right">Calls</th>
+              <th className="!text-right">Connected</th>
+              <th className="!text-right">Talk time</th>
+              <th className="!text-right">Of target</th>
+              <th className="!text-right">Leads</th>
+              <th className="!text-right">Converted</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.employeeId} style={{ borderTop: '1px solid #F1F5F9' }}>
-                <td className="px-5 py-2.5">
-                  <a href={`/employees/${r.employeeId}`} className="font-semibold hover:underline" style={{ color: '#0F172A' }}>{r.employeeName}</a>
-                  {!r.isActive && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#FEF2F2', color: '#DC2626' }}>INACTIVE</span>}
-                  {r.employeeCode && <span className="block text-[11px]" style={{ color: '#94A3B8' }}>{r.employeeCode}</span>}
+              <tr key={r.employeeId}>
+                <td>
+                  <a href={`/employees/${r.employeeId}`} className="font-medium text-ink hover:text-[var(--blue)] transition-colors">{r.employeeName}</a>
+                  {!r.isActive && <span className="badge bg-gray-100 text-ink-3 ml-2">Inactive</span>}
+                  {r.employeeCode && <span className="block text-xs text-ink-3">{r.employeeCode}</span>}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.totalCalls}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.connectedCalls} <span style={{ color: '#94A3B8' }}>({pct(r.connectedCalls, r.totalCalls)}%)</span></td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.totalTalktime}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.targetAchievement == null ? '—' : `${r.targetAchievement}%`}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{r.leadsAssigned}</td>
-                <td className="px-5 py-2.5 text-right tabular-nums">{r.leadsConverted}</td>
+                <td className="text-right tabular-nums">{r.totalCalls ? <b className="font-medium text-ink">{r.totalCalls.toLocaleString('en-IN')}</b> : <span className="text-ink-4">0</span>}</td>
+                <td className="text-right tabular-nums">{r.totalCalls ? `${pct(r.connectedCalls, r.totalCalls)}%` : <span className="text-ink-4">—</span>}</td>
+                <td className="text-right tabular-nums">{r.totalTalktime}</td>
+                <td className="text-right tabular-nums">{r.targetAchievement == null ? <span className="text-ink-4">—</span> : <span className={r.targetAchievement >= 100 ? 'text-met font-medium' : ''}>{r.targetAchievement}%</span>}</td>
+                <td className="text-right tabular-nums">{r.leadsAssigned}</td>
+                <td className="text-right tabular-nums">{r.leadsConverted}</td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="px-5 py-8 text-center text-sm" style={{ color: '#94A3B8' }}>No employees in this team.</td></tr>
+              <tr><td colSpan={7} className="!py-10 text-center text-ink-3">No employees in this team yet.</td></tr>
             )}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
+  );
+}
+
+// Admin: one row per team with totals; click a team to open its members (accordion, 200ms).
+function TeamsSummary({ teams }) {
+  const [open, setOpen] = useState(() => new Set());
+  const toggle = (k) => setOpen((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  return (
+    <section className="panel overflow-hidden" aria-label="Teams">
+      <div className="panel-head">
+        <div><h2 className="panel-title">Teams</h2><p className="panel-sub">Click a team to see its members</p></div>
+        <button onClick={() => setOpen(open.size ? new Set() : new Set(teams.map(([n]) => n)))} className="btn-ghost btn-sm">
+          {open.size ? 'Collapse all' : 'Expand all'}
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="data-table min-w-[720px]">
+          <thead>
+            <tr><th>Team</th><th className="!text-right">Agents</th><th className="!text-right">Calls</th><th className="!text-right">Connected</th><th className="!text-right">Talk time</th><th className="!text-right">Converted</th></tr>
+          </thead>
+          <tbody>
+            {teams.map(([name, list]) => {
+              const t = sum(list);
+              const isOpen = open.has(name);
+              const active = list.filter((r) => r.isActive).length;
+              return (
+                <Fragment key={name}>
+                  <tr onClick={() => toggle(name)} aria-expanded={isOpen} className="cursor-pointer">
+                    <td>
+                      <span className="flex items-center gap-2">
+                        <svg className={`text-ink-3 transition-transform duration-200 ease-out ${isOpen ? 'rotate-90' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+                        <span className={`font-medium ${name === 'Unassigned' ? 'text-ink-3' : 'text-ink'}`}>{name}</span>
+                      </span>
+                    </td>
+                    <td className="text-right tabular-nums">{active}<span className="text-ink-3"> / {list.length}</span></td>
+                    <td className="text-right tabular-nums">{t.calls ? <b className="font-medium text-ink">{t.calls.toLocaleString('en-IN')}</b> : <span className="text-ink-4">0</span>}</td>
+                    <td className="text-right tabular-nums">{t.calls ? `${pct(t.connected, t.calls)}%` : <span className="text-ink-4">—</span>}</td>
+                    <td className="text-right tabular-nums">{fmtDur(t.duration)}</td>
+                    <td className="text-right tabular-nums">{t.converted}</td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={6} className="!p-0 !h-auto bg-gray-50">
+                        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+                          transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }} className="overflow-hidden">
+                          <div className="p-3"><TeamTable rows={list} /></div>
+                        </motion.div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -122,39 +180,29 @@ export default function TeamPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-extrabold" style={{ color: '#0F172A', letterSpacing: '-0.02em' }}>
-            {admin ? 'Team Reports' : 'My Team'}
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: '#94A3B8' }}>
-            {admin
-              ? 'Every manager / TL team and their employees'
-              : `Employees assigned to ${user?.name || 'you'} (by TL name)`}
-          </p>
-        </div>
-        <div className="flex gap-1 p-1 rounded-xl" style={{ background: '#F1F5F9' }}>
-          {PRESETS.map((p) => (
-            <button key={p.key} onClick={() => setPreset(p.key)}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg"
-              style={preset === p.key ? { background: '#fff', color: '#0F172A', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' } : { color: '#64748B' }}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title={admin ? 'Team reports' : 'My team'}
+        description={admin ? 'Every manager / TL team and their employees' : `Employees whose TL name matches ${user?.name || 'yours'}`}
+        actions={
+          <div className="seg" role="group" aria-label="Period">
+            {PRESETS.map((p) => (
+              <button key={p.key} aria-pressed={preset === p.key} onClick={() => setPreset(p.key)}>{p.label}</button>
+            ))}
+          </div>
+        }
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title={admin ? 'Teams' : 'Team size'} value={admin ? teams.length : rows.length} sub={admin ? `${rows.length} employees` : `${rows.filter((r) => r.isActive).length} active`} icon="👥" color="blue" />
-        <StatCard title="Calls" value={total.calls} sub={`${fmtDur(total.duration)} talk time`} icon="📞" color="teal" />
-        <StatCard title="Connected" value={`${pct(total.connected, total.calls)}%`} sub={`${total.connected} calls`} icon="✅" color="green" />
-        <StatCard title="Leads converted" value={total.converted} sub={`of ${total.leads} assigned`} icon="🎯" color="orange" />
+        <StatCard label={admin ? 'Teams' : 'Team size'} value={admin ? teams.length : rows.length} sub={admin ? `${rows.length} employees` : `${rows.filter((r) => r.isActive).length} active`} />
+        <StatCard label="Calls" value={total.calls} sub={`${fmtDur(total.duration)} talk time`} />
+        <StatCard label="Connected" value={`${pct(total.connected, total.calls)}%`} sub={`${total.connected} calls`} />
+        <StatCard label="Leads converted" value={total.converted} sub={`of ${total.leads} assigned`} />
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-2xl p-10 text-center text-sm" style={{ border: '1px solid #E2E8F4', color: '#94A3B8' }}>Loading…</div>
+        <div className="panel p-5 space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="skeleton h-9" />)}</div>
       ) : admin ? (
-        teams.map(([name, list]) => <TeamTable key={name} title={name} rows={list} />)
+        <TeamsSummary teams={teams} />
       ) : (
         <TeamTable rows={rows} />
       )}

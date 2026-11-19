@@ -23,7 +23,8 @@ import { useReportData, invalidateReportCache } from "../../../../lib/useReportD
 import { triggerServerExport } from "../../../../lib/downloads";
 import { fmtDate, fmtTime, fmtDateTime } from "../../../../lib/timezone";
 import { motion, AnimatePresence } from "framer-motion";
-import { DataTable, TLFilter, Truncate, EditableRemarks } from "../../../../components/report-shared";
+import { DataTable, TLFilter, Truncate, EditableRemarks, CallBadge, InfoDot, ChartTip, StatCard, Skeleton, EmptyState, InsightCard, Field, TYPE_META , PageHeader } from "../../../../components/report-shared";
+import MultiSelect from '../../../../components/MultiSelect';
 import {
   ArrowUp,
   ArrowDown,
@@ -227,12 +228,6 @@ const GaugeIco = () => (
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
 ──────────────────────────────────────────────────────────── */
-const TYPE_META = {
-  incoming: { label: "Incoming", color: "#16A34A", bg: "#F0FDF4" },
-  outgoing: { label: "Outgoing", color: "#D97706", bg: "#FFFBEB" },
-  missed: { label: "Missed", color: "#DC2626", bg: "#FEF2F2" },
-  rejected: { label: "Rejected", color: "#7C3AED", bg: "#F5F3FF" },
-};
 const TABS = [
   { key: "summary", label: "Summary", icon: <GridIco /> },
   { key: "analysis", label: "Analysis", icon: <BarChartTabIco /> },
@@ -274,122 +269,12 @@ function formatDuration(seconds) {
 /* ────────────────────────────────────────────────────────────
    SMALL UI PRIMITIVES
 ──────────────────────────────────────────────────────────── */
-function CallBadge({ type }) {
-  const m = TYPE_META[type] || TYPE_META.outgoing;
-  return (
-    <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-      style={{ color: m.color, background: m.bg }}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full"
-        style={{ background: m.color }}
-      />
-      {m.label}
-    </span>
-  );
-}
-
-function InfoDot({ text }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      className="relative inline-flex ml-1 cursor-help"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold flex items-center justify-center">
-        i
-      </span>
-      <AnimatePresence>
-        {open && (
-          <motion.span
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="absolute z-20 left-1/2 -translate-x-1/2 top-6 w-56 bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl"
-          >
-            {text}
-          </motion.span>
-        )}
-      </AnimatePresence>
-    </span>
-  );
-}
-
-function ChartTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white rounded-lg px-3 py-2 text-xs shadow-lg border border-gray-200">
-      <p className="text-gray-500 font-medium mb-1">{label}</p>
-      {payload.map((p, i) => (
-        <p
-          key={i}
-          className="font-semibold flex items-center gap-1.5"
-          style={{ color: p.color || p.fill }}
-        >
-          <span
-            className="w-2 h-2 rounded-full"
-            style={{ background: p.color || p.fill }}
-          />
-          {p.name}: {p.value?.toLocaleString?.() ?? p.value}
-        </p>
-      ))}
-    </div>
-  );
-}
-
-function StatCard({ label, value, sub, color, icon }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="relative bg-white rounded-xl border border-gray-200 p-4 overflow-hidden group hover:border-gray-300 hover:shadow-sm transition-all"
-    >
-      <div
-        className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-[0.06] group-hover:opacity-[0.1] transition-opacity"
-        style={{ background: color }}
-      />
-      <div className="flex items-start justify-between">
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center"
-          style={{ background: `${color}14`, color }}
-        >
-          {icon}
-        </div>
-      </div>
-      <p className="text-2xl font-bold text-gray-900 mt-3 tabular-nums">
-        {value}
-      </p>
-      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-      {sub && <p className="text-[11px] text-gray-400 mt-1">{sub}</p>}
-    </motion.div>
-  );
-}
-
-function Skeleton({ className = "" }) {
-  return <div className={`bg-gray-100 rounded animate-pulse ${className}`} />;
-}
-
-function EmptyState({
-  title = "No records found",
-  hint = "Try widening your date range or clearing filters.",
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-      <InboxIco />
-      <p className="mt-3 text-sm font-medium text-gray-600">{title}</p>
-      <p className="text-xs text-gray-400 mt-1">{hint}</p>
-    </div>
-  );
-}
-
 /* Pin toggle used in Call History "To Number" column — persisted in localStorage
    (there's no backend field for this, so it's client-only but genuinely persists). */
 function PinnedNumber({ number, pinned, onToggle }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-amber-600 font-medium">{number}</span>
+      <span className="text-ink font-medium tabular-nums">{number}</span>
       <button
         type="button"
         onClick={onToggle}
@@ -402,28 +287,6 @@ function PinnedNumber({ number, pinned, onToggle }) {
 }
 
 /* Highlight card used in Analysis tab */
-function InsightCard({ icon, title, rows }) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h4 className="text-sm font-bold text-gray-900">{title}</h4>
-      </div>
-      <div className="space-y-4">
-        {rows.map((r, i) => (
-          <div key={i} className={i > 0 ? "pt-3 border-t border-gray-100" : ""}>
-            <p className="text-xs text-gray-400">{r.label}</p>
-            <p className="text-sm font-semibold text-gray-900 mt-0.5">
-              {r.value}
-            </p>
-            {r.sub && <p className="text-xs text-gray-500 mt-0.5">{r.sub}</p>}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ────────────────────────────────────────────────────────────
    FILTER CHIP BAR
 ──────────────────────────────────────────────────────────── */
@@ -445,12 +308,12 @@ function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
       {entries.map(([k, v]) => (
         <span
           key={k}
-          className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs font-medium pl-2.5 pr-1.5 py-1 rounded-full"
+          className="inline-flex items-center gap-1.5 h-7 bg-white text-ink-2 text-xs pl-2.5 pr-1 rounded-md border border-line"
         >
-          {FILTER_LABELS[k] || k}: {k === "employee" ? employeeName || v : v}
+          {FILTER_LABELS[k] || k}: {k === "employee" ? employeeName || v : String(v).split(",").join(", ")}
           <button
             onClick={() => onClear(k)}
-            className="hover:bg-blue-100 rounded-full p-0.5"
+            className="w-5 h-5 rounded flex items-center justify-center text-ink-3 hover:bg-gray-100 hover:text-ink transition-colors"
           >
             <XIco />
           </button>
@@ -458,21 +321,10 @@ function ActiveFilterChips({ filters, employeeName, onClear, onClearAll }) {
       ))}
       <button
         onClick={onClearAll}
-        className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
+        className="text-xs font-medium text-ink-3 hover:text-ink px-1 transition-colors"
       >
         Clear all
       </button>
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-[11px] font-medium text-gray-500 mb-1.5">
-        {label}
-      </label>
-      {children}
     </div>
   );
 }
@@ -617,7 +469,7 @@ function PeriodicReportsPageContent() {
       filename: `calls-${filters.fromDate || "all"}_${filters.toDate || "today"}.csv`,
     });
 
-  const employeeName = employees.find((e) => e._id === filters.employee)?.name;
+  const employeeName = filters.employee ? filters.employee.split(',').map((id) => employees.find((e) => e._id === id)?.name || id).join(', ') : undefined;
   const clearFilter = (key) => setFilters((f) => ({ ...f, [key]: "" }));
   const clearAllFilters = () =>
     setFilters({
@@ -698,180 +550,87 @@ function PeriodicReportsPageContent() {
     : null;
 
   return (
-    <div className="min-h-screen">
-      <div className=" space-y-5">
-        {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <p className="text-xs text-gray-400 flex items-center gap-1.5">
-              Reports <span className="text-gray-300">/</span>{" "}
-              <span className="text-gray-500">Periodic Reports</span>
-            </p>
-            <h1 className="text-xl font-bold text-gray-900 mt-0.5">
-              {report?.dateLabel || "Call Reports"}
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => load(true)}
-              className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
-            >
-              <RefreshIco spinning={refreshing} /> Refresh
-            </button>
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm"
-            >
-              <DownloadIco /> Export
-            </button>
-          </div>
-        </div>
+    <div>
+      <div className="space-y-5">
+        <PageHeader
+          title="Calls report"
+          description={report?.dateLabel ? `Call activity · ${report.dateLabel}` : 'Call activity across agents, by period'}
+          actions={
+            <>
+              <button onClick={() => load(true)} className="btn-secondary" disabled={refreshing}>
+                <RefreshIco spinning={refreshing} /> Refresh
+              </button>
+              <button onClick={handleExport} className="btn-primary">
+                <DownloadIco /> Export CSV
+              </button>
+            </>
+          }
+        />
 
         {/* ── Filters ── */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div className="panel">
           <button
             onClick={() => setFiltersOpen((o) => !o)}
-            className="w-full flex items-center justify-between px-5 py-3.5"
+            aria-expanded={filtersOpen}
+            className="w-full flex items-center justify-between gap-3 px-5 h-12 text-left"
           >
-            <div className="flex items-center gap-3">
-              <span className="text-sm font-semibold text-gray-800">
-                Filters
+            <span className="flex items-center gap-3 min-w-0">
+              <span className="text-[13px] font-medium text-ink">Filters</span>
+              <span className="text-[13px] text-ink-3 truncate">
+                {filters.fromDate || 'Any date'} – {filters.toDate || 'today'}
               </span>
-              <span className="text-xs text-gray-400">
-                {filters.fromDate || "Any date"} – {filters.toDate || "today"}
-              </span>
-            </div>
-            <ChevronIco open={filtersOpen} />
+            </span>
+            <span className={`text-ink-3 transition-transform duration-200 ease-out ${filtersOpen ? 'rotate-180' : ''}`}><ChevronIco open={false} /></span>
           </button>
 
           <AnimatePresence initial={false}>
             {filtersOpen && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
+                animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
                 className="overflow-hidden"
               >
-                <div className="px-5 pb-5 border-t border-gray-100 pt-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <Field label="From Date">
-                      <div className="relative">
-                        <input
-                          type="date"
-                          className="input pl-9"
-                          value={filters.fromDate}
-                          onChange={(e) =>
-                            setFilters({ ...filters, fromDate: e.target.value })
-                          }
-                        />
-                      </div>
+                <div className="px-5 pb-5 pt-4 border-t border-line-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-4">
+                    <Field label="From">
+                      <input type="date" className="form-input" value={filters.fromDate}
+                        onChange={(e) => setFilters({ ...filters, fromDate: e.target.value })} />
                     </Field>
-                    <Field label="To Date">
-                      <div className="relative">
-                        <input
-                          type="date"
-                          className="input pl-9"
-                          value={filters.toDate}
-                          onChange={(e) =>
-                            setFilters({ ...filters, toDate: e.target.value })
-                          }
-                        />
-                      </div>
+                    <Field label="To">
+                      <input type="date" className="form-input" value={filters.toDate}
+                        onChange={(e) => setFilters({ ...filters, toDate: e.target.value })} />
                     </Field>
                     <Field label="Employee">
-                      <select
-                        className="input"
-                        value={filters.employee}
-                        onChange={(e) =>
-                          setFilters({ ...filters, employee: e.target.value })
-                        }
-                      >
-                        <option value="">All employees</option>
-                        {employees.map((e) => (
-                          <option key={e._id} value={e._id}>
-                            {e.name}
-                          </option>
-                        ))}
-                      </select>
+                      <MultiSelect value={filters.employee} onChange={(v) => setFilters({ ...filters, employee: v })}
+                        placeholder="All employees" noun="employees" ariaLabel="Employee" options={employees.map((e) => [e._id, e.name])} />
                     </Field>
-                    <Field label="Call Type">
-                      <select
-                        className="input"
-                        value={filters.callType}
-                        onChange={(e) =>
-                          setFilters({ ...filters, callType: e.target.value })
-                        }
-                      >
-                        <option value="">All types</option>
-                        <option value="incoming">Incoming</option>
-                        <option value="outgoing">Outgoing</option>
-                        <option value="missed">Missed</option>
-                        <option value="rejected">Rejected</option>
-                      </select>
+                    <Field label="Call type">
+                      <MultiSelect value={filters.callType} onChange={(v) => setFilters({ ...filters, callType: v })}
+                        placeholder="All types" noun="types" ariaLabel="Call type" options={[['incoming', 'Incoming'], ['outgoing', 'Outgoing'], ['missed', 'Missed'], ['rejected', 'Rejected']]} />
                     </Field>
                     <Field label="Duration">
-                      <select
-                        className="input"
-                        value={filters.duration}
-                        onChange={(e) =>
-                          setFilters({ ...filters, duration: e.target.value })
-                        }
-                      >
-                        <option value="">Any duration</option>
-                        <option value="0-60">0 – 60s</option>
-                        <option value="60-300">60 – 300s</option>
-                        <option value="300+">300s+</option>
-                      </select>
+                      <MultiSelect value={filters.duration} onChange={(v) => setFilters({ ...filters, duration: v })}
+                        placeholder="Any duration" noun="ranges" ariaLabel="Duration"
+                        options={[['0-60', 'Under 1 min'], ['60-300', '1 – 5 min'], ['300+', 'Over 5 min']]} />
                     </Field>
-                    <Field label="Call Time">
-                      <select
-                        className="input"
-                        value={filters.callTime}
-                        onChange={(e) =>
-                          setFilters({ ...filters, callTime: e.target.value })
-                        }
-                      >
-                        <option value="">Any time</option>
-                        <option value="morning">Morning (6AM–12PM)</option>
-                        <option value="afternoon">Afternoon (12PM–6PM)</option>
-                        <option value="evening">Evening (6PM–12AM)</option>
-                      </select>
+                    <Field label="Time of day">
+                      <MultiSelect value={filters.callTime} onChange={(v) => setFilters({ ...filters, callTime: v })}
+                        placeholder="Any time" noun="windows" ariaLabel="Time of day"
+                        options={[['morning', 'Morning (6 AM–12 PM)'], ['afternoon', 'Afternoon (12–6 PM)'], ['evening', 'Evening (6 PM–12 AM)']]} />
                     </Field>
-                    <Field label="Team Lead">
-                      <TLFilter
-                        value={filters.tl}
-                        onChange={(v) => setFilters({ ...filters, tl: v })}
-                        className="w-full"
-                      />
+                    <Field label="Team lead">
+                      <TLFilter value={filters.tl} onChange={(v) => setFilters({ ...filters, tl: v })} className="w-full" />
                     </Field>
-                    <Field label="Source">
-                      <input
-                        type="text"
-                        placeholder="e.g. Meta, Call, Upload"
-                        className="input"
-                        value={filters.source}
-                        onChange={(e) =>
-                          setFilters({ ...filters, source: e.target.value })
-                        }
-                      />
+                    <Field label="Lead source">
+                      <input type="text" placeholder="Meta, Call, Upload…" className="form-input" value={filters.source}
+                        onChange={(e) => setFilters({ ...filters, source: e.target.value })} />
                     </Field>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-gray-100">
-                    <div className="flex gap-2 ml-auto">
-                      <button
-                        onClick={clearAllFilters}
-                        className="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50"
-                      >
-                        Reset
-                      </button>
-                      <button
-                        onClick={() => load()}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm"
-                      >
-                        Apply Filters
-                      </button>
-                    </div>
+                  <div className="flex justify-end gap-2 mt-5">
+                    <button onClick={clearAllFilters} className="btn-ghost">Reset</button>
+                    <button onClick={() => load()} className="btn-primary">Apply filters</button>
                   </div>
                 </div>
               </motion.div>
@@ -879,322 +638,136 @@ function PeriodicReportsPageContent() {
           </AnimatePresence>
         </div>
 
-        <ActiveFilterChips
-          filters={filters}
-          employeeName={employeeName}
-          onClear={clearFilter}
-          onClearAll={clearAllFilters}
-        />
+        <ActiveFilterChips filters={filters} employeeName={employeeName} onClear={clearFilter} onClearAll={clearAllFilters} />
 
-        {/* ── Tab nav ── */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-          <div className="flex gap-1 px-4 py-3 overflow-hidden">
-            {TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`relative px-2 py-3.5 text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                  activeTab === tab.key
-                    ? "text-blue-600"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <span
-                  className={`flex items-center justify-center transition-transform ${activeTab === tab.key ? "scale-110" : ""}`}
-                >
-                  {tab.icon}
-                </span>
+        {/* ── Tabs ── */}
+        <div className="tab-nav mb-0" role="tablist">
+          {TABS.map((tab) => {
+            const active = activeTab === tab.key;
+            return (
+              <button key={tab.key} role="tab" aria-selected={active} onClick={() => setActiveTab(tab.key)}
+                className={`tab-item !border-transparent ${active ? 'text-ink' : ''}`}>
                 {tab.label}
                 {tab.hint && <InfoDot text={tab.hint} />}
-                {activeTab === tab.key && (
-                  <motion.span
-                    layoutId="tabUnderline"
-                    className="absolute left-3 right-3 -bottom-px h-[2.5px] bg-blue-600 rounded-full"
-                  />
+                {active && (
+                  <motion.span layoutId="callsTabUnderline" className="absolute left-0 right-0 -bottom-px h-0.5 bg-[var(--blue)] rounded-full"
+                    transition={{ duration: 0.25, ease: [0.77, 0, 0.175, 1] }} />
                 )}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
         {/* ── Tab content ── */}
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
             className="space-y-5"
           >
             {/* ═══════════════ SUMMARY ═══════════════ */}
             {activeTab === "summary" && (
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                <div className="lg:col-span-2 grid grid-cols-2 gap-3 auto-rows-min">
-                  <StatCard
-                    label="Total Calls"
-                    value={grandTotal.toLocaleString()}
-                    color="#2563EB"
-                    icon={<PhoneIco s={16} />}
-                  />
-                  <StatCard
-                    label="Connected Calls"
-                    value={(
-                      report?.sidebarStats?.connectedCalls ?? 0
-                    ).toLocaleString()}
-                    color="#16A34A"
-                    icon={<CheckIco />}
-                  />
-                  <StatCard
-                    label="Unique Clients"
-                    value={(
-                      report?.sidebarStats?.uniqueClients ?? 0
-                    ).toLocaleString()}
-                    color="#7C3AED"
-                    icon={<UsersIco />}
-                  />
-                  <StatCard
-                    label="Working Hours"
-                    value={report?.sidebarStats?.workingHours ?? "0s"}
-                    color="#D97706"
-                    icon={<ClockIco />}
-                  />
-                </div>
-
-                <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-1">
-                    Calls
-                  </h3>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Overall split by call type
-                  </p>
-                  {loading ? (
-                    <Skeleton className="h-56 w-full" />
-                  ) : (
-                    <div className="relative">
-                      <ResponsiveContainer width="100%" height={200}>
-                        <PieChart>
-                          <Pie
-                            data={pieData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={54}
-                            outerRadius={80}
-                            paddingAngle={4}
-                            dataKey="value"
-                          >
-                            {pieData.map((e, i) => (
-                              <Cell key={i} fill={e.color} stroke="none" />
-                            ))}
-                          </Pie>
-                          <Tooltip content={<ChartTip />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div
-                        className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
-                        style={{ top: -8 }}
-                      >
-                        <p className="text-2xl font-bold text-gray-900">
-                          {grandTotal.toLocaleString()}
-                        </p>
-                        <p className="text-xs text-gray-400">Calls</p>
-                      </div>
-                      <div className="flex justify-center gap-4 mt-2 flex-wrap">
-                        {pieData.map((d, i) => (
-                          <span
-                            key={i}
-                            className="flex items-center gap-1.5 text-xs text-gray-500"
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full"
-                              style={{ background: d.color }}
-                            />{" "}
-                            {d.name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="lg:col-span-5 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-7">
-                    Call Type Breakdown
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2  gap-20">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-xs uppercase">
-                          <th className="text-left pb-2 px-4">Call Type</th>
-                          <th className="text-right pb-2 px-4">Calls</th>
-                          <th className="text-right pb-2 px-4">Duration</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-black ">
-                        {["incoming", "outgoing", "missed", "rejected"].map(
-                          (k) => (
-                            <tr key={k}>
-                              <td className="py-2.5 px-4">
-                                <CallBadge type={k} />
-                              </td>
-                              <td className="py-2.5 px-4 text-right font-semibold text-gray-900">
-                                {(
-                                  report?.summary?.[k]?.calls ?? 0
-                                ).toLocaleString()}
-                              </td>
-                              <td className="py-2.5 px-4 text-right text-gray-500">
-                                {report?.summary?.[k]?.duration ?? "—"}
-                              </td>
-                            </tr>
-                          ),
-                        )}
-                        <tr className="border-t-2 border-gray-100">
-                          <td className="py-2.5 px-4 font-bold text-gray-900">
-                            Total
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-gray-900">
-                            {grandTotal.toLocaleString()}
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-bold text-gray-900">
-                            {report?.summary?.total?.duration ?? "0s"}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    <div className="grid grid-cols-2 md:grid-cols-2 gap-3 border-t border-gray-100">
-                      {[
-                        {
-                          label: "Never Attended",
-                          value: report?.sidebarStats?.neverAttended ?? 0,
-                          color: "#DC2626",
-                        },
-                        {
-                          label: "Not Pickup by Client",
-                          value: report?.sidebarStats?.notPickupByClient ?? 0,
-                          color: "#EA580C",
-                        },
-                        {
-                          label: "Connected Calls",
-                          value: report?.sidebarStats?.connectedCalls ?? 0,
-                          color: "#16A34A",
-                        },
-                        {
-                          label: "Unique Connected",
-                          value:
-                            report?.sidebarStats?.uniqueConnectedCalls ?? 0,
-                          color: "#0891B2",
-                        },
-                        {
-                          label: "Unique Clients",
-                          value: report?.sidebarStats?.uniqueClients ?? 0,
-                          color: "#7C3AED",
-                        },
-                        {
-                          label: "Working Hours",
-                          value: report?.sidebarStats?.workingHours ?? "0s",
-                          color: "#D97706",
-                        },
-                      ].map((s, i) => (
-                        <div key={i} className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-400">{s.label}</p>
-                          <p
-                            className="text-sm font-bold mt-0.5"
-                            style={{ color: s.color }}
-                          >
-                            {s.value.toLocaleString?.() ?? s.value}
+              <div className="space-y-5">
+                <section className="panel overflow-hidden" aria-label="Summary">
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 [&>*]:border-line-2 [&>*]:border-b xl:[&>*]:border-b-0 xl:divide-x divide-line-2">
+                    {[
+                      { label: 'Total calls', value: grandTotal },
+                      { label: 'Connected', value: report?.sidebarStats?.connectedCalls ?? 0, sub: grandTotal ? `${Math.round(((report?.sidebarStats?.connectedCalls ?? 0) / grandTotal) * 100)}% of calls` : null },
+                      { label: 'Unique clients', value: report?.sidebarStats?.uniqueClients ?? 0, sub: `${(report?.sidebarStats?.uniqueConnectedCalls ?? 0).toLocaleString('en-IN')} reached` },
+                      { label: 'Never attended', value: report?.sidebarStats?.neverAttended ?? 0, sub: 'Missed, never called back', tone: (report?.sidebarStats?.neverAttended ?? 0) > 0 ? 'behind' : null },
+                      { label: 'Not picked up', value: report?.sidebarStats?.notPickupByClient ?? 0, sub: 'Outgoing, client didn’t answer' },
+                      { label: 'Active calling time', value: report?.sidebarStats?.workingHours ?? '0s', sub: 'First to last call, summed' },
+                    ].map((s) => (
+                      <div key={s.label} className="px-5 py-4 min-w-0">
+                        <p className="stat-label">{s.label}</p>
+                        {loading ? <Skeleton className="h-7 w-20 mt-2" /> : (
+                          <p className={`stat-number mt-1 ${s.tone === 'behind' ? 'text-behind' : ''}`}>
+                            {typeof s.value === 'number' ? s.value.toLocaleString('en-IN') : s.value}
                           </p>
-                        </div>
-                      ))}
+                        )}
+                        {s.sub && <p className="text-xs text-ink-3 mt-1 truncate">{s.sub}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="panel" aria-label="Call type breakdown">
+                  <div className="panel-head">
+                    <div>
+                      <h3 className="panel-title">By call type</h3>
+                      <p className="panel-sub">Calls and talk time per type</p>
                     </div>
                   </div>
-                </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th className="w-[40%] hidden md:table-cell">Share</th>
+                        <th className="!text-right">Calls</th>
+                        <th className="!text-right">Talk time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {["outgoing", "incoming", "missed", "rejected"].map((k) => {
+                        const calls = report?.summary?.[k]?.calls ?? 0;
+                        const pct = grandTotal ? (calls / grandTotal) * 100 : 0;
+                        return (
+                          <tr key={k}>
+                            <td><CallBadge type={k} /></td>
+                            <td className="hidden md:table-cell">
+                              <div className="flex items-center gap-3">
+                                <span className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                                  <span className="block h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: `${pct}%`, background: TYPE_META[k].color }} />
+                                </span>
+                                <span className="w-10 text-right text-xs text-ink-3 tabular-nums">{Math.round(pct)}%</span>
+                              </div>
+                            </td>
+                            <td className="text-right font-medium text-ink tabular-nums">{calls.toLocaleString('en-IN')}</td>
+                            <td className="text-right tabular-nums">{report?.summary?.[k]?.duration ?? '—'}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr className="bg-gray-50">
+                        <td className="font-semibold text-ink">Total</td>
+                        <td className="hidden md:table-cell" />
+                        <td className="text-right font-semibold text-ink tabular-nums">{grandTotal.toLocaleString('en-IN')}</td>
+                        <td className="text-right font-semibold text-ink tabular-nums">{report?.summary?.total?.duration ?? '0s'}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
 
-                <div className="lg:col-span-5 bg-white rounded-xl border border-gray-200 p-5">
-                  <h3 className="text-sm font-bold text-gray-900 mb-1">
-                    Employee Summary
-                  </h3>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Per-employee call performance
-                  </p>
+                <section className="panel" aria-label="Employee summary">
+                  <div className="panel-head">
+                    <div>
+                      <h3 className="panel-title">By employee</h3>
+                      <p className="panel-sub">Per-employee call performance for this period</p>
+                    </div>
+                  </div>
+                  <div className="p-4 pt-3">
                   <DataTable
                     loading={loading}
                     footer={employeeSummaryFooter}
                     columns={[
-                      { key: "employeeName", label: "Employee", width: 160, render: (r) => <Truncate text={r.employeeName} /> },
-                      { key: "tlName", label: "TL", width: 110, render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-gray-300">—</span> },
-                      {
-                        key: "totalCalls",
-                        label: "Total",
-                        align: "right",
-                        width: 80,
-                      },
-                      {
-                        key: "incoming",
-                        label: "In",
-                        align: "right",
-                        searchable: false,
-                        width: 70,
-                      },
-                      {
-                        key: "outgoing",
-                        label: "Out",
-                        align: "right",
-                        searchable: false,
-                        width: 70,
-                      },
-                      {
-                        key: "missed",
-                        label: "Missed",
-                        align: "right",
-                        searchable: false,
-                        width: 80,
-                      },
-                      {
-                        key: "connectedCalls",
-                        label: "Connected",
-                        align: "right",
-                        searchable: false,
-                        width: 100,
-                        render: (r) => (
-                          <span className="text-emerald-600 font-semibold">
-                            {r.connectedCalls}
-                          </span>
-                        ),
-                      },
-                      {
-                        key: "neverAttended",
-                        label: "Never Attended",
-                        align: "right",
-                        searchable: false,
-                        width: 130,
-                      },
-                      {
-                        key: "notPickupByClient",
-                        label: "Not Pickup",
-                        align: "right",
-                        searchable: false,
-                        width: 110,
-                      },
-                      {
-                        key: "uniqueClients",
-                        label: "Unique Clients",
-                        align: "right",
-                        searchable: false,
-                        width: 120,
-                      },
-                      {
-                        key: "totalDuration",
-                        label: "Duration",
-                        align: "right",
-                        searchable: false,
-                        width: 110,
-                      },
+                      { key: "employeeName", label: "Employee", width: 170, render: (r) => <span className="font-medium text-ink"><Truncate text={r.employeeName} max={22} /></span> },
+                      { key: "tlName", label: "Team lead", width: 120, render: (r) => r.tlName ? <Truncate text={r.tlName} max={14} /> : <span className="text-ink-4">—</span> },
+                      { key: "totalCalls", label: "Total", align: "right", width: 80 },
+                      { key: "incoming", label: "In", align: "right", searchable: false, width: 64 },
+                      { key: "outgoing", label: "Out", align: "right", searchable: false, width: 64 },
+                      { key: "missed", label: "Missed", align: "right", searchable: false, width: 76, render: (r) => r.missed ? <span className="text-behind">{r.missed.toLocaleString('en-IN')}</span> : <span className="text-ink-4">0</span> },
+                      { key: "connectedCalls", label: "Connected", align: "right", searchable: false, width: 96 },
+                      { key: "neverAttended", label: "Never attended", align: "right", searchable: false, width: 124 },
+                      { key: "notPickupByClient", label: "Not picked up", align: "right", searchable: false, width: 116 },
+                      { key: "uniqueClients", label: "Unique clients", align: "right", searchable: false, width: 116 },
+                      { key: "totalDuration", label: "Talk time", align: "right", searchable: false, width: 104 },
                     ]}
                     rows={employeeSummaryRows}
                   />
-                </div>
+                  </div>
+                </section>
               </div>
             )}
 
@@ -1207,7 +780,7 @@ function PeriodicReportsPageContent() {
                       <h3 className="text-sm font-bold text-gray-900">
                         Calls vs. Connected — Hourly
                       </h3>
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-gray-500">
                         Bars = total calls · Line = connected calls
                       </p>
                     </div>
@@ -1238,30 +811,30 @@ function PeriodicReportsPageContent() {
                           >
                             <stop
                               offset="0%"
-                              stopColor="#2563EB"
+                              stopColor="#7C3AED"
                               stopOpacity={0.9}
                             />
                             <stop
                               offset="100%"
-                              stopColor="#2563EB"
+                              stopColor="#7C3AED"
                               stopOpacity={0.25}
                             />
                           </linearGradient>
                         </defs>
                         <CartesianGrid
                           strokeDasharray="3 3"
-                          stroke="#F1F5F9"
+                          stroke="#F4F3F8"
                           vertical={false}
                         />
                         <XAxis
                           dataKey="hour"
-                          tick={{ fill: "#94A3B8", fontSize: 10 }}
+                          tick={{ fill: "#A19DB2", fontSize: 10 }}
                           tickLine={false}
                           axisLine={false}
                           interval={1}
                         />
                         <YAxis
-                          tick={{ fill: "#94A3B8", fontSize: 10 }}
+                          tick={{ fill: "#A19DB2", fontSize: 10 }}
                           tickLine={false}
                           axisLine={false}
                           width={32}
@@ -1280,9 +853,9 @@ function PeriodicReportsPageContent() {
                             type="monotone"
                             dataKey="connected"
                             name="Connected"
-                            stroke="#16A34A"
+                            stroke="#079455"
                             strokeWidth={2}
-                            dot={{ r: 3, fill: "#16A34A" }}
+                            dot={{ r: 3, fill: "#079455" }}
                           />
                         )}
                       </ComposedChart>
@@ -1382,7 +955,7 @@ function PeriodicReportsPageContent() {
                     ))}
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Daily totals within the selected date range
                 </p>
 
@@ -1432,17 +1005,17 @@ function PeriodicReportsPageContent() {
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
-                            stroke="#F1F5F9"
+                            stroke="#F4F3F8"
                             vertical={false}
                           />
                           <XAxis
                             dataKey="day"
-                            tick={{ fill: "#94A3B8", fontSize: 11 }}
+                            tick={{ fill: "#A19DB2", fontSize: 11 }}
                             tickLine={false}
                             axisLine={false}
                           />
                           <YAxis
-                            tick={{ fill: "#94A3B8", fontSize: 10 }}
+                            tick={{ fill: "#A19DB2", fontSize: 10 }}
                             tickLine={false}
                             axisLine={false}
                             width={40}
@@ -1451,13 +1024,13 @@ function PeriodicReportsPageContent() {
                           <Bar
                             dataKey="total"
                             name="Total Calls"
-                            fill="#2563EB"
+                            fill="#7C3AED"
                             radius={[4, 4, 0, 0]}
                           />
                           <Bar
                             dataKey="connected"
                             name="Connected"
-                            fill="#16A34A"
+                            fill="#079455"
                             radius={[4, 4, 0, 0]}
                           />
                         </BarChart>
@@ -1471,17 +1044,17 @@ function PeriodicReportsPageContent() {
                         >
                           <CartesianGrid
                             strokeDasharray="3 3"
-                            stroke="#F1F5F9"
+                            stroke="#F4F3F8"
                             vertical={false}
                           />
                           <XAxis
                             dataKey="day"
-                            tick={{ fill: "#94A3B8", fontSize: 11 }}
+                            tick={{ fill: "#A19DB2", fontSize: 11 }}
                             tickLine={false}
                             axisLine={false}
                           />
                           <YAxis
-                            tick={{ fill: "#94A3B8", fontSize: 10 }}
+                            tick={{ fill: "#A19DB2", fontSize: 10 }}
                             tickLine={false}
                             axisLine={false}
                             width={40}
@@ -1491,7 +1064,7 @@ function PeriodicReportsPageContent() {
                             type="monotone"
                             dataKey="total"
                             name="Total Calls"
-                            stroke="#2563EB"
+                            stroke="#7C3AED"
                             strokeWidth={2}
                             dot={{ r: 3 }}
                           />
@@ -1499,7 +1072,7 @@ function PeriodicReportsPageContent() {
                             type="monotone"
                             dataKey="connected"
                             name="Connected"
-                            stroke="#16A34A"
+                            stroke="#079455"
                             strokeWidth={2}
                             dot={{ r: 3 }}
                           />
@@ -1517,7 +1090,7 @@ function PeriodicReportsPageContent() {
                 <h3 className="text-sm font-bold text-gray-900 mb-1">
                   Hourly Time Slots
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Share of total call volume by hour (IST)
                 </p>
                 <DataTable
@@ -1575,13 +1148,13 @@ function PeriodicReportsPageContent() {
                   Never Attended{" "}
                   <InfoDot text="Calls that were never returned, even after being missed." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Missed calls with zero follow-up outgoing call
                 </p>
                 <DataTable
                   loading={loading}
                   showRowNumber
-                  emptyTitle="Nothing slipped through 🎉"
+                  emptyTitle="Nothing slipped through"
                   capNotice={
                     report?.total > neverAttendedRows.length
                       ? `Showing ${neverAttendedRows.length.toLocaleString()} of ${report.total.toLocaleString()} — narrow the date range or filters to see the rest.`
@@ -1597,7 +1170,7 @@ function PeriodicReportsPageContent() {
                           <p className="font-medium text-gray-900 truncate">
                             {r.contactName}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {r.contactNumber}
                           </p>
                         </div>
@@ -1640,7 +1213,7 @@ function PeriodicReportsPageContent() {
                   Not Pickup by Client{" "}
                   <InfoDot text="Outgoing calls the client never answered." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Outbound attempts that went unanswered
                 </p>
                 <DataTable
@@ -1662,7 +1235,7 @@ function PeriodicReportsPageContent() {
                           <p className="font-medium text-gray-900 truncate">
                             {r.contactName}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {r.contactNumber}
                           </p>
                         </div>
@@ -1710,7 +1283,7 @@ function PeriodicReportsPageContent() {
                   Unique Clients{" "}
                   <InfoDot text="One row per distinct phone number contacted." />
                 </h3>
-                <p className="text-xs text-gray-400 mb-4">
+                <p className="text-xs text-gray-500 mb-4">
                   Every distinct client contacted this period
                 </p>
                 <DataTable
@@ -1731,7 +1304,7 @@ function PeriodicReportsPageContent() {
                           <p className="font-medium text-gray-900 truncate">
                             {r.contactName}
                           </p>
-                          <p className="text-xs text-gray-400 truncate">
+                          <p className="text-xs text-gray-500 truncate">
                             {r.contactNumber}
                           </p>
                         </div>
@@ -1824,7 +1397,7 @@ function PeriodicReportsPageContent() {
                       render: (r) => (
                         <div>
                           <p><Truncate text={r.employeeName} /></p>
-                          {r.employeeTL && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.employeeTL} max={14} /></p>}
+                          {r.employeeTL && <p className="text-xs text-gray-500">TL: <Truncate text={r.employeeTL} max={14} /></p>}
                         </div>
                       ),
                     },
@@ -1921,23 +1494,6 @@ function PeriodicReportsPageContent() {
           </motion.div>
         </AnimatePresence>
       </div>
-
-      <style jsx global>{`
-        .input {
-          width: 100%;
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.5rem;
-          border: 1px solid #e5e7eb;
-          font-size: 0.8125rem;
-          outline: none;
-          background: white;
-          transition: border-color 0.15s;
-        }
-        .input:focus {
-          border-color: #3b82f6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-      `}</style>
     </div>
   );
 }

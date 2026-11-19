@@ -3,6 +3,11 @@ import { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import { parseUTC } from '../../../lib/timezone';
+import { AlertCircle, CalendarClock, PhoneMissed, RefreshCw, UserPlus, BarChart3 } from 'lucide-react';
+
+// Drawn icons, one stroke weight, in place of the emoji the notification builders tag items with.
+const ICONS = { '🔴': AlertCircle, '📅': CalendarClock, '📵': PhoneMissed, '🔄': RefreshCw, '🎯': UserPlus, '📊': BarChart3 };
+const NoteIcon = ({ glyph, size = 16 }) => { const I = ICONS[glyph]; return I ? <I size={size} strokeWidth={1.75} aria-hidden /> : null; };
 
 const READ_KEY  = 'calltrack_notif_read';
 const PREF_KEY  = 'ct_notif_prefs';
@@ -19,7 +24,7 @@ function Toggle({ checked, onChange }) {
   return (
     <button type="button" onClick={()=>onChange(!checked)}
       className="relative flex-shrink-0 transition-colors duration-200 focus:outline-none"
-      style={{ width:40, height:24, borderRadius:9999, background:checked?'#2563EB':'#E2E8F0' }}>
+      style={{ width:40, height:24, borderRadius:9999, background:checked?'#7C3AED':'#E9E7EF' }}>
       <span className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
         style={{ transform:checked?'translateX(18px)':'translateX(4px)' }}/>
     </button>
@@ -36,7 +41,7 @@ function buildNotifications(calls, leads) {
       const overdue = new Date(l.followUpDate) < new Date();
       list.push({
         id:`fu_${l._id}`, type:'followUp',
-        color:overdue?'#EF4444':'#D97706', bg:overdue?'rgba(220,38,38,0.08)':'rgba(217,119,6,0.08)',
+        color:overdue?'#D92D20':'#B54708', bg:overdue?'rgba(217,45,32,0.08)':'rgba(181,71,8,0.08)',
         title:`Follow-up ${overdue?'overdue':'today'}: ${l.name}`,
         body:`${l.phone}${l.lastCallNote?` · "${l.lastCallNote}"` : ''}`,
         time:new Date(l.followUpDate).toISOString(),
@@ -50,7 +55,7 @@ function buildNotifications(calls, leads) {
     .forEach(c=>{
       list.push({
         id:`missed_${c._id}`, type:'missed',
-        color:'#EF4444', bg:'rgba(220,38,38,0.08)', icon:'📵',
+        color:'#D92D20', bg:'rgba(217,45,32,0.08)', icon:'📵',
         title:`Missed call from ${c.contactName||c.contactNumber}`,
         body:`${c.employeeName} · ${parseUTC(c.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}`,
         time:c.timestamp,
@@ -61,7 +66,7 @@ function buildNotifications(calls, leads) {
   if (recentSync.length > 0) {
     list.push({
       id:`sync_${Date.now()}`, type:'callSync',
-      color:'#2563EB', bg:'rgba(37,99,235,0.08)', icon:'🔄',
+      color:'#7C3AED', bg:'rgba(124,58,237,0.08)', icon:'🔄',
       title:`${recentSync.length} call${recentSync.length!==1?'s':''} synced in the last hour`,
       body:'Call logs are up to date.',
       time:new Date().toISOString(),
@@ -131,20 +136,20 @@ export default function NotificationsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold flex items-center gap-2.5" style={{ color:'#0F172A', letterSpacing:'-0.02em' }}>
+          <h2 className="page-title flex items-center gap-2.5">
             Notifications
             {unreadCount > 0 && (
-              <span className="text-xs text-white rounded-full px-2 py-0.5 font-semibold" style={{ background:'#2563EB' }}>{unreadCount}</span>
+              <span className="text-xs text-white rounded-full px-2 py-0.5 font-semibold" style={{ background:'#7C3AED' }}>{unreadCount}</span>
             )}
           </h2>
-          <p className="text-sm mt-0.5" style={{ color:'#94A3B8' }}>Follow-up reminders, missed calls, and sync events</p>
+          <p className="page-subtitle">Follow-up reminders, missed calls, and sync events</p>
         </div>
         {unreadCount > 0 && (
           <button onClick={markAllRead}
             className="text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors"
-            style={{ color:'#2563EB', background:'#EFF6FF', border:'1px solid #BFDBFE' }}
+            style={{ color:'#7C3AED', background:'#F5F3FF', border:'1px solid #EDE9FE' }}
             onMouseEnter={e=>{ e.currentTarget.style.background='#DBEAFE'; }}
-            onMouseLeave={e=>{ e.currentTarget.style.background='#EFF6FF'; }}>
+            onMouseLeave={e=>{ e.currentTarget.style.background='#F5F3FF'; }}>
             Mark all read
           </button>
         )}
@@ -165,7 +170,7 @@ export default function NotificationsPage() {
             {loading ? (
               <div>
                 {[1,2,3].map(i=>(
-                  <div key={i} className="flex items-start gap-4 px-5 py-4" style={{ borderBottom:'1px solid #F1F5F9' }}>
+                  <div key={i} className="flex items-start gap-4 px-5 py-4" style={{ borderBottom:'1px solid #F4F3F8' }}>
                     <div className="skeleton w-10 h-10 rounded-xl flex-shrink-0"/>
                     <div className="flex-1 space-y-2 pt-1">
                       <div className="skeleton h-3 w-3/4 rounded"/>
@@ -176,13 +181,13 @@ export default function NotificationsPage() {
               </div>
             ) : visible.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:'#EFF6FF', color:'#2563EB' }}>
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background:'#F5F3FF', color:'#7C3AED' }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
                   </svg>
                 </div>
-                <p className="text-sm font-medium" style={{ color:'#0F172A' }}>{tab==='unread'?'All caught up!':'No notifications'}</p>
-                <p className="text-xs" style={{ color:'#94A3B8' }}>Check back later or adjust your preferences</p>
+                <p className="text-sm font-medium" style={{ color:'#1A1726' }}>{tab==='unread'?'All caught up!':'No notifications'}</p>
+                <p className="text-xs" style={{ color: '#6B6880' }}>Check back later or adjust your preferences</p>
               </div>
             ) : visible.map(n=>{
               const isRead = readSet.has(n.id);
@@ -190,19 +195,19 @@ export default function NotificationsPage() {
                 <div key={n.id}
                   onClick={()=>markRead(n.id)}
                   className="flex items-start gap-4 px-5 py-4 cursor-pointer transition-colors"
-                  style={{ borderBottom:'1px solid #F1F5F9', background:isRead?'':'rgba(37,99,235,0.02)' }}
-                  onMouseEnter={e=>e.currentTarget.style.background='#F8FAFC'}
-                  onMouseLeave={e=>e.currentTarget.style.background=isRead?'':'rgba(37,99,235,0.02)'}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                  style={{ borderBottom:'1px solid #F4F3F8', background:isRead?'':'rgba(124,58,237,0.02)' }}
+                  onMouseEnter={e=>e.currentTarget.style.background='#FAF9FC'}
+                  onMouseLeave={e=>e.currentTarget.style.background=isRead?'':'rgba(124,58,237,0.02)'}>
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
                     style={{ background:n.bg, color:n.color }}>
-                    {n.icon}
+                    <NoteIcon glyph={n.icon} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm leading-snug" style={{ color:'#0F172A', fontWeight:isRead?400:600 }}>{n.title}</p>
-                    <p className="text-xs mt-0.5 truncate" style={{ color:'#94A3B8' }}>{n.body}</p>
-                    <p className="text-xs mt-1" style={{ color:'#94A3B8' }}>{timeAgo(n.time)}</p>
+                    <p className="text-sm leading-snug" style={{ color:'#1A1726', fontWeight:isRead?400:600 }}>{n.title}</p>
+                    <p className="text-xs mt-0.5 truncate" style={{ color: '#6B6880' }}>{n.body}</p>
+                    <p className="text-xs mt-1" style={{ color: '#6B6880' }}>{timeAgo(n.time)}</p>
                   </div>
-                  {!isRead && <span className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background:'#2563EB' }}/>}
+                  {!isRead && <span className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background:'#7C3AED' }}/>}
                 </div>
               );
             })}
@@ -211,11 +216,11 @@ export default function NotificationsPage() {
 
         {/* Right: preferences */}
         <div className="page-card overflow-hidden">
-          <div className="px-5 py-3.5" style={{ borderBottom:'1px solid #E2E8F0' }}>
-            <h3 className="font-bold text-sm" style={{ color:'#0F172A' }}>Notification Preferences</h3>
-            <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>Toggle which alerts you receive</p>
+          <div className="px-5 py-3.5" style={{ borderBottom:'1px solid #E9E7EF' }}>
+            <h3 className="font-bold text-sm" style={{ color:'#1A1726' }}>Notification Preferences</h3>
+            <p className="text-xs mt-0.5" style={{ color: '#6B6880' }}>Toggle which alerts you receive</p>
           </div>
-          <div style={{ borderBottom:'1px solid #E2E8F0' }}>
+          <div style={{ borderBottom:'1px solid #E9E7EF' }}>
             {[
               { key:'newLead',      label:'New Lead Assigned',   desc:'When a lead is assigned to you', icon:'🎯' },
               { key:'followUp',     label:'Follow-up Reminders', desc:'Upcoming or overdue follow-ups',  icon:'📅' },
@@ -223,12 +228,12 @@ export default function NotificationsPage() {
               { key:'callSync',     label:'Call Sync Events',    desc:'When call logs sync from mobile', icon:'🔄' },
               { key:'weeklyReport', label:'Weekly Report',       desc:'Performance summary every week',  icon:'📊' },
             ].map(({ key, label, desc, icon }) => (
-              <div key={key} className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom:'1px solid #F1F5F9' }}>
+              <div key={key} className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom:'1px solid #F4F3F8' }}>
                 <div className="flex items-start gap-3 mr-3 min-w-0">
-                  <span className="text-lg flex-shrink-0 mt-0.5">{icon}</span>
+                  <span className="flex-shrink-0 mt-0.5 text-ink-3"><NoteIcon glyph={icon} /></span>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium leading-none" style={{ color:'#0F172A' }}>{label}</p>
-                    <p className="text-xs mt-0.5" style={{ color:'#94A3B8' }}>{desc}</p>
+                    <p className="text-sm font-medium leading-none" style={{ color:'#1A1726' }}>{label}</p>
+                    <p className="text-xs mt-0.5" style={{ color: '#6B6880' }}>{desc}</p>
                   </div>
                 </div>
                 <Toggle checked={!!prefs[key]} onChange={v=>updatePref(key, v)}/>
@@ -236,7 +241,7 @@ export default function NotificationsPage() {
             ))}
           </div>
           <div className="px-5 py-3">
-            <p className="text-xs" style={{ color:'#94A3B8' }}>Changes are saved automatically to this browser.</p>
+            <p className="text-xs" style={{ color: '#6B6880' }}>Changes are saved automatically to this browser.</p>
           </div>
         </div>
       </div>

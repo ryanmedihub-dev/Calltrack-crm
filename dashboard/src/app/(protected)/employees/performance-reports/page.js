@@ -8,10 +8,9 @@ import { StatCard, DataTable, ChartTip, Ico, UsersIco, PhoneIco, TrophyIco } fro
 const ChevronRightIco = ({ s = 13 }) => <Ico size={s}><polyline points="9 18 15 12 9 6" /></Ico>;
 
 const PERIODS = [{ key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' }];
-const RANK_COLORS = ['#F59E0B', '#94A3B8', '#B45309'];
-const RANK_BG = ['rgba(245,158,11,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
-const MEDALS = ['🥇', '🥈', '🥉'];
-const GRADIENT_COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE'].reverse();
+const RANK_COLORS = ['#B54708', '#A19DB2', '#B45309'];
+const RANK_BG = ['rgba(181,71,8,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
+const GRADIENT_COLORS = ['#7C3AED', '#7C3AED', '#C4B5FD', '#EDE9FE'].reverse();
 
 export default function PerformanceReportsPage() {
   const [period, setPeriod] = useState('week');
@@ -49,10 +48,7 @@ export default function PerformanceReportsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-gray-400 flex items-center gap-1.5">
-              Employees <span className="text-gray-300">/</span> <span className="text-gray-500">Performance Reports</span>
-            </p>
-            <h1 className="text-xl font-bold text-gray-900 mt-0.5">Performance Reports</h1>
+            <h1 className="page-title">Performance Reports</h1>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -72,16 +68,16 @@ export default function PerformanceReportsPage() {
 
         {/* Summary KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Active Agents" value={dialers.length} color="#2563EB" icon={<UsersIco s={16} />} loading={loading} />
-          <StatCard label="Total Calls" value={dialers.reduce((s, d) => s + d.count, 0).toLocaleString()} color="#16A34A" icon={<PhoneIco s={16} />} loading={loading} />
-          <StatCard label="Avg per Agent" value={dialers.length ? Math.round(dialers.reduce((s, d) => s + d.count, 0) / dialers.length) : 0} color="#D97706" icon={<PhoneIco s={16} />} loading={loading} />
-          <StatCard label="Top Performer" value={dialers[0]?.count || 0} color="#F59E0B" icon={<TrophyIco s={16} />} loading={loading} />
+          <StatCard label="Active Agents" value={dialers.length} color="#7C3AED" icon={<UsersIco s={16} />} loading={loading} />
+          <StatCard label="Total Calls" value={dialers.reduce((s, d) => s + d.count, 0).toLocaleString()} color="#079455" icon={<PhoneIco s={16} />} loading={loading} />
+          <StatCard label="Avg per Agent" value={dialers.length ? Math.round(dialers.reduce((s, d) => s + d.count, 0) / dialers.length) : 0} color="#B54708" icon={<PhoneIco s={16} />} loading={loading} />
+          <StatCard label="Top Performer" value={dialers[0]?.count || 0} color="#B54708" icon={<TrophyIco s={16} />} loading={loading} />
         </div>
 
         {/* Top 3 podium */}
         {!loading && dialers.length >= 3 && (
           <div className="bg-white rounded-xl border border-gray-200 p-8 shadow-sm">
-            <p className="text-xs font-bold text-center uppercase tracking-widest mb-8 text-gray-400">Top Performers</p>
+            <p className="text-xs font-bold text-center mb-8 text-gray-500">Top Performers</p>
             <div className="flex items-end justify-center gap-8">
               {[
                 dialers[1] ? { ...dialers[1], rank: 2 } : null,
@@ -90,22 +86,22 @@ export default function PerformanceReportsPage() {
               ].filter(Boolean).map(d => {
                 const heights = { 1: '8rem', 2: '5.5rem', 3: '4rem' };
                 const grads = {
-                  1: 'linear-gradient(135deg,#F59E0B,#D97706)',
-                  2: 'linear-gradient(135deg,#94A3B8,#64748B)',
-                  3: 'linear-gradient(135deg,#FB923C,#F97316)',
+                  1: '#B54708',
+                  2: '#A19DB2',
+                  3: '#FB923C',
                 };
                 return (
                   <div key={d.employeeId} className="flex flex-col items-center gap-2">
                     <div className="relative">
-                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-lg font-black shadow-md"
-                        style={{ background: grads[d.rank] }}>
+                      <div className="w-12 h-12 rounded-full flex items-center justify-center bg-gray-100 text-ink-2 text-base font-semibold"
+                        >
                         {(d.name || '?').slice(0, 2).toUpperCase()}
                       </div>
-                      <span className="absolute -top-2 -right-2 text-xl">{MEDALS[d.rank - 1]}</span>
+                      <span className="absolute -top-2 -right-2"><span className="inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-semibold tabular-nums bg-[var(--blue-50)] text-[var(--blue)]">{d.rank}</span></span>
                     </div>
                     <div className="text-center">
                       <p className="text-xs font-bold max-w-[80px] truncate text-gray-900">{d.name}</p>
-                      <span className="text-[10px] font-bold rounded-full px-2 py-0.5"
+                      <span className="text-xs font-bold rounded-full px-2 py-0.5"
                         style={{ background: RANK_BG[d.rank - 1], color: RANK_COLORS[d.rank - 1] }}>
                         {d.count} calls
                       </span>
@@ -124,9 +120,9 @@ export default function PerformanceReportsPage() {
             <h3 className="text-sm font-bold text-gray-900 mb-4">Call Volume — Top 12</h3>
             <ResponsiveContainer width="100%" height={Math.max(200, barData.length * 32)}>
               <BarChart data={barData} barSize={20} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} allowDecimals={false} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#475569', fontWeight: 600 }} tickLine={false} axisLine={false} width={72} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: '#A19DB2' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#524F63', fontWeight: 600 }} tickLine={false} axisLine={false} width={72} />
                 <Tooltip content={<ChartTip />} />
                 <Bar dataKey="calls" name="Calls" radius={[0, 5, 5, 0]}>
                   {barData.map((_, i) => <Cell key={i} fill={GRADIENT_COLORS[Math.min(i, GRADIENT_COLORS.length - 1)]} />)}
@@ -139,7 +135,7 @@ export default function PerformanceReportsPage() {
         {/* Full rankings */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Full Rankings</h3>
-          <p className="text-xs text-gray-400 mb-3">Every employee ranked by call volume this period</p>
+          <p className="text-xs text-gray-500 mb-3">Every employee ranked by call volume this period</p>
           <DataTable
             loading={loading}
             emptyTitle="No performance data for this period"
@@ -147,14 +143,14 @@ export default function PerformanceReportsPage() {
               {
                 key: 'rank', label: 'Rank', sortable: false, searchable: false,
                 render: (r) => r.rank <= 3
-                  ? <span className="text-lg">{MEDALS[r.rank - 1]}</span>
-                  : <span className="font-bold text-xs text-gray-400">#{r.rank}</span>,
+                  ? <span className="inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-semibold tabular-nums bg-[var(--blue-50)] text-[var(--blue)]">{r.rank}</span>
+                  : <span className="font-bold text-xs text-gray-500">#{r.rank}</span>,
               },
               {
                 key: 'name', label: 'Agent',
                 render: (r) => (
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold shrink-0 bg-blue-600">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 bg-blue-600">
                       {(r.name || '?').slice(0, 2).toUpperCase()}
                     </div>
                     <span className="font-semibold text-sm text-gray-900">{r.name || 'Unknown'}</span>
@@ -169,7 +165,7 @@ export default function PerformanceReportsPage() {
                     <div className="h-1.5 w-16 rounded-full overflow-hidden bg-gray-100">
                       <div className="h-full rounded-full bg-blue-600" style={{ width: `${(r.count / maxCalls) * 100}%` }} />
                     </div>
-                    <span className="text-[11px] tabular-nums text-gray-400">{Math.round((r.count / totalCalls) * 100)}%</span>
+                    <span className="text-xs tabular-nums text-gray-500">{Math.round((r.count / totalCalls) * 100)}%</span>
                   </div>
                 ),
               },

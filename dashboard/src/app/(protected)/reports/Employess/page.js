@@ -9,6 +9,7 @@ import api from '../../../../lib/api';
 import useIsAdmin from '../../../../lib/useIsAdmin';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { triggerServerExport } from '../../../../lib/downloads';
+import MultiSelect from '../../../../components/MultiSelect';
 import {
   DataTable, StatCard, ChartTip, EmptyState, InsightCard, Field, Skeleton, TLFilter, Truncate,
   PhoneIco, UsersIco, CheckIco, GaugeIco, TrophyIco, ClockIco, DownloadIco,
@@ -26,8 +27,8 @@ const TABS = [
 ];
 
 function AchievementBar({ pct }) {
-  if (pct == null) return <span className="text-xs text-gray-400">No target set</span>;
-  const color = pct >= 100 ? '#16A34A' : pct >= 50 ? '#D97706' : '#DC2626';
+  if (pct == null) return <span className="text-xs text-gray-500">No target set</span>;
+  const color = pct >= 100 ? '#079455' : pct >= 50 ? '#B54708' : '#D92D20';
   return (
     <div className="flex items-center gap-2 justify-end">
       <div className="w-20 h-1.5 rounded-full overflow-hidden bg-gray-200">
@@ -168,20 +169,18 @@ export default function EmployeeReportsPage() {
   const dayWiseRows = (report?.daywise || []).map((d) => ({ ...d, id: d.date }));
   const hourlyChartData = (report?.hourly || []).map((h) => ({ hour: h.label, calls: h.calls, leads: h.leads }));
 
-  const employeeName = employees.find((e) => e._id === filters.employee)?.name;
+  const employeeName = filters.employee ? filters.employee.split(',').map((id) => employees.find((e) => e._id === id)?.name || id).join(', ') : undefined;
 
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Employee Reports</span>
-          </p>
-          <h1 className="text-xl font-bold text-gray-900 mt-0.5">{report?.dateLabel || 'Employee Reports'}</h1>
+          <h1 className="page-title">Employees report</h1>
+          <p className="page-subtitle">{report?.dateLabel ? `Performance per agent · ${report.dateLabel}` : 'Performance per agent, by period'}</p>
         </div>
         <button onClick={exportCSV}
-          className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm">
+          className="flex items-center gap-2 px-3.5 py-2 bg-[var(--blue)] text-white rounded-lg hover:bg-[var(--blue-600)] transition-colors text-sm font-medium shadow-sm">
           <DownloadIco /> Export
         </button>
       </div>
@@ -196,17 +195,12 @@ export default function EmployeeReportsPage() {
             <input type="date" className="form-input" value={filters.toDate} onChange={(e) => setFilters({ ...filters, toDate: e.target.value })} />
           </Field>
           <Field label="Employee">
-            <select className="form-input" value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })}>
-              <option value="">All employees</option>
-              {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
-            </select>
+            <MultiSelect value={filters.employee} onChange={(v) => setFilters({ ...filters, employee: v })}
+              placeholder="All employees" noun="employees" ariaLabel="Employee" options={employees.map((e) => [e._id, e.name])} />
           </Field>
           <Field label="Status">
-            <select className="form-input" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-              <option value="">All</option>
-              <option value="active">Active only</option>
-              <option value="inactive">Inactive only</option>
-            </select>
+            <MultiSelect value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })}
+              placeholder="All" noun="statuses" ariaLabel="Status" options={[['active', 'Active'], ['inactive', 'Inactive']]} />
           </Field>
           <Field label="Team Lead">
             <TLFilter value={filters.tl} onChange={(v) => setFilters({ ...filters, tl: v })} className="w-full" />
@@ -214,8 +208,8 @@ export default function EmployeeReportsPage() {
           <button onClick={load} className="btn-primary justify-center h-[38px]">Apply</button>
         </div>
         {(filters.employee || filters.status || filters.tl) && (
-          <p className="text-xs text-gray-400 mt-3">
-            Filtering by {filters.employee ? employeeName : 'all employees'}{filters.status ? `, ${filters.status}` : ''}{filters.tl ? `, TL: ${filters.tl}` : ''}
+          <p className="text-xs text-gray-500 mt-3">
+            Filtering by {filters.employee ? employeeName : 'all employees'}{filters.status ? `, ${filters.status.split(',').join(' or ')}` : ''}{filters.tl ? `, TL: ${filters.tl.split(',').join(', ')}` : ''}
           </p>
         )}
       </div>
@@ -233,16 +227,16 @@ export default function EmployeeReportsPage() {
       {activeTab === 'summary' && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard loading={loading} label="Total Employees" value={(report?.kpis?.totalEmployees ?? 0).toLocaleString()} color="#2563EB" icon={<UsersIco />} />
-            <StatCard loading={loading} label="Active Employees" value={(report?.kpis?.activeEmployees ?? 0).toLocaleString()} color="#16A34A" icon={<CheckIco />} />
-            <StatCard loading={loading} label="Total Calls" value={(report?.kpis?.totalCalls ?? 0).toLocaleString()} color="#D97706" icon={<PhoneIco />} />
-            <StatCard loading={loading} label="Leads Assigned" value={(report?.kpis?.totalLeadsAssigned ?? 0).toLocaleString()} color="#7C3AED" icon={<UsersIco />} />
+            <StatCard loading={loading} label="Total Employees" value={(report?.kpis?.totalEmployees ?? 0).toLocaleString()} color="#7C3AED" icon={<UsersIco />} />
+            <StatCard loading={loading} label="Active Employees" value={(report?.kpis?.activeEmployees ?? 0).toLocaleString()} color="#079455" icon={<CheckIco />} />
+            <StatCard loading={loading} label="Total Calls" value={(report?.kpis?.totalCalls ?? 0).toLocaleString()} color="#B54708" icon={<PhoneIco />} />
+            <StatCard loading={loading} label="Leads Assigned" value={(report?.kpis?.totalLeadsAssigned ?? 0).toLocaleString()} color="#524F63" icon={<UsersIco />} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
             <div className="lg:col-span-1 bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-bold text-gray-900 mb-1">Workforce Status</h3>
-              <p className="text-xs text-gray-400 mb-3">Active vs inactive</p>
+              <p className="text-xs text-gray-500 mb-3">Active vs inactive</p>
               {loading ? <Skeleton className="h-44 w-full" /> : !report?.statusPie?.length ? <EmptyState title="No employees" hint="" /> : (
                 <ResponsiveContainer width="100%" height={180}>
                   <PieChart>
@@ -264,7 +258,7 @@ export default function EmployeeReportsPage() {
 
             <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-5">
               <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Performance</h3>
-              <p className="text-xs text-gray-400 mb-3">Calls, leads and target achievement for the selected period</p>
+              <p className="text-xs text-gray-500 mb-3">Calls, leads and target achievement for the selected period</p>
               <DataTable
                 loading={loading}
                 pageSize={10}
@@ -300,7 +294,7 @@ export default function EmployeeReportsPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Calls vs. Leads — Hourly</h3>
-                <p className="text-xs text-gray-400">Org-wide activity across all employees</p>
+                <p className="text-xs text-gray-500">Org-wide activity across all employees</p>
               </div>
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
                 {['composed', 'bar'].map((m) => (
@@ -314,13 +308,13 @@ export default function EmployeeReportsPage() {
             {loading ? <Skeleton className="h-72 w-full" /> : (
               <ResponsiveContainer width="100%" height={280}>
                 <ComposedChart data={hourlyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                  <XAxis dataKey="hour" tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} interval={1} />
-                  <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} width={30} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" vertical={false} />
+                  <XAxis dataKey="hour" tick={{ fill: '#A19DB2', fontSize: 10 }} tickLine={false} axisLine={false} interval={1} />
+                  <YAxis tick={{ fill: '#A19DB2', fontSize: 10 }} tickLine={false} axisLine={false} width={30} allowDecimals={false} />
                   <Tooltip content={<ChartTip />} />
-                  <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[4, 4, 0, 0]} barSize={18} />
-                  {chartMode === 'composed' && <Line type="monotone" dataKey="leads" name="Leads Created" stroke="#7C3AED" strokeWidth={2} dot={{ r: 3, fill: '#7C3AED' }} />}
-                  {chartMode === 'bar' && <Bar dataKey="leads" name="Leads Created" fill="#7C3AED" radius={[4, 4, 0, 0]} barSize={18} />}
+                  <Bar dataKey="calls" name="Calls" fill="#7C3AED" radius={[4, 4, 0, 0]} barSize={18} />
+                  {chartMode === 'composed' && <Line type="monotone" dataKey="leads" name="Leads Created" stroke="#524F63" strokeWidth={2} dot={{ r: 3, fill: '#524F63' }} />}
+                  {chartMode === 'bar' && <Bar dataKey="leads" name="Leads Created" fill="#524F63" radius={[4, 4, 0, 0]} barSize={18} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )}
@@ -348,7 +342,7 @@ export default function EmployeeReportsPage() {
       {activeTab === 'dayWise' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Daily Activity</h3>
-          <p className="text-xs text-gray-400 mb-4">Calls and leads created per day, across all employees</p>
+          <p className="text-xs text-gray-500 mb-4">Calls and leads created per day, across all employees</p>
           <DataTable
             loading={loading}
             searchable={false}
@@ -365,12 +359,12 @@ export default function EmployeeReportsPage() {
             <div className="mt-6">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={[...dayWiseRows].reverse().map((r) => ({ day: r.label.split(',')[0], calls: r.calls, leads: r.leadsCreated }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fill: '#94A3B8', fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} tickLine={false} axisLine={false} width={30} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: '#A19DB2', fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#A19DB2', fontSize: 10 }} tickLine={false} axisLine={false} width={30} />
                   <Tooltip content={<ChartTip />} />
-                  <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="leads" name="Leads Created" fill="#7C3AED" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="calls" name="Calls" fill="#7C3AED" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="leads" name="Leads Created" fill="#524F63" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -382,7 +376,7 @@ export default function EmployeeReportsPage() {
       {activeTab === 'hourly' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Hourly Time Slots</h3>
-          <p className="text-xs text-gray-400 mb-4">Share of combined activity (calls + leads) by hour, IST</p>
+          <p className="text-xs text-gray-500 mb-4">Share of combined activity (calls + leads) by hour, IST</p>
           <DataTable
             loading={loading}
             searchable={false}
@@ -412,7 +406,7 @@ export default function EmployeeReportsPage() {
       {activeTab === 'target' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Target Achievement</h3>
-          <p className="text-xs text-gray-400 mb-4">Employees with a daily call target set, weakest first</p>
+          <p className="text-xs text-gray-500 mb-4">Employees with a daily call target set, weakest first</p>
           <DataTable
             loading={loading}
             emptyTitle="No targets configured"
@@ -433,10 +427,10 @@ export default function EmployeeReportsPage() {
       {activeTab === 'attention' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Needs Attention</h3>
-          <p className="text-xs text-gray-400 mb-4">Inactive accounts, employees below 50% of target, or no activity this period</p>
+          <p className="text-xs text-gray-500 mb-4">Inactive accounts, employees below 50% of target, or no activity this period</p>
           <DataTable
             loading={loading}
-            emptyTitle="Nobody needs attention 🎉"
+            emptyTitle="Nobody needs attention"
             columns={[
               { key: 'employeeName', label: 'Employee' },
               {
@@ -459,7 +453,7 @@ export default function EmployeeReportsPage() {
       {activeTab === 'directory' && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Directory</h3>
-          <p className="text-xs text-gray-400 mb-4">Full roster — click a status pill or target value to edit it directly</p>
+          <p className="text-xs text-gray-500 mb-4">Full roster — click a status pill or target value to edit it directly</p>
           <DataTable
             loading={loading}
             pageSize={25}
@@ -470,7 +464,7 @@ export default function EmployeeReportsPage() {
                 render: (r) => (
                   <div>
                     <p className="font-semibold text-sm text-gray-900"><Truncate text={r.employeeName} /></p>
-                    <p className="text-xs text-gray-400 truncate">{r.email}</p>
+                    <p className="text-xs text-gray-500 truncate">{r.email}</p>
                   </div>
                 ),
               },

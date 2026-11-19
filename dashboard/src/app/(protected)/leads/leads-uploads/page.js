@@ -118,10 +118,10 @@ function StepBar({ step }) {
         <div key={s.n} className="flex items-center flex-1 last:flex-none">
           <div className="flex flex-col items-center">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors
-              ${step > s.n ? 'bg-blue-600 border-blue-600 text-white' : step === s.n ? 'bg-gray-900 border-blue-500 text-white' : 'bg-gray-100 border-gray-200 text-gray-400'}`}>
+ ${step > s.n ? 'bg-blue-600 border-blue-600 text-white' : step === s.n ? 'bg-blue-600 border-blue-600 text-white ring-4 ring-blue-100' : 'bg-gray-100 border-gray-200 text-gray-500'}`}>
               {step > s.n ? <CheckIco s={16} /> : s.n}
             </div>
-            <span className={`text-[11px] font-medium mt-1.5 whitespace-nowrap ${step >= s.n ? 'text-gray-900' : 'text-gray-400'}`}>{s.label}</span>
+            <span className={`text-xs font-medium mt-1.5 whitespace-nowrap ${step >= s.n ? 'text-gray-900' : 'text-gray-500'}`}>{s.label}</span>
           </div>
           {i < STEPS.length - 1 && <div className={`h-0.5 flex-1 mx-2 mb-5 ${step > s.n ? 'bg-blue-500' : 'bg-gray-200'}`} />}
         </div>
@@ -156,7 +156,7 @@ function TagInput({ tags, setTags, placeholder = 'Add tags & hit Enter' }) {
         placeholder={placeholder}
         className="form-input"
       />
-      <p className="text-[11px] text-gray-400 mt-1">Provide multiple tags separated by Enter</p>
+      <p className="text-xs text-gray-500 mt-1">Provide multiple tags separated by Enter</p>
     </div>
   );
 }
@@ -303,8 +303,8 @@ export default function LeadsUploadsPage() {
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Import Leads</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Bulk import leads from a CSV file in a few guided steps</p>
+        <h1 className="page-title">Import Leads</h1>
+        <p className="page-subtitle">Bulk import leads from a CSV file in a few guided steps</p>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -339,14 +339,14 @@ export default function LeadsUploadsPage() {
                       <>
                         <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-3 bg-blue-50 text-blue-600"><FileIco /></div>
                         <p className="font-bold text-sm text-gray-900">{file.name}</p>
-                        <p className="text-xs mt-1 text-gray-400">{(file.size / 1024).toFixed(1)} KB · {csvRows.length} rows detected</p>
+                        <p className="text-xs mt-1 text-gray-500">{(file.size / 1024).toFixed(1)} KB · {csvRows.length} rows detected</p>
                         <button onClick={(e) => { e.stopPropagation(); setFile(null); setCsvHeaders([]); setCsvRows([]); }} className="mt-3 text-xs font-semibold text-red-600 hover:underline">Remove</button>
                       </>
                     ) : (
                       <>
                         <div className={dragging ? 'text-blue-600 mb-3' : 'text-gray-400 mb-3'}><UploadIco /></div>
                         <p className="font-bold text-sm text-gray-900">Drag & Drop CSV file</p>
-                        <p className="text-xs mt-1 text-gray-400">or click to browse · comma separated values</p>
+                        <p className="text-xs mt-1 text-gray-500">or click to browse · comma separated values</p>
                       </>
                     )}
                   </div>
@@ -368,8 +368,8 @@ export default function LeadsUploadsPage() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-gray-400 sm:col-span-1">Field(s) in your CSV</p>
-                  <p className="text-xs font-bold uppercase tracking-wide text-gray-400 sm:col-span-1">Map to lead field</p>
+                  <p className="text-xs font-bold text-gray-500 sm:col-span-1">Field(s) in your CSV</p>
+                  <p className="text-xs font-bold text-gray-500 sm:col-span-1">Map to lead field</p>
                   {csvHeaders.map((h) => (
                     <Fragment key={h}>
                       <div className="flex items-center text-sm font-medium text-gray-800 py-1.5">{h}</div>
@@ -409,14 +409,14 @@ export default function LeadsUploadsPage() {
                     </div>
                     <div className="rounded-xl border border-gray-200 overflow-hidden">
                       <table className="w-full text-sm">
-                        <thead><tr className="bg-gray-50 text-xs uppercase text-gray-500"><th className="text-left px-4 py-2.5">Row Number</th><th className="text-left px-4 py-2.5">Invalid Fields</th></tr></thead>
+                        <thead><tr className="bg-gray-50 text-xs text-gray-500"><th className="text-left px-4 py-2.5">Row Number</th><th className="text-left px-4 py-2.5">Invalid Fields</th></tr></thead>
                         <tbody className="divide-y divide-gray-100">
                           {invalidRows.slice(0, 50).map((r, i) => (
                             <tr key={i}><td className="px-4 py-2 text-gray-600">{r.rowNumber}</td><td className="px-4 py-2 text-gray-600">{r.reason}</td></tr>
                           ))}
                         </tbody>
                       </table>
-                      {invalidRows.length > 50 && <p className="text-xs text-gray-400 px-4 py-2 bg-gray-50">+{invalidRows.length - 50} more — download the full list below.</p>}
+                      {invalidRows.length > 50 && <p className="text-xs text-gray-500 px-4 py-2 bg-gray-50">+{invalidRows.length - 50} more — download the full list below.</p>}
                     </div>
                     <button onClick={downloadInvalid} className="btn-secondary text-xs"><DownloadIco s={12} /> Download Invalid Rows</button>
                     <div className="flex justify-between">
@@ -467,7 +467,7 @@ export default function LeadsUploadsPage() {
                             <div className="p-2 border-b border-gray-100">
                               <div className="relative">
                                 <input value={empSearch} onChange={(e) => setEmpSearch(e.target.value)} placeholder="Search…" className="form-input pl-8 py-1.5 text-xs" />
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"><SearchIco /></span>
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"><SearchIco /></span>
                               </div>
                             </div>
                             <label className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 text-xs font-semibold cursor-pointer hover:bg-gray-50">
@@ -481,10 +481,10 @@ export default function LeadsUploadsPage() {
                                   {e.name}{e.phone ? ` (+91-${e.phone})` : ''}
                                 </label>
                               ))}
-                              {filteredEmployees.length === 0 && <p className="text-xs text-gray-400 px-3 py-3">No employees found</p>}
+                              {filteredEmployees.length === 0 && <p className="text-xs text-gray-500 px-3 py-3">No employees found</p>}
                             </div>
                           </div>
-                          <p className="text-[11px] text-gray-400 mt-1">Lead(s) will be assigned to the selected employee(s).</p>
+                          <p className="text-xs text-gray-500 mt-1">Lead(s) will be assigned to the selected employee(s).</p>
                         </Field>
                         {selectedEmployees.length > 1 && (
                           <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
@@ -493,13 +493,13 @@ export default function LeadsUploadsPage() {
                           </label>
                         )}
                         {selectedEmployees.length > 1 && !autoSplit && (
-                          <p className="text-[11px] text-amber-600">Without auto-split, every lead is assigned to the first selected employee ({employeeNames[0]}).</p>
+                          <p className="text-xs text-amber-600">Without auto-split, every lead is assigned to the first selected employee ({employeeNames[0]}).</p>
                         )}
                       </>
                     ) : (
                       <Field label="Tag *">
                         <input value={tagModeValue} onChange={(e) => setTagModeValue(e.target.value)} placeholder="e.g. Website Leads" className="form-input" />
-                        <p className="text-[11px] text-gray-400 mt-1">Leads are imported unassigned, tagged for manual pickup — this system doesn't yet support tag-based auto-routing.</p>
+                        <p className="text-xs text-gray-500 mt-1">Leads are imported unassigned, tagged for manual pickup — this system doesn't yet support tag-based auto-routing.</p>
                       </Field>
                     )}
                   </div>
@@ -517,7 +517,7 @@ export default function LeadsUploadsPage() {
                           <input type="radio" className="mt-1" disabled={opt.disabled} checked={duplicateStrategy === opt.key} onChange={() => setDuplicateStrategy(opt.key)} />
                           <div>
                             <p className="text-sm font-semibold text-gray-800">{opt.title}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">{opt.desc}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{opt.desc}</p>
                           </div>
                         </label>
                       ))}
@@ -527,7 +527,7 @@ export default function LeadsUploadsPage() {
                       <select className="form-input" value={defaultStatus} onChange={(e) => setDefaultStatus(e.target.value)}>
                         {STATUS_OPTIONS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                       </select>
-                      <p className="text-[11px] text-gray-400 mt-1">Applied to newly created leads only — existing leads keep their current status.</p>
+                      <p className="text-xs text-gray-500 mt-1">Applied to newly created leads only — existing leads keep their current status.</p>
                     </Field>
 
                     <Field label="Add Tags to Organize Leads">
@@ -550,10 +550,10 @@ export default function LeadsUploadsPage() {
                   <>
                     <h3 className="font-bold text-sm text-gray-900">Review before importing</h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-2xl font-extrabold text-gray-900">{validRows.length}</p><p className="text-xs text-gray-400">Leads to import</p></div>
-                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900">{assignMode === 'employee' ? `${selectedEmployees.length} employee(s)` : `Tag: ${tagModeValue}`}</p><p className="text-xs text-gray-400">Assignment</p></div>
-                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900 capitalize">{duplicateStrategy === 'skip' ? 'Keep existing' : 'Replace existing'}</p><p className="text-xs text-gray-400">Duplicate handling</p></div>
-                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900">{STATUS_OPTIONS.find((s) => s.key === defaultStatus)?.label}</p><p className="text-xs text-gray-400">Default status</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-2xl font-extrabold text-gray-900">{validRows.length}</p><p className="text-xs text-gray-500">Leads to import</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900">{assignMode === 'employee' ? `${selectedEmployees.length} employee(s)` : `Tag: ${tagModeValue}`}</p><p className="text-xs text-gray-500">Assignment</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900 capitalize">{duplicateStrategy === 'skip' ? 'Keep existing' : 'Replace existing'}</p><p className="text-xs text-gray-500">Duplicate handling</p></div>
+                      <div className="bg-gray-50 rounded-lg p-3"><p className="text-sm font-bold text-gray-900">{STATUS_OPTIONS.find((s) => s.key === defaultStatus)?.label}</p><p className="text-xs text-gray-500">Default status</p></div>
                     </div>
                     {assignMode === 'employee' && (
                       <p className="text-xs text-gray-500">Assigning to: <span className="font-medium text-gray-700">{employeeNames.join(', ')}</span>{selectedEmployees.length > 1 && (autoSplit ? ' (auto-split round robin)' : ` (all to ${employeeNames[0]})`)}</p>
@@ -571,7 +571,7 @@ export default function LeadsUploadsPage() {
                   </>
                 ) : (
                   <>
-                    <div className="rounded-xl border border-gray-200 border-l-4 border-l-emerald-600 bg-emerald-50 p-5">
+                    <div className="rounded-xl border border-emerald-200 bg-[var(--met-50)] p-5">
                       <div className="flex items-center gap-3 mb-3">
                         <div className="w-8 h-8 rounded-full flex items-center justify-center bg-emerald-600 text-white"><CheckIco s={16} /></div>
                         <p className="font-bold text-sm text-emerald-700">Import Complete</p>

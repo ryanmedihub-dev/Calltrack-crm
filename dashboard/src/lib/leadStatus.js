@@ -31,23 +31,24 @@ export const STATUS_LABELS = {
 };
 
 // Tailwind-friendly {bg, text, border, dot} tokens — use with className, not inline style.
-// Talk-time bands ride a cold -> hot ramp (gray -> slate -> sky -> blue -> violet -> amber ->
-// orange -> red); `new` and the five manual statuses keep their existing tokens.
+// The nine talk-time bands are one cold -> hot ramp in the brand blue (light dot = cold, deep = hot),
+// so 'hotter' always reads as 'more blue'. Manual statuses carry a fixed meaning colour used
+// everywhere: amber = needs a follow-up, green = booked/converted, red = not interested, grey = closed.
 export const STATUS_STYLES = {
-  new:             { bg: 'bg-blue-50',    text: 'text-blue-600',    border: 'border-blue-200',    dot: 'bg-blue-500' },
-  not_connected:   { bg: 'bg-gray-100',   text: 'text-gray-500',    border: 'border-gray-200',    dot: 'bg-gray-400' },
-  low:             { bg: 'bg-slate-100',  text: 'text-slate-600',   border: 'border-slate-200',   dot: 'bg-slate-500' },
-  contacted:       { bg: 'bg-sky-50',     text: 'text-sky-600',     border: 'border-sky-200',     dot: 'bg-sky-500' },
-  engaged:         { bg: 'bg-blue-50',    text: 'text-blue-600',    border: 'border-blue-200',    dot: 'bg-blue-500' },
-  interested:      { bg: 'bg-violet-50',  text: 'text-violet-600',  border: 'border-violet-200',  dot: 'bg-violet-500' },
-  warm:            { bg: 'bg-amber-50',   text: 'text-amber-600',   border: 'border-amber-200',   dot: 'bg-amber-500' },
-  hot:             { bg: 'bg-orange-50',  text: 'text-orange-600',  border: 'border-orange-200',  dot: 'bg-orange-500' },
-  high_engagement: { bg: 'bg-red-50',     text: 'text-red-600',     border: 'border-red-200',     dot: 'bg-red-500' },
-  not_interested:  { bg: 'bg-red-50',     text: 'text-red-600',     border: 'border-red-200',     dot: 'bg-red-500' },
-  follow_up:       { bg: 'bg-teal-50',    text: 'text-teal-600',    border: 'border-teal-200',    dot: 'bg-teal-500' },
-  booking_done:    { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200', dot: 'bg-emerald-500' },
-  converted:       { bg: 'bg-green-50',   text: 'text-green-700',   border: 'border-green-300',   dot: 'bg-green-600' },
-  lost:            { bg: 'bg-gray-100',   text: 'text-gray-500',    border: 'border-gray-200',    dot: 'bg-gray-400' },
+  new:             { bg: 'bg-gray-100',   text: 'text-gray-700',    border: 'border-gray-200',    dot: 'bg-gray-400',    hex: '#A19DB2' },
+  not_connected:   { bg: 'bg-gray-100',   text: 'text-gray-500',    border: 'border-gray-200',    dot: 'bg-gray-300',    hex: '#D5D2DE' },
+  low:             { bg: 'bg-blue-50',    text: 'text-blue-800',    border: 'border-blue-100',    dot: 'bg-blue-200',    hex: '#DDD6FE' },
+  contacted:       { bg: 'bg-blue-50',    text: 'text-blue-800',    border: 'border-blue-100',    dot: 'bg-blue-300',    hex: '#C4B5FD' },
+  engaged:         { bg: 'bg-blue-50',    text: 'text-blue-800',    border: 'border-blue-100',    dot: 'bg-blue-400',    hex: '#A78BFA' },
+  interested:      { bg: 'bg-blue-50',    text: 'text-blue-800',    border: 'border-blue-200',    dot: 'bg-blue-500',    hex: '#8B5CF6' },
+  warm:            { bg: 'bg-blue-100',   text: 'text-blue-800',    border: 'border-blue-200',    dot: 'bg-blue-600',    hex: '#7C3AED' },
+  hot:             { bg: 'bg-blue-100',   text: 'text-blue-900',    border: 'border-blue-200',    dot: 'bg-blue-700',    hex: '#6D28D9' },
+  high_engagement: { bg: 'bg-blue-100',   text: 'text-blue-900',    border: 'border-blue-300',    dot: 'bg-blue-900',    hex: '#4C1D95' },
+  follow_up:       { bg: 'bg-amber-50',   text: 'text-amber-800',   border: 'border-amber-200',   dot: 'bg-amber-500',   hex: '#F59E0B' },
+  not_interested:  { bg: 'bg-red-50',     text: 'text-red-700',     border: 'border-red-200',     dot: 'bg-red-500',     hex: '#EF4444' },
+  booking_done:    { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200', dot: 'bg-emerald-500', hex: '#10B981' },
+  converted:       { bg: 'bg-green-50',   text: 'text-green-800',   border: 'border-green-200',   dot: 'bg-green-600',   hex: '#079455' },
+  lost:            { bg: 'bg-gray-100',   text: 'text-gray-500',    border: 'border-gray-200',    dot: 'bg-gray-400',    hex: '#A19DB2' },
 };
 
 export function statusStyle(status) {

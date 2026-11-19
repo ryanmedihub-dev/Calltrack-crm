@@ -21,8 +21,8 @@ function ChevronRightIco() {
 }
 
 function AchievementBar({ pct }) {
-  if (pct == null) return <span className="text-xs text-gray-400">No target</span>;
-  const color = pct >= 100 ? '#16A34A' : pct >= 50 ? '#D97706' : '#DC2626';
+  if (pct == null) return <span className="text-xs text-gray-500">No target</span>;
+  const color = pct >= 100 ? '#079455' : '#7C3AED'; // green only when met
   return (
     <div className="flex items-center gap-2 justify-end">
       <div className="w-16 h-1.5 rounded-full overflow-hidden bg-gray-200">
@@ -34,7 +34,7 @@ function AchievementBar({ pct }) {
 }
 
 function avatarColor(id) {
-  const colors = ['#2563EB', '#16A34A', '#D97706', '#7C3AED', '#0D9488', '#DC2626'];
+  const colors = ['#524F63']; // neutral: colour is reserved for meaning
   const s = String(id || '');
   let hash = 0;
   for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
@@ -94,7 +94,7 @@ export default function ActiveUsersPage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             </span>
           </h1>
-          <p className="text-sm text-gray-400 mt-0.5">
+          <p className="page-subtitle">
             {loading ? 'Loading…' : `${active.length} of ${all.length} employees active`} · updated {now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
         </div>
@@ -102,7 +102,7 @@ export default function ActiveUsersPage() {
           <button onClick={() => load(true)} className="flex items-center gap-2 px-3.5 py-2 border border-gray-200 bg-white text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
             <RefreshIco spinning={refreshing} /> Refresh
           </button>
-          <Link href="/users" className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition-colors">
+          <Link href="/users" className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--blue)] text-white text-sm font-medium hover:bg-[var(--blue-600)] transition-colors">
             Manage Users <ChevronRightIco />
           </Link>
         </div>
@@ -110,10 +110,10 @@ export default function ActiveUsersPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard loading={loading} label="Active Now" value={active.length.toLocaleString()} color="#16A34A" icon={<CheckIco />} />
-        <StatCard loading={loading} label="Inactive" value={(all.length - active.length).toLocaleString()} color="#DC2626" icon={<UsersIco />} />
-        <StatCard loading={loading} label="Calls Today" value={(report?.kpis?.totalCalls ?? 0).toLocaleString()} color="#2563EB" icon={<PhoneIco />} />
-        <StatCard loading={loading} label="Avg Daily Target" value={avgTarget.toLocaleString()} color="#D97706" icon={<GaugeIco />} />
+        <StatCard loading={loading} label="Active Now" value={active.length.toLocaleString()} color="#079455" icon={<CheckIco />} />
+        <StatCard loading={loading} label="Inactive" value={(all.length - active.length).toLocaleString()} color="#D92D20" icon={<UsersIco />} />
+        <StatCard loading={loading} label="Calls Today" value={(report?.kpis?.totalCalls ?? 0).toLocaleString()} color="#7C3AED" icon={<PhoneIco />} />
+        <StatCard loading={loading} label="Avg Daily Target" value={avgTarget.toLocaleString()} color="#B54708" icon={<GaugeIco />} />
       </div>
 
       {/* Table */}
@@ -153,7 +153,7 @@ export default function ActiveUsersPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-sm text-gray-900 truncate">{u.employeeName}</p>
-                      <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                      <p className="text-xs text-gray-500 truncate">{u.email}</p>
                     </div>
                   </div>
                 ),

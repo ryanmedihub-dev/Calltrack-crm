@@ -1,19 +1,25 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import Pusher from 'pusher-js';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend, LabelList,
+  ComposedChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
 } from 'recharts';
 import api from '../../../lib/api';
 import { getAllEmployeesSafe } from '../../../lib/employees';
-import { STATUSES, STATUS_LABELS } from '../../../lib/leadStatus';
-import CallTypeBadge from '../../../components/CallTypeBadge';
+import { STATUSES, STATUS_LABELS, statusStyle } from '../../../lib/leadStatus';
 import DateRangeFilter, { formatRangeLabel, rangeToDates } from '../../../components/DateRangeFilter';
-import { Truncate } from '../../../components/report-shared';
-import { motion, AnimatePresence } from 'framer-motion';
+import MultiSelect from '../../../components/MultiSelect';
+import {
+  DataTable, PageHeader, CallBadge, ChartTip, EmptyState, Truncate, TYPE_META, fmtNum, RefreshIco,
+} from '../../../components/report-shared';
 
+/* ── The chase is measured against the working shift (IST hours).
+   ponytail: fixed shift window; move to a settings value if teams work different hours. ── */
+const SHIFT_START = 10; // 10:00 IST
+const SHIFT_END = 19;   // 19:00 IST
+const EASE_OUT = [0.23, 1, 0.32, 1];
 
 function parseUTC(ts) {
   if (!ts) return new Date(NaN);
@@ -21,263 +27,55 @@ function parseUTC(ts) {
   if (s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s) || /[+-]\d{4}$/.test(s)) return new Date(s);
   return new Date(s + 'Z');
 }
-
-function fmtDate(ts, tz) {
-  return parseUTC(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: tz });
-}
-
-function fmtTime(ts, tz) {
-  return parseUTC(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: tz });
-}
-
-function todayInTZ(tz) {
-  return new Date().toLocaleDateString('en-CA', { timeZone: tz });
-}
-
-function utcHourLabel(utcHour, tz) {
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), parseInt(utcHour), 0, 0));
-  const h = parseInt(d.toLocaleString('en-US', { timeZone: tz, hour: 'numeric', hour12: false })) % 24;
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  return `${h % 12 || 12}${ampm}`;
-}
-
-/* ── Icons ───────────────────────────────────────── */
-const Ico = ({ size = 18, children, className = '' }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    {children}
-  </svg>
-);
-
-const PhoneIco = ({ size }) => (
-  <Ico size={size}>
-    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
-  </Ico>
-);
-const InIco = () => (
-  <Ico>
-    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
-    <polyline points="17 18 23 18 23 12" />
-  </Ico>
-);
-const OutIco = () => (
-  <Ico>
-    <polyline points="1 6 10.5 15.5 15.5 10.5 23 18" />
-    <polyline points="7 6 1 6 1 12" />
-  </Ico>
-);
-const MissedIco = () => (
-  <Ico>
-    <line x1="1" y1="1" x2="23" y2="23" />
-    <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
-  </Ico>
-);
-const CheckIco = () => (
-  <Ico>
-    <polyline points="20 6 9 17 4 12" />
-  </Ico>
-);
-const UsersIco = () => (
-  <Ico>
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-  </Ico>
-);
-const RefreshIco = () => (
-  <Ico size={14}>
-    <polyline points="23 4 23 10 17 10" />
-    <polyline points="1 20 1 14 7 14" />
-    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-  </Ico>
-);
-const StarIco = () => (
-  <Ico size={14}>
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-  </Ico>
-);
-const ChevronIco = () => (
-  <Ico size={13}>
-    <polyline points="9 18 15 12 9 6" />
-  </Ico>
-);
-const CloseIco = () => (
-  <Ico size={15}>
-    <line x1="18" y1="6" x2="6" y2="18" />
-    <line x1="6" y1="6" x2="18" y2="18" />
-  </Ico>
-);
-const TrendUpIco = () => (
-  <Ico size={12}>
-    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
-    <polyline points="17 6 23 6 23 12" />
-  </Ico>
-);
-const TrendDnIco = () => (
-  <Ico size={12}>
-    <polyline points="1 6 10.5 15.5 15.5 10.5 23 18" />
-    <polyline points="7 18 1 18 1 12" />
-  </Ico>
-);
-const GlobeIco = () => (
-  <Ico size={14}>
-    <circle cx="12" cy="12" r="10" />
-    <line x1="2" y1="12" x2="22" y2="12" />
-    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-  </Ico>
-);
-const LeadIco = () => (
-  <Ico size={16}>
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <line x1="23" y1="11" x2="17" y2="11" />
-    <line x1="20" y1="8" x2="20" y2="14" />
-  </Ico>
-);
-const ClockIco = () => (
-  <Ico size={14}>
-    <circle cx="12" cy="12" r="10" />
-    <polyline points="12 6 12 12 16 14" />
-  </Ico>
-);
-
-function trend(cur, prev) {
-  if (!prev || prev === 0) return null;
-  return Math.round(((cur - prev) / prev) * 100);
-}
-
-// `callType` (when set) is added as a report filter so the destination page's
-// total lines up with the exact number shown on the card — see `kpiHref` below.
-const KPI = [
-  { key: 'totalCalls', label: 'Total Calls', Icon: PhoneIco, grad: 'linear-gradient(135deg,#2563EB,#3B82F6)' },
-  { key: 'incoming', label: 'Incoming', Icon: InIco, grad: 'linear-gradient(135deg,#16A34A,#22C55E)', callType: 'incoming' },
-  { key: 'outgoing', label: 'Outgoing', Icon: OutIco, grad: 'linear-gradient(135deg,#D97706,#F59E0B)', callType: 'outgoing' },
-  { key: 'missed', label: 'Missed', Icon: MissedIco, grad: 'linear-gradient(135deg,#DC2626,#EF4444)', callType: 'missed' },
-  { key: 'connectedCalls', label: 'Connected', Icon: CheckIco, grad: 'linear-gradient(135deg,#0D9488,#14B8A6)' },
-  { key: 'uniqueClients', label: 'Unique Clients', Icon: UsersIco, grad: 'linear-gradient(135deg,#7C3AED,#8B5CF6)' },
-];
-
-// Builds a /reports/calllogs link carrying the same date window (and call type,
-// when relevant) the KPI card's own number was computed over.
-function kpiHref(cfg, fromDate, toDate) {
-  const params = new URLSearchParams({ fromDate, toDate });
-  if (cfg.callType) params.set('callType', cfg.callType);
-  return `/reports/calllogs?${params.toString()}`;
-}
-
-const KpiCard = ({ label, value, Icon, grad, href, delta, idx }) => {
-  const card = (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: idx * 0.05, duration: 0.4 }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="group bg-white rounded-2xl p-5 border border-gray-100 hover:border-blue-200 hover:shadow-xl transition-all duration-300 cursor-pointer"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div
-          className="w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/20"
-          style={{ background: grad }}
-        >
-          <Icon size={18} />
-        </div>
-        <motion.span
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: idx * 0.05 + 0.2 }}
-          className="text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-        >
-          <ChevronIco />
-        </motion.span>
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-gray-900 tracking-tight">
-          {value ?? '—'}
-        </p>
-        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mt-1">
-          {label}
-        </p>
-        {delta !== null && delta !== undefined && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: idx * 0.05 + 0.3 }}
-            className="flex items-center gap-1 mt-2 text-xs font-semibold"
-          >
-            <span className={`flex items-center gap-1 ${delta >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {delta >= 0 ? <TrendUpIco /> : <TrendDnIco />}
-              {Math.abs(delta)}% vs yesterday
-            </span>
-          </motion.div>
-        )}
-      </div>
-    </motion.div>
-  );
-  return href ? <Link href={href}>{card}</Link> : card;
+const fmtTime = (ts) => parseUTC(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }).toUpperCase();
+const hourLabel = (h) => `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`;
+const istNow = () => {
+  const p = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: 'numeric', hour12: false }).split(':');
+  return { h: parseInt(p[0], 10) % 24, m: parseInt(p[1], 10) };
 };
+const fmtDur = (s) => {
+  if (!s) return '0m';
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+};
+// Lower-case relative words mid-sentence ('created today'), never dates ('created 02 Nov').
+const inline = (label) => (/^(today|yesterday|this week|all time)$/i.test(label) ? label.toLowerCase() : label);
+const daysBetween = (a, b) => (a && b ? Math.round((new Date(b) - new Date(a)) / 86400000) + 1 : 1);
 
-const PeriodPanel = ({ title, data }) => {
-  const rows = [
-    { label: 'Total Calls', val: data?.totalCalls, color: '#2563EB' },
-    { label: 'Incoming', val: data?.incoming, color: '#16A34A' },
-    { label: 'Outgoing', val: data?.outgoing, color: '#D97706' },
-    { label: 'Missed', val: data?.missed, color: '#DC2626' },
-    { label: 'Connected', val: data?.connectedCalls, color: '#0D9488' },
-    { label: 'Working Hours', val: data?.workingHours, color: '#475569' },
-  ];
+/* ── Chase maths: how far through the window are we, so what should be done by now ── */
+function chaseClock(isToday) {
+  if (!isToday) return { elapsed: 1, hoursLeft: 0, state: 'closed' };
+  const { h, m } = istNow();
+  const t = h + m / 60;
+  const len = SHIFT_END - SHIFT_START;
+  if (t < SHIFT_START) return { elapsed: 0, hoursLeft: len, state: 'before' };
+  if (t >= SHIFT_END) return { elapsed: 1, hoursLeft: 0, state: 'after' };
+  return { elapsed: (t - SHIFT_START) / len, hoursLeft: SHIFT_END - t, state: 'live' };
+}
 
+/* ── Small pieces ─────────────────────────────────────────────────── */
+function Score({ label, value, unit, sub, tone, className = "" }) {
   return (
-    <motion.div
-      whileHover={{ y: -2 }}
-      className="bg-white rounded-2xl p-5 border border-gray-100 hover:shadow-lg transition-all duration-300"
-    >
-      <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4">
-        {title}
+    <div className={`px-5 py-4 min-w-0 ${className}`}>
+      <p className="stat-label">{label}</p>
+      <p className={`stat-number mt-1 ${tone === 'behind' ? 'text-behind' : tone === 'met' ? 'text-met' : ''}`}>
+        {value}{unit && <span className="text-[15px] font-medium text-ink-3 ml-1">{unit}</span>}
       </p>
-      {!data ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-8 bg-gray-100 rounded-lg animate-pulse" />
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-0">
-          {rows.map((r) => (
-            <div
-              key={r.label}
-              className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0"
-            >
-              <span className="text-xs text-gray-500">{r.label}</span>
-              <span className="text-sm font-bold tabular-nums" style={{ color: r.color }}>
-                {r.val ?? '—'}
-              </span>
-            </div>
-          ))}
-          {data?.callDuration && (
-            <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
-              <span className="text-xs text-gray-500">Total Duration</span>
-              <span className="text-sm font-semibold tabular-nums text-gray-700">
-                {data.callDuration}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-    </motion.div>
+      {sub && <p className="text-xs text-ink-3 mt-1 truncate">{sub}</p>}
+    </div>
   );
-};
+}
 
-const CreateLeadModal = ({ call, employees, onClose }) => {
+function Meter({ value, max, tone }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div className="progress-bar w-full">
+      <div className="progress-fill" style={{ width: `${pct}%`, background: tone === 'met' ? 'var(--met)' : tone === 'behind' ? 'var(--behind)' : 'var(--blue)' }} />
+    </div>
+  );
+}
+
+function CreateLeadModal({ call, employees, onClose }) {
   const [form, setForm] = useState({
     name: call?.contactName && call.contactName !== 'Unknown' ? call.contactName : '',
     phone: call?.contactNumber || '',
@@ -287,172 +85,97 @@ const CreateLeadModal = ({ call, employees, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
       await api.post('/api/leads/from-call', { ...form, callId: call?._id, source: 'Call' });
-      onClose();
+      onClose(true);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create lead');
+      setError(err.response?.data?.error || 'Could not create the lead. Check the details and try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.95, y: 20 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.95, y: 20 }}
-        className="w-full max-w-md bg-white rounded-2xl shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25, ease: EASE_OUT }}>
+      <div className="absolute inset-0 bg-[rgba(26,23,38,0.45)]" onClick={() => onClose()} />
+      <motion.div role="dialog" aria-modal="true" aria-labelledby="lead-modal-title"
+        initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+        transition={{ duration: 0.25, ease: EASE_OUT }}
+        className="relative w-full max-w-md bg-white rounded-xl shadow-2xl">
+        <div className="flex items-start justify-between px-5 pt-5">
           <div>
-            <h3 className="font-bold text-gray-900">Create Lead from Call</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{call?.contactNumber}</p>
+            <h2 id="lead-modal-title" className="text-base font-semibold text-ink">Create lead from call</h2>
+            <p className="text-[13px] text-ink-3 mt-0.5 tabular-nums">{call?.contactNumber}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors duration-200"
-          >
-            <CloseIco />
+          <button onClick={() => onClose()} aria-label="Close" className="btn-ghost btn-icon btn-sm w-8 -mr-1.5 -mt-1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
           </button>
         </div>
-        <form onSubmit={submit} className="p-6 space-y-4">
-          {error && (
-            <div className="text-sm bg-red-50 text-red-600 rounded-xl px-4 py-3 border border-red-100">
-              {error}
-            </div>
-          )}
-          {[
-            { k: 'name', l: 'Full Name', ro: false },
-            { k: 'phone', l: 'Phone', ro: true },
-            { k: 'email', l: 'Email', ro: false },
-          ].map(({ k, l, ro }) => (
-            <div key={k}>
-              <label className="block text-xs font-medium text-gray-700 mb-1.5">{l}</label>
-              <input
-                type={k === 'email' ? 'email' : 'text'}
-                value={form[k]}
-                readOnly={ro}
-                onChange={(e) => !ro && setForm({ ...form, [k]: e.target.value })}
-                className={`w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none ${ro ? 'bg-gray-50 text-gray-400 cursor-not-allowed' : 'text-gray-900'
-                  }`}
-              />
-            </div>
-          ))}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">Assign To</label>
-            <select
-              value={form.assignedTo}
-              onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-gray-900"
-            >
-              <option value="">Unassigned</option>
-              {employees.map((e) => (
-                <option key={e._id} value={e._id}>
-                  {e.name}{e.ryanEmployeeCode ? ` (${e.ryanEmployeeCode})` : ''}
-                </option>
-              ))}
-            </select>
+        <form onSubmit={submit} className="px-5 pb-5 pt-4 space-y-4">
+          {error && <p role="alert" className="text-[13px] text-behind bg-[var(--behind-50)] rounded-lg px-3 py-2">{error}</p>}
+          <label className="block">
+            <span className="form-label">Full name</span>
+            <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="form-label">Phone</span>
+              <input className="form-input tabular-nums" value={form.phone} readOnly disabled />
+            </label>
+            <label className="block">
+              <span className="form-label">Email <span className="text-ink-3 font-normal">(optional)</span></span>
+              <input type="email" className="form-input" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </label>
           </div>
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors duration-200 font-medium text-sm"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Creating…' : 'Create Lead'}
-            </button>
+          <label className="block">
+            <span className="form-label">Assign to</span>
+            <MultiSelect multiple={false} placeholder="Leave unassigned" ariaLabel="Assign to"
+              value={form.assignedTo} onChange={(v) => setForm({ ...form, assignedTo: v })}
+              options={employees.map((e) => [e._id, `${e.name}${e.ryanEmployeeCode ? ` (${e.ryanEmployeeCode})` : ''}`])} />
+          </label>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={() => onClose()} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={loading} className="btn-primary min-w-[112px]">{loading ? 'Creating…' : 'Create lead'}</button>
           </div>
         </form>
       </motion.div>
     </motion.div>
   );
-};
+}
 
-const ChartTip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-gray-900 text-white rounded-xl px-4 py-3 text-xs shadow-2xl">
-      <p className="text-gray-400">{label}</p>
-      {payload.map((p, i) => (
-        <p key={i} className="font-bold mt-1">
-          {p.name}: {p.value}
-        </p>
-      ))}
-    </div>
-  );
-};
-
-const STATUS_COLORS = {
-  new:             { color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
-  not_connected:   { color: '#6B7280', bg: '#F3F4F6', border: '#E5E7EB' },
-  low:             { color: '#475569', bg: '#F1F5F9', border: '#CBD5E1' },
-  contacted:       { color: '#0284C7', bg: '#F0F9FF', border: '#BAE6FD' },
-  engaged:         { color: '#2563EB', bg: '#EFF6FF', border: '#BFDBFE' },
-  interested:      { color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
-  warm:            { color: '#D97706', bg: '#FFFBEB', border: '#FDE68A' },
-  hot:             { color: '#EA580C', bg: '#FFF7ED', border: '#FFEDD5' },
-  high_engagement: { color: '#DC2626', bg: '#FEF2F2', border: '#FECACA' },
-  follow_up:       { color: '#0D9488', bg: '#F0FDFA', border: '#99F6E4' },
-  not_interested:  { color: '#EF4444', bg: '#FEF2F2', border: '#FECACA' },
-  booking_done:    { color: '#059669', bg: '#ECFDF5', border: '#A7F3D0' },
-  converted:       { color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0' },
-  lost:            { color: '#9CA3AF', bg: '#F3F4F6', border: '#E5E7EB' },
-};
-
-const LEAD_STATUSES = STATUSES.map((key) => ({
-  key,
-  label: STATUS_LABELS[key] || key,
-  color: STATUS_COLORS[key]?.color || '#6B7280',
-  bg: STATUS_COLORS[key]?.bg || '#F3F4F6',
-  border: STATUS_COLORS[key]?.border || '#E5E7EB',
-}));
-
+/* ── Page ─────────────────────────────────────────────────────────── */
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [liveFeed, setLiveFeed] = useState([]);
+  const [freshIds, setFreshIds] = useState(() => new Set());
   const [employees, setEmployees] = useState([]);
   const [leadModal, setLeadModal] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [timezone, setTimezone] = useState('Asia/Kolkata');
-  const [tzOpen, setTzOpen] = useState(false);
   const [leadStats, setLeadStats] = useState({});
   const [dateRange, setDateRange] = useState({ range: 'today', startDate: null, endDate: null });
-  const channelRef = useRef(null);
+  const [fitCalls, setFitCalls] = useState(false); // chart y-scale: target (honest pace) or calls (readable shape)
+  const [, setTick] = useState(0); // re-evaluates "now" for the chase every minute
   const dateRangeRef = useRef(dateRange);
 
-  useEffect(() => {
-    dateRangeRef.current = dateRange;
-  }, [dateRange]);
+  useEffect(() => { dateRangeRef.current = dateRange; }, [dateRange]);
 
   const fetchStats = async (spin = false) => {
     if (spin) setRefreshing(true);
     try {
       const dr = dateRangeRef.current;
       const params = { range: dr.range };
-      if (dr.range === 'custom') {
-        params.startDate = dr.startDate;
-        params.endDate = dr.endDate;
-      }
+      if (dr.range === 'custom') { params.startDate = dr.startDate; params.endDate = dr.endDate; }
       const r = await api.get('/api/calls/stats', { params });
       setStats(r.data.data);
     } catch { } finally {
@@ -460,543 +183,455 @@ export default function DashboardPage() {
     }
   };
 
-  // Filtered the same way as fetchStats so the Lead Pipeline cards match
-  // whatever date range is selected — and so their deep links into
-  // /reports/lead land on the same set of leads the card counted.
+  // Filtered like fetchStats so pipeline counts match the selected range, and so each row's
+  // deep link into /reports/lead lands on the same set of leads it counted.
   const fetchLeadStats = async () => {
     try {
       const dr = dateRangeRef.current;
       const params = { limit: 1, range: dr.range };
-      if (dr.range === 'custom') {
-        params.startDate = dr.startDate;
-        params.endDate = dr.endDate;
-      }
+      if (dr.range === 'custom') { params.startDate = dr.startDate; params.endDate = dr.endDate; }
       const results = await Promise.all(
-        LEAD_STATUSES.map((s) =>
-          api
-            .get('/api/leads', { params: { ...params, status: s.key } })
-            .then((r) => ({ key: s.key, count: r.data.data?.total ?? 0 }))
-            .catch(() => ({ key: s.key, count: 0 }))
-        )
+        STATUSES.map((key) =>
+          api.get('/api/leads', { params: { ...params, status: key } })
+            .then((r) => ({ key, count: r.data.data?.total ?? 0 }))
+            .catch(() => ({ key, count: 0 })),
+        ),
       );
       const map = {};
-      results.forEach((r) => {
-        map[r.key] = r.count;
-      });
+      results.forEach((r) => { map[r.key] = r.count; });
       setLeadStats(map);
     } catch { }
   };
 
   useEffect(() => {
+    setStats(null);
     fetchStats();
     fetchLeadStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange]);
 
   useEffect(() => {
     getAllEmployeesSafe(api).then(setEmployees).catch(() => { });
-    api
-      .get('/api/calls/realtime')
-      .then((r) => setLiveFeed((r.data.data || []).slice(0, 30)))
-      .catch(() => { });
+    api.get('/api/calls/realtime').then((r) => setLiveFeed((r.data.data || []).slice(0, 30))).catch(() => { });
     const interval = setInterval(fetchStats, 30000);
-    if (!process.env.NEXT_PUBLIC_PUSHER_KEY) return () => clearInterval(interval);
-    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap2',
-    });
+    const clock = setInterval(() => setTick((t) => t + 1), 60000);
+    if (!process.env.NEXT_PUBLIC_PUSHER_KEY) return () => { clearInterval(interval); clearInterval(clock); };
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, { cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap2' });
     const channel = pusher.subscribe('managers');
-    channelRef.current = channel;
     channel.bind('new_call_log', (data) => {
       setLiveFeed((prev) => [data, ...prev].slice(0, 30));
+      const id = data._id || `${data.contactNumber}-${data.timestamp}`;
+      setFreshIds((s) => new Set(s).add(id));
+      setTimeout(() => setFreshIds((s) => { const n = new Set(s); n.delete(id); return n; }), 1600);
       fetchStats();
     });
-
-
     return () => {
       clearInterval(interval);
+      clearInterval(clock);
       channel.unbind_all();
       pusher.unsubscribe('managers');
       pusher.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const today = stats?.today;
+  /* ── Derived chase ───────────────────────────────────────────── */
+  const isToday = dateRange.range === 'today';
+  const selected = stats?.selected || stats?.today;
   const yest = stats?.yesterday;
-  const selected = stats?.selected || today;
-  const isTodayRange = dateRange.range === 'today';
   const rangeLabel = formatRangeLabel(dateRange);
   const { fromDate, toDate } = rangeToDates(dateRange);
+  const days = dateRange.range === 'all' ? null : daysBetween(fromDate, toDate);
+  const clock = chaseClock(isToday);
 
-  const pieData = selected
-    ? [
-      { name: 'Incoming', value: selected.incoming || 0, color: '#22C55E' },
-      { name: 'Outgoing', value: selected.outgoing || 0, color: '#F59E0B' },
-      { name: 'Connected', value: selected.connectedCalls || 0, color: '#14B8A6' },
-      { name: 'Missed', value: selected.missed || 0, color: '#EF4444' },
-      { name: 'Rejected', value: selected.rejected || 0, color: '#8B5CF6' },
-    ].filter((d) => d.value > 0)
-    : [];
+  const agents = useMemo(() => {
+    const byId = new Map((selected?.employeeStats || []).map((e) => [e.employeeId, e]));
+    const rows = employees
+      .filter((e) => e.role === 'employee' && e.isActive !== false)
+      .map((e) => {
+        const s = byId.get(String(e._id));
+        byId.delete(String(e._id));
+        return { id: String(e._id), name: e.name, tl: e.tlName || '', code: e.ryanEmployeeCode || '', target: (e.dailyTarget || 0) * (days || 1), done: s?.count || 0, connected: s?.connectedCalls || 0, missed: s?.missed || 0, last: s?.lastCallAt || null };
+      });
+    // Callers not in the employee list (e.g. deactivated mid-range) still count toward the totals.
+    byId.forEach((s) => rows.push({ id: s.employeeId, name: s.name, tl: s.tlName || '', code: '', target: (s.dailyTarget || 0) * (days || 1), done: s.count, connected: s.connectedCalls, missed: s.missed, last: s.lastCallAt }));
+    return rows.map((r) => {
+      const expected = Math.round(r.target * clock.elapsed);
+      const gap = r.done - expected;
+      const tone = r.target > 0 && r.done >= r.target ? 'met' : r.target > 0 && clock.state !== 'before' && gap < 0 ? 'behind' : null;
+      return { ...r, expected, gap, need: Math.max(0, r.target - r.done), pct: r.target ? Math.round((r.done / r.target) * 100) : null, connRate: r.done ? Math.round((r.connected / r.done) * 100) : 0, tone };
+    });
+  }, [employees, selected, days, clock.elapsed, clock.state]);
 
-  const greeting = (() => {
-    const h = new Date().toLocaleString('en-US', { timeZone: timezone, hour: 'numeric', hour12: false });
-    const hr = parseInt(h);
-    return hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
-  })();
+  const teamTarget = agents.reduce((a, r) => a + r.target, 0);
+  const done = selected?.totalCalls || 0;
+  const need = Math.max(0, teamTarget - done);
+  const shiftLen = SHIFT_END - SHIFT_START;
+  const requiredRate = clock.state === 'live' && clock.hoursLeft > 0 ? Math.ceil(need / clock.hoursLeft) : clock.state === 'before' ? Math.ceil(teamTarget / shiftLen) : null;
+  const elapsedHours = clock.elapsed * shiftLen;
+  const currentRate = clock.state === 'live' && elapsedHours > 0.25 ? Math.round(done / elapsedHours) : clock.state === 'after' ? Math.round(done / shiftLen) : null;
+  const expectedNow = Math.round(teamTarget * clock.elapsed);
+  const rateTone = requiredRate != null && currentRate != null ? (currentRate >= requiredRate ? 'met' : 'behind') : null;
+  const vsYest = isToday && yest?.totalCalls ? Math.round(((done - yest.totalCalls) / yest.totalCalls) * 100) : null;
 
-  const todayLabel = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: timezone,
-  });
+  const worm = useMemo(() => {
+    const perHour = selected?.callsPerHour || [];
+    const active = perHour.filter((p) => p.count > 0).map((p) => p.hour);
+    const lo = Math.min(SHIFT_START, ...(active.length ? active : [SHIFT_START]));
+    const hi = Math.max(SHIFT_END - 1, ...(active.length ? active : [SHIFT_END - 1]));
+    const nowH = isToday ? istNow().h : 23;
+    let cum = 0;
+    const out = [];
+    for (let h = lo; h <= hi; h++) {
+      cum += perHour.find((p) => p.hour === h)?.count || 0;
+      const frac = Math.max(0, Math.min(1, (h + 1 - SHIFT_START) / shiftLen));
+      out.push({ hour: h, label: hourLabel(h), actual: h <= nowH ? cum : null, target: teamTarget ? Math.round(teamTarget * frac) : null });
+    }
+    return out;
+  }, [selected, isToday, teamTarget, shiftLen]);
+
+  const behind = agents.filter((a) => a.tone === 'behind').sort((a, b) => a.gap - b.gap);
+  const notStarted = isToday && clock.state !== 'before' ? agents.filter((a) => a.done === 0).length : 0;
+
+  const mix = ['outgoing', 'incoming', 'missed', 'rejected'].map((k) => ({ key: k, ...TYPE_META[k], value: selected?.[k] || 0 }));
+  const mixTotal = mix.reduce((a, m) => a + m.value, 0);
 
   const totalLeads = Object.values(leadStats).reduce((a, b) => a + b, 0);
+  const maxLead = Math.max(1, ...Object.values(leadStats));
+  const loadingStats = !stats;
+
+  // When today is empty, offer the last day that has data instead of a dead screen.
+  const lastActiveDay = stats?.latestActivityTs ? new Date(stats.latestActivityTs).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : null;
+  const emptyToday = isToday && stats && done === 0;
+
+  const agentColumns = [
+    {
+      key: 'name', label: 'Agent', width: '24%',
+      render: (r) => (
+        <Link href={`/employees/${r.id}`} className="block min-w-0 group/a">
+          <span className="block font-medium text-ink truncate group-hover/a:text-[var(--blue)]">{r.name}</span>
+          <span className="block text-xs text-ink-3 truncate">{r.tl ? `TL ${r.tl}` : 'No team lead'}{r.code ? ` · ${r.code}` : ''}</span>
+        </Link>
+      ),
+      filterValue: (r) => `${r.name} ${r.tl} ${r.code}`,
+    },
+    {
+      key: 'pct', label: 'Calls vs target', width: '24%',
+      render: (r) => (
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="tabular-nums text-ink w-[76px] shrink-0"><b className="font-semibold">{fmtNum(r.done)}</b><span className="text-ink-3"> / {r.target ? fmtNum(r.target) : '—'}</span></span>
+          {r.target > 0 && <Meter value={r.done} max={r.target} tone={r.tone} />}
+        </div>
+      ),
+      searchable: false,
+    },
+    {
+      key: 'gap', label: isToday ? 'Vs pace' : 'Vs target', align: 'right', width: '13%',
+      render: (r) => r.target === 0 ? <span className="text-ink-4">No target</span>
+        : r.tone === 'met' ? <span className="text-met font-medium">Target met</span>
+        : clock.state === 'before' ? <span className="text-ink-3">—</span>
+        : r.gap < 0 ? <span className="text-behind font-medium tabular-nums">{fmtNum(r.gap)}</span>
+        : <span className="text-ink-2 tabular-nums">+{fmtNum(r.gap)}</span>,
+      searchable: false,
+    },
+    { key: 'need', label: 'Need', align: 'right', width: '9%', searchable: false, render: (r) => (r.target ? fmtNum(r.need) : '—') },
+    { key: 'connRate', label: 'Connected', align: 'right', width: '11%', searchable: false, render: (r) => (r.done ? `${r.connRate}%` : '—') },
+    { key: 'missed', label: 'Missed', align: 'right', width: '9%', searchable: false, render: (r) => (r.missed ? <span className="text-behind tabular-nums">{fmtNum(r.missed)}</span> : <span className="text-ink-4">0</span>) },
+    { key: 'last', label: 'Last call', align: 'right', width: '10%', searchable: false, render: (r) => (r.last ? <span className="tabular-nums">{fmtTime(r.last)}</span> : <span className="text-ink-4">—</span>) },
+  ];
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto space-y-6 lg:space-y-7">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white rounded-2xl p-6 shadow-sm border border-gray-100"
-        >
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-              {greeting} 👋
-            </h1>
-            <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-              <ClockIco />
-              {todayLabel}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {/* Date range filter */}
+    <div className="space-y-6">
+      <PageHeader
+        title="Dashboard"
+        description={isToday
+          ? `${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' })} · shift ${hourLabel(SHIFT_START)}–${hourLabel(SHIFT_END)} IST`
+          : `${rangeLabel}${days ? ` · ${days} day${days > 1 ? 's' : ''}` : ''}`}
+        actions={
+          <>
             <DateRangeFilter value={dateRange} onChange={setDateRange} />
-          
-            <button
-              onClick={() => fetchStats(true)}
-              disabled={refreshing}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <motion.span
-                animate={{ rotate: refreshing ? 360 : 0 }}
-                transition={{ duration: 1, repeat: refreshing ? Infinity : 0 }}
-              >
-                <RefreshIco />
-              </motion.span>
-              <span className="hidden sm:inline">{refreshing ? 'Refreshing…' : 'Refresh'}</span>
+            <button onClick={() => fetchStats(true)} disabled={refreshing} aria-label="Refresh" title="Refresh" className="btn-secondary btn-icon">
+              <RefreshIco s={15} spinning={refreshing} />
             </button>
-          </div>
-        </motion.div>
+          </>
+        }
+      />
 
-        {/* Date Scope Notice */}
-        {dateRange.range === 'today' && stats?.selected?.totalCalls === 0 && stats?.latestActivityDate && (
-          <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl px-4 py-3 flex items-center gap-3 text-xs text-amber-800">
-            <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <span>No calls logged on today's calendar date ({stats?.selected?.date || 'Today'}). Latest recorded activity: <strong>{stats.latestActivityDate}</strong>.</span>
-              <span className="ml-2 text-amber-700">Select a custom date or range to view historical activity.</span>
-            </div>
-          </div>
-        )}
-
-        {/* KPI Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          {KPI.map((cfg, i) => (
-            <KpiCard
-              key={cfg.key}
-              idx={i}
-              label={cfg.label}
-              value={selected?.[cfg.key]}
-              Icon={cfg.Icon}
-              grad={cfg.grad}
-              href={kpiHref(cfg, fromDate, toDate)}
-              delta={isTodayRange && cfg.key !== 'uniqueClients' ? trend(selected?.[cfg.key], yest?.[cfg.key]) : null}
-            />
-          ))}
+      {/* ── The chase ─────────────────────────────────────────── */}
+      <section className="panel overflow-hidden" aria-label="Team call chase">
+        <div className="grid grid-cols-2 lg:grid-cols-5 divide-line-2 lg:divide-x [&>*]:border-line-2 [&>*:nth-child(-n+4)]:border-b lg:[&>*]:border-b-0">
+          {loadingStats ? Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="px-5 py-4"><div className="skeleton h-3.5 w-20" /><div className="skeleton h-7 w-24 mt-2.5" /><div className="skeleton h-3 w-28 mt-2" /></div>
+          )) : (
+            <>
+              <Score label={isToday ? 'Calls today' : 'Calls'} value={fmtNum(done)}
+                unit={teamTarget ? `/ ${fmtNum(teamTarget)}` : null}
+                sub={teamTarget ? `${Math.round((done / teamTarget) * 100)}% of target${vsYest != null ? ` · ${vsYest >= 0 ? '+' : '−'}${Math.abs(vsYest)}% vs yesterday` : ''}` : 'No daily targets set'}
+                tone={teamTarget && done >= teamTarget ? 'met' : null} />
+              <Score label="Still needed" value={teamTarget ? fmtNum(need) : '—'}
+                sub={!teamTarget ? 'Set targets in Daily targets' : need === 0 ? 'Target reached' : isToday && clock.state === 'live' ? `${fmtNum(Math.max(0, expectedNow - done))} behind pace now` : 'to reach target'}
+                tone={teamTarget && need === 0 ? 'met' : null} />
+              <Score label="Required rate" value={requiredRate != null ? fmtNum(requiredRate) : '—'} unit={requiredRate != null ? '/hr' : null}
+                sub={clock.state === 'live' ? `${clock.hoursLeft.toFixed(1)} h left in shift` : clock.state === 'before' ? 'Shift not started' : isToday ? 'Shift over' : 'Today only'} />
+              <Score label="Current rate" value={currentRate != null ? fmtNum(currentRate) : '—'} unit={currentRate != null ? '/hr' : null}
+                sub={rateTone === 'behind' ? `${fmtNum(requiredRate - currentRate)}/hr short of required` : rateTone === 'met' ? 'On pace for target' : isToday ? 'Avg since shift start' : 'Today only'}
+                tone={rateTone} />
+              <Score className="col-span-2 lg:col-span-1" label="Connected" value={done ? `${Math.round(((selected?.connectedCalls || 0) / done) * 100)}%` : '—'}
+                sub={`${fmtNum(selected?.connectedCalls || 0)} connected · ${fmtDur(selected?.callDurationSec)} talk`} />
+            </>
+          )}
         </div>
 
-        {/* Lead Pipeline */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <LeadIco />
-              </div>
+        <div className="grid grid-cols-1 xl:grid-cols-3 border-t border-line-2">
+          {/* Worm */}
+          <div className="xl:col-span-2 p-5 pb-3 xl:border-r border-line-2">
+            <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-gray-900">Lead Pipeline</h3>
-                <p className="text-xs text-gray-500">
-                  {totalLeads} total leads {dateRange.range === 'today' && totalLeads === 0 ? '(0 created today)' : ''}
-                </p>
+                <h2 className="panel-title">{isToday ? 'Today’s chase' : 'Cumulative calls by hour'}</h2>
+                <p className="panel-sub">{isToday ? 'Calls so far against the target line, by IST hour' : `Summed across ${inline(rangeLabel)} against the target line`}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-3">
+                {teamTarget > 0 && (
+                  <div className="seg" role="group" aria-label="Chart scale">
+                    <button aria-pressed={!fitCalls} onClick={() => setFitCalls(false)}>Target scale</button>
+                    <button aria-pressed={fitCalls} onClick={() => setFitCalls(true)}>Fit calls</button>
+                  </div>
+                )}
+                <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 rounded bg-[var(--blue)]" />Actual</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 border-t border-dashed border-ink-4" />Target</span>
               </div>
             </div>
-            <Link
-              href={`/reports/lead?fromDate=${fromDate}&toDate=${toDate}`}
-              className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors duration-200"
-            >
-              View all →
-            </Link>
-          </div>
-          {dateRange.range === 'today' && totalLeads === 0 && (
-            <div className="mb-4 bg-blue-50/70 border border-blue-100 rounded-lg px-3 py-2 text-xs text-blue-700 flex items-center justify-between">
-              <span>No leads created on today's calendar date. All 121,124 historical leads are available under All Time.</span>
-              <Link href="/leads/overview" className="underline font-medium hover:text-blue-900 ml-2 shrink-0">
-                Go to Leads Overview →
-              </Link>
-            </div>
-          )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            {LEAD_STATUSES.map((s, i) => {
-              const count = leadStats[s.key] ?? 0;
-              const pct = totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0;
-              return (
-                <Link href={`/reports/lead?status=${s.key}&fromDate=${fromDate}&toDate=${toDate}`} key={s.key}>
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.04 + 0.35 }}
-                    whileHover={{ y: -2 }}
-                    className="bg-gray-50 hover:bg-white rounded-xl p-3 border border-gray-100 hover:border-gray-200 transition-all duration-300 cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold uppercase tracking-wider truncate mr-1" style={{ color: s.color }} title={s.label}>
-                        {s.label}
-                      </span>
-                      <span
-                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0"
-                        style={{ background: s.bg, color: s.color }}
-                      >
-                        {pct}%
-                      </span>
-                    </div>
-                    <p className="text-xl font-bold text-gray-900 tabular-nums">
-                      {leadStats[s.key] === undefined ? '—' : count}
-                    </p>
-                    <div className="mt-2 h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ delay: i * 0.04 + 0.45, duration: 0.8 }}
-                        className="h-full rounded-full"
-                        style={{ background: s.color }}
-                      />
-                    </div>
-                  </motion.div>
-                </Link>
-              );
-            })}
-          </div>
-        </motion.div>
-
-        {/* Charts */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Bar Chart */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="xl:col-span-2 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Calls Per Hour</h3>
-                <p className="text-xs text-gray-500 mt-1">{rangeLabel} activity ·</p>
-              </div>
-              {isTodayRange && (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs font-semibold text-green-600">Live</span>
-                </div>
+            <div className="h-[248px] -ml-2">
+              {loadingStats ? <div className="skeleton h-full ml-2" /> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={worm} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="wormFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#7C3AED" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="#7C3AED" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#F1F0F5" vertical={false} />
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={14} tick={{ fontSize: 11.5 }} dy={4} />
+                    <YAxis axisLine={false} tickLine={false} width={44} allowDecimals={false} allowDataOverflow domain={fitCalls ? [0, (max) => Math.max(10, Math.ceil(Math.max(...worm.map((w) => w.actual || 0)) * 1.15))] : [0, 'auto']} tickFormatter={(v) => fmtNum(v)} tick={{ fontSize: 11.5 }} />
+                    <Tooltip content={<ChartTip />} cursor={{ stroke: '#D5D2DE', strokeDasharray: '3 3' }} />
+                    {isToday && clock.state === 'live' && (
+                      <ReferenceLine x={hourLabel(istNow().h)} stroke="#A19DB2" strokeDasharray="2 3"
+                        label={{ value: 'Now', position: 'insideTopRight', fill: '#6B6880', fontSize: 11 }} />
+                    )}
+                    {teamTarget > 0 && (
+                      <Line dataKey="target" name="Target" stroke="#A19DB2" strokeWidth={1.5} strokeDasharray="5 4" dot={false} isAnimationActive={false} />
+                    )}
+                    <Area dataKey="actual" name="Actual" stroke="#7C3AED" strokeWidth={2} fill="url(#wormFill)" dot={false}
+                      activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff', fill: '#7C3AED' }} connectNulls={false} isAnimationActive={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
               )}
             </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={selected?.callsPerHour || []} barCategoryGap="40%" margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#2563EB" stopOpacity={0.9} />
-                    <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.3} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                <XAxis
-                  dataKey="hour"
-                  tick={{ fill: '#94A3B8', fontSize: 10 }}
-                  tickFormatter={(h) => utcHourLabel(h, timezone)}
-                  axisLine={false}
-                  tickLine={false}
-                  interval={1}
-                />
-                <YAxis
-                  tick={{ fill: '#94A3B8', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={28}
-                  allowDecimals={false}
-                />
-                <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(37,99,235,0.05)', radius: 6 }} />
-                <Bar dataKey="count" fill="url(#barGrad)" radius={[6, 6, 0, 0]} name="Calls">
-                  <LabelList
-                    dataKey="count"
-                    position="top"
-                    style={{ fontSize: 9, fill: '#94A3B8', fontWeight: 600 }}
-                    formatter={(v) => v > 0 ? v : ''}
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </motion.div>
-
-          {/* Pie Chart */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-          >
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-900">{rangeLabel} Breakdown</h3>
-              <p className="text-xs text-gray-500 mt-1">{selected?.totalCalls || 0} total calls</p>
-            </div>
-            {pieData.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[220px] gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <PhoneIco size={24} />
-                </div>
-                <p className="text-sm text-gray-500">No calls yet for {rangeLabel.toLowerCase()}</p>
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="45%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={3}
-                    dataKey="value"
-                    strokeWidth={0}
-                  >
-                    {pieData.map((e, i) => (
-                      <Cell key={i} fill={e.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<ChartTip />} />
-                  <Legend
-                    iconType="circle"
-                    iconSize={8}
-                    wrapperStyle={{ fontSize: 11, color: '#475569', paddingTop: 12 }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </motion.div>
-        </div>
-
-        {/* Bottom Section */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Top Dialers */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.55 }}
-            className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Top Dialers</h3>
-                <p className="text-xs text-gray-500 mt-1">{rangeLabel}'s leaders</p>
-              </div>
-              <Link
-                href="/employees/leaderboard"
-                className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors duration-200"
-              >
-                View all
-              </Link>
-            </div>
-            {(selected?.topDialers?.length ?? 0) === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[260px] gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <StarIco />
-                </div>
-                <p className="text-sm text-gray-500">No data yet</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {(selected.topDialers || []).slice(0, 7).map((d, i) => {
-                  const pct = Math.min(100, (d.count / (selected.topDialers[0]?.count || 1)) * 100);
-                  const MEDAL = ['#F59E0B', '#94A3B8', '#B45309'];
-                  const MEDAL_BG = ['rgba(245,158,11,0.12)', 'rgba(148,163,184,0.12)', 'rgba(180,83,9,0.12)'];
-                  return (
-                    <div key={d.employeeId} className="flex items-center gap-3">
-                      <div
-                        className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        style={{
-                          background: i < 3 ? MEDAL_BG[i] : '#F1F5F9',
-                          color: i < 3 ? MEDAL[i] : '#94A3B8',
-                        }}
-                      >
-                        {i + 1}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="text-sm font-medium text-gray-900 truncate">{d.name}</p>
-                          <span className="text-sm font-bold text-blue-600 ml-2 flex-shrink-0">{d.count}</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${pct}%` }}
-                            transition={{ delay: i * 0.05 + 0.6, duration: 0.8 }}
-                            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+            {emptyToday && (
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 px-3 py-2.5 rounded-lg bg-gray-50 text-[13px]">
+                <span className="text-ink-2">No calls have synced today yet.{lastActiveDay && stats?.latestActivityDate ? ` Last activity was on ${stats.latestActivityDate}.` : ''}</span>
+                {lastActiveDay && (
+                  <button onClick={() => setDateRange({ range: 'custom', startDate: lastActiveDay, endDate: lastActiveDay })} className="btn-secondary btn-sm">
+                    View {stats.latestActivityDate}
+                  </button>
+                )}
               </div>
             )}
-          </motion.div>
-
-          {/* Live Feed */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
-            className="xl:col-span-2 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Live Call Feed</h3>
-                <p className="text-xs text-gray-500 mt-1">Streaming in real time ·</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs font-semibold text-green-600">Real-time</span>
-                </div>
-                <Link
-                  href="/calls/live"
-                  className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors duration-200"
-                >
-                  Monitor →
-                </Link>
-              </div>
-            </div>
-            {liveFeed.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-[300px] gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <PhoneIco size={24} />
-                </div>
-                <p className="text-sm text-gray-500">Waiting for live calls…</p>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-gray-100 overflow-hidden">
-                <div className="max-h-[340px] overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead className="sticky top-0 z-10">
-                      <tr className="bg-gray-50 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                          Employee
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                          Contact
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                          Type
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                          Duration
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                          Time
-                        </th>
-                        <th className="px-4 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                          Remarks
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50 bg-white">
-                      {liveFeed.map((log, i) => (
-                        <motion.tr
-                          key={i}
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: Math.min(i * 0.02, 0.3) }}
-                          className={`hover:bg-blue-50/40 transition-colors duration-150 ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                {(log.employeeName || '?')[0].toUpperCase()}
-                              </div>
-                              <span className="font-medium text-gray-900">
-                                <Truncate text={log.employeeName} />
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 hidden sm:table-cell">
-                            <p className="text-gray-900 tabular-nums">{log.contactNumber}</p>
-                            {log.contactName && log.contactName !== 'Unknown' && (
-                              <p className="text-xs text-gray-500"><Truncate text={log.contactName} /></p>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 hidden md:table-cell">
-                            <CallTypeBadge type={log.callType} />
-                          </td>
-                          <td className="px-4 py-3 hidden lg:table-cell text-gray-700 tabular-nums whitespace-nowrap">
-                            {log.duration ? `${Math.floor(log.duration / 60)}m ${log.duration % 60}s` : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap tabular-nums">
-                            {fmtTime(log.timestamp, timezone)}
-                          </td>
-                          <td className="px-4 py-3 text-gray-600">
-                            <Truncate text={log.remarks} />
-                          </td>
-                        </motion.tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        </div>
-
-        {/* Period Comparison */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.65 }}
-        >
-          <h3 className="text-sm font-bold text-gray-900 mb-4">Period Comparison</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <PeriodPanel title={rangeLabel} data={selected} />
-            <PeriodPanel title="Yesterday" data={stats?.yesterday} />
-            <PeriodPanel title="Last Week" data={stats?.lastWeek} />
           </div>
-        </motion.div>
 
-        {/* Modal */}
-        <AnimatePresence>
-          {leadModal && (
-            <CreateLeadModal
-              call={leadModal}
-              employees={employees}
-              onClose={() => setLeadModal(null)}
-            />
+          {/* Behind the rate */}
+          <div className="p-5 border-t xl:border-t-0 border-line-2 flex flex-col min-h-[240px]">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="panel-title">Behind the rate</h2>
+                <p className="panel-sub">{isToday ? 'Agents short of where they should be by now' : 'Agents short of their target'}</p>
+              </div>
+              {behind.length > 0 && <span className="badge bg-[var(--behind-50)] text-behind tabular-nums">{fmtNum(behind.length)}</span>}
+            </div>
+            {loadingStats ? (
+              <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <div key={i} className="skeleton h-9" />)}</div>
+            ) : behind.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <p className="text-sm font-medium text-ink">{teamTarget ? (clock.state === 'before' ? 'Shift hasn’t started' : 'Everyone is on pace') : 'No targets to chase'}</p>
+                <p className="text-[13px] text-ink-3 mt-1">{teamTarget ? 'Agents who fall behind their target pace show up here.' : 'Give agents a daily call target to track pace.'}</p>
+                {!teamTarget && <Link href="/calls/targets" className="btn-secondary btn-sm mt-3">Set daily targets</Link>}
+              </div>
+            ) : (
+              <>
+                <ul className="-mx-2 flex-1">
+                  {behind.slice(0, 6).map((a) => (
+                    <li key={a.id}>
+                      <Link href={`/employees/${a.id}`} className="flex items-center gap-3 px-2 h-11 rounded-lg hover:bg-gray-50 transition-colors duration-150">
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[13px] font-medium text-ink truncate">{a.name}</span>
+                          <span className="block text-xs text-ink-3 tabular-nums">{a.done === 0 ? 'No calls yet' : `${fmtNum(a.done)} of ${fmtNum(a.target)}`}</span>
+                        </span>
+                        <span className="text-[13px] font-semibold text-behind tabular-nums">{fmtNum(a.gap)}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex items-center justify-between pt-3 mt-auto text-xs text-ink-3">
+                  <span>{notStarted > 0 ? `${fmtNum(notStarted)} not started` : `${fmtNum(behind.length)} behind`}</span>
+                  <a href="#agents" className="font-medium text-[var(--blue)] hover:underline">All agents</a>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Agent chase table ─────────────────────────────────── */}
+      <section id="agents" className="panel scroll-mt-20" aria-label="Agents">
+        <div className="panel-head">
+          <div>
+            <h2 className="panel-title">Agents</h2>
+            <p className="panel-sub">{fmtNum(agents.length)} active · {isToday ? 'pace is measured against the shift clock' : 'measured against target × days in range'}</p>
+          </div>
+          <Link href="/calls/targets" className="btn-ghost btn-sm">Manage targets</Link>
+        </div>
+        <div className="p-4 pt-3">
+          <DataTable
+            columns={agentColumns}
+            rows={[...agents].sort((a, b) => (b.tone === 'behind') - (a.tone === 'behind') || (a.tone === 'behind' ? a.gap - b.gap : b.done - a.done))}
+            loading={loadingStats || employees.length === 0 && !stats}
+            pageSize={10}
+            getRowId={(r) => r.id}
+            emptyTitle="No active agents"
+            emptyHint="Agents appear here once they are added and active."
+          />
+        </div>
+      </section>
+
+      {/* ── Mix + live feed ───────────────────────────────────── */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <section className="panel" aria-label="Call mix">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Call mix</h2>
+              <p className="panel-sub">{rangeLabel} · {fmtNum(mixTotal)} calls</p>
+            </div>
+          </div>
+          <div className="p-5">
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-100" role="img" aria-label="Call type split">
+              {mixTotal > 0 && mix.map((m) => m.value > 0 && (
+                <span key={m.key} title={`${m.label} ${m.value}`} style={{ width: `${(m.value / mixTotal) * 100}%`, background: m.color }} className="h-full transition-[width] duration-500 ease-out first:rounded-l-full last:rounded-r-full" />
+              ))}
+            </div>
+            <ul className="mt-4 -mx-2">
+              {mix.map((m) => (
+                <li key={m.key}>
+                  <Link href={`/reports/calllogs?${new URLSearchParams({ fromDate, toDate, callType: m.key })}`}
+                    className="flex items-center gap-3 h-10 px-2 rounded-lg hover:bg-gray-50 transition-colors duration-150">
+                    <span className="w-2 h-2 rounded-sm" style={{ background: m.color }} />
+                    <span className="flex-1 text-[13px] text-ink-2">{m.label}</span>
+                    <span className="text-[13px] font-medium text-ink tabular-nums">{fmtNum(m.value)}</span>
+                    <span className="w-10 text-right text-xs text-ink-3 tabular-nums">{mixTotal ? `${Math.round((m.value / mixTotal) * 100)}%` : '—'}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <dl className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-line-2">
+              <div><dt className="text-xs text-ink-3">Unique clients</dt><dd className="text-[15px] font-semibold text-ink tabular-nums mt-0.5">{fmtNum(selected?.uniqueClients || 0)}</dd></div>
+              <div><dt className="text-xs text-ink-3">Avg call</dt><dd className="text-[15px] font-semibold text-ink tabular-nums mt-0.5">{fmtDur(selected?.avgDuration)}</dd></div>
+              <div><dt className="text-xs text-ink-3">Never attended</dt><dd className="text-[15px] font-semibold text-ink tabular-nums mt-0.5">{fmtNum(selected?.neverAttended || 0)}</dd></div>
+            </dl>
+          </div>
+        </section>
+
+        <section className="panel xl:col-span-2 flex flex-col" aria-label="Live call feed">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title flex items-center gap-2">Latest calls {process.env.NEXT_PUBLIC_PUSHER_KEY && <span className="live-dot" title="Streaming" />}</h2>
+              <p className="panel-sub">Newest synced calls across your agents</p>
+            </div>
+            <Link href="/calls/live" className="btn-ghost btn-sm">Live monitor</Link>
+          </div>
+          {liveFeed.length === 0 ? (
+            <EmptyState title="No calls synced yet" hint="Calls appear here as agents' phones sync them." />
+          ) : (
+            <div className="overflow-auto max-h-[392px]">
+              <table className="data-table">
+                <thead className="sticky top-0 z-10">
+                  <tr><th>Time</th><th>Agent</th><th className="hidden sm:table-cell">Contact</th><th>Type</th><th className="text-right hidden md:table-cell">Duration</th><th className="w-px" /></tr>
+                </thead>
+                <tbody>
+                  {liveFeed.slice(0, 20).map((log, i) => {
+                    const id = log._id || `${log.contactNumber}-${log.timestamp}`;
+                    return (
+                      <tr key={`${id}-${i}`} className={`group/feed ${freshIds.has(id) ? 'ct-flash' : ''}`}>
+                        <td className="tabular-nums text-ink-3 whitespace-nowrap">{fmtTime(log.timestamp)}</td>
+                        <td className="font-medium text-ink"><Truncate text={log.employeeName} max={20} /></td>
+                        <td className="hidden sm:table-cell">
+                          <span className="tabular-nums text-ink">{log.contactNumber}</span>
+                          {log.contactName && log.contactName !== 'Unknown' && <span className="block text-xs text-ink-3"><Truncate text={log.contactName} max={22} /></span>}
+                        </td>
+                        <td><CallBadge type={log.callType} /></td>
+                        <td className="text-right tabular-nums hidden md:table-cell">{log.duration ? `${Math.floor(log.duration / 60)}:${String(log.duration % 60).padStart(2, '0')}` : <span className="text-ink-4">—</span>}</td>
+                        <td className="text-right">
+                          {!log.leadId && (
+                            <button onClick={() => setLeadModal(log)}
+                              className="btn-ghost btn-sm opacity-100 lg:opacity-0 lg:group-hover/feed:opacity-100 focus:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                              Create lead
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
-        </AnimatePresence>
+        </section>
       </div>
+
+      {/* ── Lead pipeline ─────────────────────────────────────── */}
+      <section className="panel" aria-label="Lead pipeline">
+        <div className="panel-head">
+          <div>
+            <h2 className="panel-title">Lead pipeline</h2>
+            <p className="panel-sub">{fmtNum(totalLeads)} leads {dateRange.range === 'all' ? 'in total' : `created ${inline(rangeLabel)}`} · by status</p>
+          </div>
+          <Link href={`/reports/lead?fromDate=${fromDate}&toDate=${toDate}`} className="btn-ghost btn-sm">Leads report</Link>
+        </div>
+        {totalLeads === 0 && Object.keys(leadStats).length > 0 ? (
+          <EmptyState title={`No leads created ${inline(rangeLabel)}`} hint="Pick a wider date range to see how leads are moving."
+            action={<button onClick={() => setDateRange({ range: 'all', startDate: null, endDate: null })} className="btn-secondary btn-sm">Show all time</button>} />
+        ) : (
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 px-5 py-3">
+            {STATUSES.map((key) => {
+              const count = leadStats[key];
+              const st = statusStyle(key);
+              return (
+                <li key={key}>
+                  <Link href={`/reports/lead?status=${key}&fromDate=${fromDate}&toDate=${toDate}`}
+                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_64px] items-center gap-4 h-10 -mx-2 px-2 rounded-lg hover:bg-gray-50 transition-colors duration-150">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${st.dot}`} />
+                      <span className="text-[13px] text-ink-2 truncate">{STATUS_LABELS[key]}</span>
+                    </span>
+                    <span className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                      <span className="block h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: count ? `${Math.max(2, (count / maxLead) * 100)}%` : 0, background: st.hex }} />
+                    </span>
+                    <span className="text-right text-[13px] font-medium text-ink tabular-nums">{count === undefined ? <span className="skeleton inline-block h-3 w-8" /> : fmtNum(count)}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <AnimatePresence>
+        {leadModal && (
+          <CreateLeadModal call={leadModal} employees={employees} onClose={(created) => {
+            if (created) setLiveFeed((f) => f.map((l) => (l === leadModal ? { ...l, leadId: true } : l)));
+            setLeadModal(null);
+          }} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

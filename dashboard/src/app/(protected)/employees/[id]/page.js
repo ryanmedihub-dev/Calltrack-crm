@@ -1,196 +1,227 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../../../../lib/api';
 import { fmtDate, fmtTime } from '../../../../lib/timezone';
-import { DataTable } from '../../../../components/report-shared';
+import { statusLabel, statusStyle } from '../../../../lib/leadStatus';
+import { DataTable, CallBadge, ChartTip, LeadStatusBadge, Skeleton, fmtNum } from '../../../../components/report-shared';
 
 function formatDuration(sec) {
   if (!sec) return '—';
-  const m = Math.floor(sec/60), s = sec%60;
-  return m>0?`${m}m ${s}s`:`${s}s`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.round(sec % 60);
+  return h ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
+const hourLabel = (h) => `${h % 12 || 12}${h >= 12 ? 'p' : 'a'}`;
+const initials = (n) => (n || '?').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
-const TYPE_CHIPS = ['', 'incoming', 'outgoing', 'missed', 'rejected'];
-const CHIP_LABELS = { '':'All', incoming:'Incoming', outgoing:'Outgoing', missed:'Missed', rejected:'Rejected' };
+const TYPES = [['', 'All'], ['outgoing', 'Outgoing'], ['incoming', 'Incoming'], ['missed', 'Missed'], ['rejected', 'Rejected']];
 
-const TYPE_COLORS = {
-  incoming: { bg:'rgba(22,163,74,0.08)', color:'#16A34A', border:'rgba(22,163,74,0.22)' },
-  outgoing: { bg:'rgba(217,119,6,0.08)', color:'#D97706', border:'rgba(217,119,6,0.22)' },
-  missed:   { bg:'rgba(220,38,38,0.08)', color:'#DC2626', border:'rgba(220,38,38,0.22)' },
-  rejected: { bg:'rgba(124,58,237,0.08)', color:'#7C3AED', border:'rgba(124,58,237,0.22)' },
-};
-
-function CallBadge({ type }) {
-  const c = TYPE_COLORS[type]||{ bg:'#F1F5F9', color:'#64748B', border:'#E2E8F0' };
+function Fact({ label, children }) {
   return (
-    <span className="badge text-[11px] capitalize"
-      style={{ background:c.bg, color:c.color, border:`1px solid ${c.border}` }}>
-      {type||'—'}
-    </span>
+    <div className="flex items-start justify-between gap-4 py-2.5 border-b border-line-2 last:border-0">
+      <dt className="text-[13px] text-ink-3 shrink-0">{label}</dt>
+      <dd className="text-[13px] text-ink text-right min-w-0 break-words">{children || <span className="text-ink-4">—</span>}</dd>
+    </div>
   );
 }
-
-const AVATAR_COLORS = ['#2563EB','#16A34A','#D97706','#DC2626','#0D9488','#7C3AED'];
 
 export default function EmployeeDetailPage() {
   const { id } = useParams();
   const [employee, setEmployee] = useState(null);
-  const [data,     setData]     = useState(null);
-  const [page,     setPage]     = useState(1);
-  const [filters,  setFilters]  = useState({ callType:'', startDate:'', endDate:'' });
-  const [avatarColor] = useState(() => AVATAR_COLORS[Math.floor(Math.random()*AVATAR_COLORS.length)]);
+  const [today, setToday] = useState(null);
+  const [data, setData] = useState(null);
+  const [loadingCalls, setLoadingCalls] = useState(true);
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({ callType: '', startDate: '', endDate: '' });
+  const reqId = useRef(0);
 
-  const fetchData = async (p=page) => {
-    try {
-      const params = { page:p, limit:20, ...Object.fromEntries(Object.entries(filters).filter(([,v])=>v)) };
-      const [empRes, callRes] = await Promise.all([
-        api.get(`/api/employees/${id}`),
-        api.get(`/api/calls/employee/${id}`, { params }),
-      ]);
-      setEmployee(empRes.data.data);
-      setData(callRes.data.data);
-    } catch {}
-  };
+  useEffect(() => {
+    api.get(`/api/employees/${id}`).then((r) => setEmployee(r.data.data)).catch(() => setEmployee(false));
+    api.get('/api/calls/stats', { params: { range: 'today', employee: id } }).then((r) => setToday(r.data.data?.today || null)).catch(() => {});
+  }, [id]);
 
-  useEffect(() => { fetchData(); }, [page, id]);
+  // Filters are passed in explicitly — the old setTimeout(fetchData) read the previous filter state.
+  useEffect(() => {
+    const mine = ++reqId.current;
+    setLoadingCalls(true);
+    const params = { page, limit: 20, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) };
+    api.get(`/api/calls/employee/${id}`, { params })
+      .then((r) => { if (mine === reqId.current) setData(r.data.data); })
+      .catch(() => {})
+      .finally(() => { if (mine === reqId.current) setLoadingCalls(false); });
+  }, [id, page, filters]);
 
-  const applyFilter = (patch) => {
-    const next = { ...filters, ...patch };
-    setFilters(next);
-    setPage(1);
-    setTimeout(() => fetchData(1), 0);
-  };
+  const applyFilter = (patch) => { setFilters((f) => ({ ...f, ...patch })); setPage(1); };
+  const filtered = filters.callType || filters.startDate || filters.endDate;
 
-  const activeChip = { background:'#2563EB', color:'#fff', border:'1px solid #2563EB' };
-  const idleChip   = { background:'#F1F5F9', color:'#64748B', border:'1px solid #E2E8F0' };
+  const target = employee?.dailyTarget || 0;
+  const done = today?.totalCalls || 0;
+  const pct = target ? Math.min(100, Math.round((done / target) * 100)) : 0;
+  const hours = (today?.callsPerHour || []).filter((h) => h.hour >= 8 && h.hour <= 21).map((h) => ({ ...h, label: hourLabel(h.hour) }));
 
   const columns = [
     {
-      key: 'contactName',
-      label: 'Contact',
+      key: 'contactName', label: 'Contact', width: '28%',
       render: (log) => (
-        <div>
-          <p className="text-sm font-medium" style={{ color:'#0F172A' }}>{log.contactName||'—'}</p>
-          <p className="text-xs" style={{ color:'#94A3B8' }}>{log.contactNumber}</p>
-        </div>
+        <span className="block min-w-0">
+          <span className="block font-medium text-ink truncate">{log.contactName && log.contactName !== 'Unknown' ? log.contactName : log.contactNumber}</span>
+          {log.contactName && log.contactName !== 'Unknown' && <span className="block text-xs text-ink-3 tabular-nums">{log.contactNumber}</span>}
+        </span>
       ),
     },
-    { key: 'callType', label: 'Type', render: (log) => <CallBadge type={log.callType}/> },
-    { key: 'duration', label: 'Duration', render: (log) => <span className="font-medium text-sm" style={{ color:'#475569' }}>{formatDuration(log.duration)}</span> },
+    { key: 'callType', label: 'Type', width: '14%', render: (log) => <CallBadge type={log.callType} /> },
+    { key: 'duration', label: 'Duration', align: 'right', width: '12%', render: (log) => <span className="tabular-nums">{formatDuration(log.duration)}</span> },
     {
-      key: 'timestamp',
-      label: 'Date & Time',
-      render: (log) => (
-        <div>
-          <p className="text-xs" style={{ color:'#475569' }}>{fmtDate(log.timestamp)}</p>
-          <p className="text-xs" style={{ color:'#94A3B8' }}>{fmtTime(log.timestamp)}</p>
-        </div>
-      ),
+      key: 'timestamp', label: 'When', width: '20%',
+      render: (log) => <span className="tabular-nums">{fmtDate(log.timestamp)} <span className="text-ink-3">· {fmtTime(log.timestamp)}</span></span>,
     },
     {
-      key: 'leadStatus',
-      label: 'Status',
+      key: 'leadStatus', label: 'Lead status', width: '26%',
       render: (log) => log.leadStatus
-        ? <span className="badge text-[11px]" style={{ background:'#EFF6FF', color:'#2563EB', border:'1px solid #BFDBFE' }}>{log.leadStatus}</span>
-        : <span className="text-xs" style={{ color:'#94A3B8' }}>—</span>,
+        ? <LeadStatusBadge status={log.leadStatus} style={statusStyle(log.leadStatus)} label={statusLabel(log.leadStatus)} />
+        : <span className="text-ink-4">No lead</span>,
     },
   ];
 
+  if (employee === false) {
+    return (
+      <div className="panel p-10 text-center">
+        <p className="text-sm font-medium text-ink">Employee not found</p>
+        <p className="text-[13px] text-ink-3 mt-1">They may have been removed, or they’re not on your team.</p>
+        <Link href="/employees/overview" className="btn-secondary btn-sm mt-4">Back to employees</Link>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-5 animate-fade-in">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm">
-        <Link href="/reports/Employess" className="transition-colors" style={{ color:'#94A3B8' }}
-          onMouseEnter={e=>e.currentTarget.style.color='#2563EB'}
-          onMouseLeave={e=>e.currentTarget.style.color='#94A3B8'}>← Employees</Link>
-        <span style={{ color:'#E2E8F0' }}>/</span>
-        <span className="font-medium" style={{ color:'#0F172A' }}>{employee?.name||'Loading…'}</span>
+    <div className="space-y-6">
+      {/* Identity */}
+      <div className="flex flex-wrap items-center gap-4">
+        <span className="w-12 h-12 rounded-full bg-white ring-1 ring-line text-ink-2 flex items-center justify-center text-base font-semibold shrink-0">
+          {employee ? initials(employee.name) : ''}
+        </span>
+        <div className="min-w-0 flex-1">
+          {employee ? (
+            <>
+              <h1 className="page-title flex items-center gap-2.5">
+                {employee.name}
+                <span className={`badge ${employee.isActive !== false ? 'bg-[var(--met-50)] text-met' : 'bg-gray-100 text-ink-3'}`}>
+                  {employee.isActive !== false ? 'Active' : 'Inactive'}
+                </span>
+              </h1>
+              <p className="page-subtitle">
+                {[employee.tlName && `Team lead ${employee.tlName}`, employee.ryanEmployeeCode, employee.phone].filter(Boolean).join(' · ') || employee.email}
+              </p>
+            </>
+          ) : (
+            <><Skeleton className="h-6 w-48" /><Skeleton className="h-4 w-64 mt-2" /></>
+          )}
+        </div>
+        <Link href={`/reports/calllogs?employee=${id}`} className="btn-secondary">Open in calls report</Link>
       </div>
 
-      {/* Profile card */}
-      {employee && (
-        <div className="page-card p-5 flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-2xl font-bold flex-shrink-0"
-            style={{ background:avatarColor }}>
-            {employee.name[0].toUpperCase()}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-lg font-bold" style={{ color:'#0F172A' }}>{employee.name}</p>
-            <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.email}</p>
-            {employee.phone && <p className="text-sm" style={{ color:'#94A3B8' }}>{employee.phone}</p>}
-            {employee.tlName && <p className="text-sm" style={{ color:'#94A3B8' }}>TL: {employee.tlName}</p>}
-            {employee.ryanEmployeeCode && <p className="text-sm" style={{ color:'#94A3B8' }}>ID: {employee.ryanEmployeeCode}</p>}
-          </div>
-          <span className="badge"
-            style={employee.isActive
-              ? { background:'rgba(22,163,74,0.08)', color:'#16A34A', border:'1px solid rgba(22,163,74,0.22)' }
-              : { background:'#F1F5F9', color:'#64748B', border:'1px solid #E2E8F0' }}>
-            {employee.isActive?'Active':'Inactive'}
-          </span>
-        </div>
-      )}
-
-      {/* Stat cards */}
-      {data?.stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 stagger">
-          {[
-            { label:'Total Calls',  value:data.stats.total,                      color:'#2563EB', bg:'#EFF6FF' },
-            { label:'Missed Calls', value:data.stats.missed,                     color:'#DC2626', bg:'#FFF1F2' },
-            { label:'Avg Duration', value:formatDuration(data.stats.avgDuration), color:'#D97706', bg:'#FFFBEB' },
-          ].map(({label,value,color,bg})=>(
-            <div key={label} className="page-card p-4">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center mb-3" style={{ background:bg, color }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-                </svg>
-              </div>
-              <p className="text-xl font-bold tabular-nums" style={{ color }}>{value}</p>
-              <p className="text-[10px] font-semibold uppercase tracking-wider mt-1" style={{ color:'#94A3B8' }}>{label}</p>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Today */}
+        <section className="panel xl:col-span-2" aria-label="Today">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Today</h2>
+              <p className="panel-sub">Progress against their daily target</p>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Type filter chips */}
-      <div className="flex gap-2 flex-wrap">
-        {TYPE_CHIPS.map(t=>(
-          <button key={t} onClick={()=>applyFilter({ callType:t })}
-            className="px-3.5 h-8 flex items-center rounded-full text-xs font-semibold transition-all"
-            style={filters.callType===t
-              ? (t===''?activeChip:{ background:TYPE_COLORS[t]?.color||'#2563EB', color:'#fff', border:`1px solid ${TYPE_COLORS[t]?.color||'#2563EB'}` })
-              : (t===''?idleChip:{ background:TYPE_COLORS[t]?.bg||'#F1F5F9', color:TYPE_COLORS[t]?.color||'#64748B', border:`1px solid ${TYPE_COLORS[t]?.border||'#E2E8F0'}` })}>
-            {CHIP_LABELS[t]}
-          </button>
-        ))}
-      </div>
-
-      {/* Date filter bar */}
-      <div className="page-card p-4 flex flex-wrap gap-3 items-end">
-        {[{key:'startDate',label:'Start Date'},{key:'endDate',label:'End Date'}].map(({key,label})=>(
-          <div key={key}>
-            <label className="block text-xs font-medium mb-1" style={{ color:'#94A3B8' }}>{label}</label>
-            <input type="date" value={filters[key]} onChange={e=>applyFilter({[key]:e.target.value})} className="form-input"/>
           </div>
-        ))}
-        <button onClick={()=>applyFilter({ callType:'', startDate:'', endDate:'' })} className="btn-secondary">Reset</button>
+          <div className="p-5">
+            <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
+              <div>
+                <p className="stat-label">Calls</p>
+                <p className={`stat-number mt-1 ${target && done >= target ? 'text-met' : ''}`}>
+                  {fmtNum(done)}<span className="text-[15px] font-medium text-ink-3 ml-1">/ {target ? fmtNum(target) : '—'}</span>
+                </p>
+              </div>
+              <div><p className="stat-label">Connected</p><p className="stat-number mt-1">{done ? `${Math.round(((today?.connectedCalls || 0) / done) * 100)}%` : '—'}</p></div>
+              <div><p className="stat-label">Missed</p><p className={`stat-number mt-1 ${(today?.missed || 0) > 0 ? 'text-behind' : ''}`}>{fmtNum(today?.missed || 0)}</p></div>
+              <div><p className="stat-label">Talk time</p><p className="stat-number mt-1">{formatDuration(today?.callDurationSec)}</p></div>
+            </div>
+            {target > 0 && (
+              <div className="mt-5">
+                <div className="flex justify-between text-xs text-ink-3 mb-1.5">
+                  <span>{pct}% of target</span>
+                  <span className="tabular-nums">{done >= target ? 'Target met' : `${fmtNum(target - done)} to go`}</span>
+                </div>
+                <div className="progress-bar h-2"><div className="progress-fill" style={{ width: `${pct}%`, background: done >= target ? 'var(--met)' : 'var(--blue)' }} /></div>
+              </div>
+            )}
+            <div className="h-[160px] mt-6 -ml-2">
+              {!today ? <Skeleton className="h-full ml-2" /> : done === 0 ? (
+                <div className="h-full ml-2 rounded-lg bg-gray-50 flex items-center justify-center text-[13px] text-ink-3">No calls today yet</div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={hours} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="30%">
+                    <CartesianGrid stroke="#F1F0F5" vertical={false} />
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} interval={0} tick={{ fontSize: 11 }} />
+                    <YAxis axisLine={false} tickLine={false} width={28} allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(124,58,237,0.05)' }} />
+                    <Bar dataKey="count" name="Calls" fill="#7C3AED" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Details */}
+        <section className="panel" aria-label="Details">
+          <div className="panel-head"><h2 className="panel-title">Details</h2></div>
+          <dl className="px-5 py-1.5">
+            <Fact label="Email">{employee?.email}</Fact>
+            <Fact label="Phone"><span className="tabular-nums">{employee?.phone}</span></Fact>
+            <Fact label="Team lead">{employee?.tlName}</Fact>
+            <Fact label="Employee ID">{employee?.ryanEmployeeCode}</Fact>
+            <Fact label="Daily target">{target ? `${fmtNum(target)} calls` : null}</Fact>
+            <Fact label="All-time calls"><span className="tabular-nums">{data?.stats ? fmtNum(data.stats.total) : null}</span></Fact>
+            <Fact label="Avg call">{data?.stats ? formatDuration(data.stats.avgDuration) : null}</Fact>
+            <Fact label="Joined">{employee?.createdAt ? fmtDate(employee.createdAt) : null}</Fact>
+          </dl>
+        </section>
       </div>
 
-      {/* Call logs table */}
-      <div className="page-card overflow-hidden p-4">
-        <DataTable
-          serverMode
-          columns={columns}
-          rows={data?.calls||[]}
-          loading={!data}
-          page={page}
-          totalPages={data?.pages||1}
-          totalCount={data?.total}
-          onPageChange={setPage}
-          emptyTitle="No call logs found"
-        />
-      </div>
+      {/* Call history */}
+      <section className="panel" aria-label="Call history">
+        <div className="panel-head flex-wrap">
+          <div>
+            <h2 className="panel-title">Call history</h2>
+            <p className="panel-sub">{data ? `${fmtNum(data.total)} calls${filtered ? ' match these filters' : ''}` : 'Loading…'}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="seg" role="group" aria-label="Call type">
+              {TYPES.map(([k, l]) => (
+                <button key={k || 'all'} aria-pressed={filters.callType === k} onClick={() => applyFilter({ callType: k })}>{l}</button>
+              ))}
+            </div>
+            <input type="date" aria-label="From date" value={filters.startDate} onChange={(e) => applyFilter({ startDate: e.target.value })} className="form-input h-8 w-[140px] text-xs" />
+            <span className="text-ink-4 text-xs">to</span>
+            <input type="date" aria-label="To date" value={filters.endDate} onChange={(e) => applyFilter({ endDate: e.target.value })} className="form-input h-8 w-[140px] text-xs" />
+            {filtered && <button onClick={() => applyFilter({ callType: '', startDate: '', endDate: '' })} className="btn-ghost btn-sm">Clear</button>}
+          </div>
+        </div>
+        <div className="p-4 pt-3">
+          <DataTable
+            serverMode
+            searchable={false}
+            columns={columns}
+            rows={data?.calls || []}
+            loading={loadingCalls && !data}
+            page={page}
+            pageSize={20}
+            totalPages={data?.pages || 1}
+            totalCount={data?.total}
+            onPageChange={setPage}
+            emptyTitle={filtered ? 'No calls match these filters' : 'No calls yet'}
+            emptyHint={filtered ? 'Clear a filter or widen the dates.' : 'Calls appear here once this employee’s phone syncs.'}
+          />
+        </div>
+      </section>
     </div>
   );
 }

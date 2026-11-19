@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import toast from 'react-hot-toast';
 import Cookies from 'js-cookie';
+import { MotionConfig } from 'framer-motion';
 import Sidebar from '../../components/Sidebar';
 import TopBar  from '../../components/TopBar';
 import { isAuthenticated, isAdminUser, isAdminOnlyPath } from '../../lib/auth';
@@ -10,26 +11,10 @@ import api from '../../lib/api';
 
 function LoadingScreen() {
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: '#F1F5F9' }}>
-      <div className="flex flex-col items-center gap-4 animate-fade-in">
-        <div className="relative">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-            style={{ background: '#2563EB', boxShadow: '0 8px 24px rgba(37,99,235,0.30)' }}>
-            <span className="text-white text-sm font-black tracking-tight select-none">CT</span>
-          </div>
-          <div className="absolute -inset-1.5 rounded-[14px] border-2 border-transparent border-t-blue-400 animate-spin"
-            style={{ animationDuration: '0.9s' }} />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-semibold" style={{ color: '#0F172A' }}>CallTrack CRM</p>
-          <p className="text-xs mt-0.5" style={{ color: '#94A3B8' }}>Loading your workspace…</p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {[0, 0.15, 0.30].map((delay, i) => (
-            <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: '#2563EB', animationDelay: `${delay}s`, opacity: 0.6 }} />
-          ))}
-        </div>
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
+      <div className="flex items-center gap-3 animate-fade-in">
+        <span className="w-8 h-8 rounded-lg bg-[var(--blue)] text-white flex items-center justify-center text-xs font-bold">CT</span>
+        <span className="text-sm text-ink-3">Loading CallTrack…</span>
       </div>
     </div>
   );
@@ -79,12 +64,13 @@ export default function ProtectedLayout({ children }) {
   if (!ready) return <LoadingScreen />;
 
   return (
-    <div className="flex min-h-screen" style={{ background: '#F1F5F9' }}>
-      {mobileOpen && (
-        <div className="fixed inset-0 z-30 lg:hidden"
-          style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)' }}
-          onClick={() => setMobileOpen(false)} />
-      )}
+    // One motion default for every framer-motion element that doesn't set its own: strong ease-out at
+    // 200ms (Emil Kowalski's UI curve), and reduced-motion users get fades instead of movement.
+    <MotionConfig transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }} reducedMotion="user">
+    <div className="flex min-h-screen bg-[var(--bg)]">
+      {/* Mobile drawer backdrop — fades with the drawer, tap to close */}
+      <div aria-hidden onClick={() => setMobileOpen(false)}
+        className={`fixed inset-0 z-30 lg:hidden bg-[rgba(26,23,38,0.45)] transition-opacity duration-200 ease-out ${mobileOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
 
       <Sidebar
         collapsed={collapsed}
@@ -96,21 +82,21 @@ export default function ProtectedLayout({ children }) {
 
       <div className={[
         'flex-1 min-w-0 flex flex-col',
-        'transition-[margin] duration-300 ease-in-out',
-        collapsed ? 'lg:ml-[64px]' : 'lg:ml-56',
+        'transition-[margin] duration-200 ease-out motion-reduce:transition-none',
+        collapsed ? 'lg:ml-[var(--sidebar-w-collapsed)]' : 'lg:ml-[var(--sidebar-w)]',
       ].join(' ')}>
         <TopBar
           collapsed={collapsed}
           onToggle={toggleSidebar}
           onMobileToggle={() => setMobileOpen(v => !v)}
-          user={user}
         />
-        <main className="flex-1 pt-14">
-          <div className="p-4 sm:p-5 lg:p-6 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 pt-[var(--topbar-h)]">
+          <div className="px-4 pb-10 pt-4 sm:px-6 lg:px-8 lg:pt-6 max-w-[1480px] w-full mx-auto">
             {children}
           </div>
         </main>
       </div>
     </div>
+    </MotionConfig>
   );
 }

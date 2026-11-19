@@ -1,4 +1,5 @@
 const express = require('express');
+const { list, anyOf, oidsOf } = require('../lib/multi');
 const router = express.Router();
 const mongoose = require('mongoose');
 const CallLog = require('../models/CallLog');
@@ -616,10 +617,10 @@ router.get('/', protect, isManager, async (req, res) => {
       page = 1, limit = 20,
     } = req.query;
     const filter = scoped(req, {});
-    if (employeeId) filter.employeeId = employeeId;
+    if (employeeId) filter.employeeId = anyOf(employeeId);
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
-    if (callType) filter.callType = callType;
-    if (engagement) filter.engagement = engagement;
+    if (callType) filter.callType = anyOf(callType);
+    if (engagement) filter.engagement = anyOf(engagement);
     // "Unsynced" here means "no matching lead was auto-linked" (leadId is null),
     // not the CallLog.synced device-sync flag — matches the page's own copy.
     if (unsynced === 'true') filter.leadId = null;
@@ -903,9 +904,9 @@ router.get('/export', protect, isManager, async (req, res) => {
   try {
     const { employeeId, callType, startDate, endDate, tlName, source } = req.query;
     const filter = scoped(req, {});
-    if (employeeId) filter.employeeId = employeeId;
+    if (employeeId) filter.employeeId = anyOf(employeeId);
     else if (tlName) filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
-    if (callType)   filter.callType   = callType;
+    if (callType)   filter.callType   = anyOf(callType);
     if (startDate || endDate) {
       filter.timestamp = {};
       if (startDate) filter.timestamp.$gte = new Date(startDate);

@@ -1,38 +1,34 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../../../lib/api';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { fmtDate } from '../../../../lib/timezone';
-import { DataTable, LeadStatusBadge, InfoDot } from '../../../../components/report-shared';
+import { DataTable, LeadStatusBadge, PageHeader, fmtNum } from '../../../../components/report-shared';
 import { statusStyle, statusLabel } from '../../../../lib/leadStatus';
+import MultiSelect from '../../../../components/MultiSelect';
 
-function Ico({ size=16, children }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
-}
-const SearchIco  = () => <Ico size={13}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Ico>;
-const CalendarIco= ({s=20}) => <Ico size={s}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></Ico>;
+const SearchIco = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="11" cy="11" r="7" /><line x1="20" y1="20" x2="16.5" y2="16.5" /></svg>
+);
 
-const fmt = fmtDate;
-
+// Overdue is the only red; due today is amber; everything later is neutral.
 function dueStatus(ts) {
   if (!ts) return null;
-  const diff = Math.floor((new Date(ts)-Date.now())/86400000);
-  if (diff < 0)  return { label:'Overdue',  className: 'bg-red-50 text-red-600 border-red-200' };
-  if (diff === 0) return { label:'Due Today', className: 'bg-amber-50 text-amber-600 border-amber-200' };
-  if (diff <= 2) return { label:`In ${diff}d`, className: 'bg-blue-50 text-blue-600 border-blue-200' };
-  return { label:`In ${diff}d`, className: 'bg-emerald-50 text-emerald-600 border-emerald-200' };
+  const diff = Math.floor((new Date(ts) - Date.now()) / 86400000);
+  if (diff < 0) return { label: `Overdue ${Math.abs(diff)}d`, tone: 'text-behind bg-[var(--behind-50)]' };
+  if (diff === 0) return { label: 'Due today', tone: 'text-[var(--warn)] bg-[var(--warn-50)]' };
+  return { label: `In ${diff} day${diff > 1 ? 's' : ''}`, tone: 'text-ink-2 bg-gray-100' };
 }
 
 export default function FollowUpsPage() {
-  const [leads,     setLeads]     = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [search,    setSearch]    = useState('');
-  const [employee,  setEmployee]  = useState('');
+  const [leads, setLeads] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [employee, setEmployee] = useState('');
   const [employees, setEmployees] = useState([]);
-  const [dueSoon,   setDueSoon]   = useState(false);
-  const [page,      setPage]      = useState(1);
-  const [total,     setTotal]     = useState(0);
+  const [dueSoon, setDueSoon] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const PER_PAGE = 30;
 
   const load = useCallback(async () => {
@@ -41,138 +37,86 @@ export default function FollowUpsPage() {
       const r = await api.get('/api/leads', {
         params: {
           followUp: true,
-          search: search||undefined,
-          assignedTo: employee||undefined,
-          dueSoon: dueSoon||undefined,
+          search: search || undefined,
+          assignedTo: employee || undefined,
+          dueSoon: dueSoon || undefined,
           page, limit: PER_PAGE,
         },
       });
-      setLeads(r.data?.data?.leads||r.data?.data||[]);
-      setTotal(r.data?.data?.total||0);
+      setLeads(r.data?.data?.leads || r.data?.data || []);
+      setTotal(r.data?.data?.total || 0);
     } catch { setLeads([]); }
     setLoading(false);
   }, [search, employee, dueSoon, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(()=>{}); }, []);
+  useEffect(() => { getAllEmployeesSafe(api).then(setEmployees).catch(() => {}); }, []);
 
-  const totalPages = Math.ceil(total/PER_PAGE);
-  // NOTE: this page is server-paginated — `leads` only holds the CURRENT page's rows,
-  // so this count can only ever reflect overdue follow-ups on the page you're looking
-  // at, not the true total across every page. Labeled accordingly below rather than
-  // implying a global count (there's no lightweight "overdue total" endpoint to call instead).
-  const overdueThisPage = leads.filter(l => l.followUpDate && new Date(l.followUpDate) < new Date()).length;
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  // Server-paginated: this counts overdue rows on the page shown, and says so.
+  const overdueThisPage = leads.filter((l) => l.followUpDate && new Date(l.followUpDate) < new Date()).length;
 
   const columns = [
     {
-      key: 'name',
-      label: 'Lead',
+      key: 'name', label: 'Lead', width: '24%',
       render: (l) => (
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 bg-amber-600">{(l.name||'?')[0].toUpperCase()}</div>
-          <div>
-            <p className="font-semibold text-xs text-gray-900">{l.name||'Unknown'}</p>
-            <p className="text-[11px] text-gray-400">{l.email||''}</p>
-          </div>
-        </div>
+        <span className="block min-w-0">
+          <span className="block font-medium text-ink truncate">{l.name || l.phone || 'Unnamed lead'}</span>
+          {l.name && l.name !== l.phone && <span className="block text-xs text-ink-3 tabular-nums">{l.phone}</span>}
+        </span>
       ),
     },
-    { key: 'phone', label: 'Phone', render: (l) => <span className="font-mono text-xs text-gray-600">{l.phone||'—'}</span> },
-    { key: 'assignedToName', label: 'Assigned To', render: (l) => <span className="text-xs text-gray-600">{l.assignedTo?.name||'Unassigned'}</span> },
+    { key: 'assignedToName', label: 'Assigned to', width: '18%', render: (l) => l.assignedTo?.name || <span className="text-ink-4">Unassigned</span> },
+    { key: 'status', label: 'Status', width: '18%', render: (l) => <LeadStatusBadge status={l.status} style={statusStyle(l.status)} label={statusLabel(l.status)} /> },
+    { key: 'lastCallNote', label: 'Last note', width: '18%', render: (l) => <span className="text-ink-3 truncate block" title={l.lastCallNote || ''}>{l.lastCallNote || '—'}</span> },
+    { key: 'followUpDate', label: 'Follow-up', width: '10%', render: (l) => <span className="tabular-nums">{fmtDate(l.followUpDate)}</span> },
     {
-      key: 'status',
-      label: 'Status',
-      render: (l) => <LeadStatusBadge status={l.status} style={statusStyle(l.status)} label={statusLabel(l.status)} />,
-    },
-    { key: 'followUpDate', label: 'Follow-up Date', render: (l) => <span className="text-xs text-gray-600">{fmt(l.followUpDate)}</span> },
-    {
-      key: 'due',
-      label: 'Due',
-      render: (l) => {
-        const due = dueStatus(l.followUpDate);
-        return due ? <span className={`badge border ${due.className}`}>{due.label}</span> : null;
-      },
+      key: 'due', label: 'Due', width: '12%', align: 'right',
+      render: (l) => { const d = dueStatus(l.followUpDate); return d ? <span className={`badge ${d.tone}`}>{d.label}</span> : null; },
     },
   ];
 
   return (
-    <div className="space-y-5 animate-fade-in">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-50 text-amber-600">
-              <CalendarIco s={16}/>
-            </div>
-            <h2 className="text-lg font-bold text-gray-900 tracking-tight">Follow-ups</h2>
-          </div>
-          <p className="text-sm text-gray-400">Leads scheduled for a follow-up call or action</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <AnimatePresence>
-            {overdueThisPage > 0 && (
-              <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                className="page-card px-4 py-2.5 flex items-center gap-2 border-l-4 border-red-600">
-                <span className="text-sm font-bold tabular-nums text-red-600">{overdueThisPage}</span>
-                <span className="text-xs font-medium text-gray-400 flex items-center">
-                  Overdue (this page)
-                  <InfoDot text="This counts only overdue follow-ups on the page currently shown. Leads are paginated server-side, so this isn't a global total." />
-                </span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <div className="page-card px-4 py-2.5">
-            <span className="text-sm font-bold tabular-nums text-amber-600">{total}</span>
-            <span className="text-xs font-medium ml-1.5 text-gray-400">Total follow-ups</span>
-          </div>
-        </div>
-      </motion.div>
+    <div>
+      <PageHeader
+        title="Follow-ups"
+        description={loading ? 'Loading…' : `${fmtNum(total)} leads with a follow-up date · soonest first`}
+      />
 
-      <AnimatePresence>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="relative flex-1 min-w-[220px] max-w-sm">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4 pointer-events-none"><SearchIco /></span>
+          <input className="form-input pl-9" placeholder="Search name or phone" aria-label="Search leads"
+            value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+        </div>
+        <MultiSelect className="w-52" ariaLabel="Assigned to" placeholder="Everyone" noun="employees"
+          value={employee} onChange={(v) => { setEmployee(v); setPage(1); }} options={employees.map((e) => [e._id, e.name])} />
+        <div className="seg" role="group" aria-label="Due window">
+          <button aria-pressed={!dueSoon} onClick={() => { setDueSoon(false); setPage(1); }}>All</button>
+          <button aria-pressed={dueSoon} onClick={() => { setDueSoon(true); setPage(1); }}>Due in 2 days</button>
+        </div>
         {overdueThisPage > 0 && (
-          <motion.div initial={{ opacity: 0, y: -8, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden">
-            <div className="page-card p-4 flex items-center gap-3 border-l-4 border-red-600 bg-red-50">
-              <CalendarIco s={18}/>
-              <p className="text-xs text-red-600">
-                <strong>{overdueThisPage} follow-up{overdueThisPage>1?'s':''}</strong> on this page {overdueThisPage>1?'are':'is'} overdue. Contact these leads immediately to avoid losing them.
-              </p>
-            </div>
-          </motion.div>
+          <span className="ml-auto text-[13px] text-behind tabular-nums" title="Counts overdue leads on the page shown; results are paged.">
+            {fmtNum(overdueThisPage)} overdue on this page
+          </span>
         )}
-      </AnimatePresence>
+      </div>
 
-      {/* Filters */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="filter-bar flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[180px]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><SearchIco/></span>
-          <input className="form-input pl-8 text-xs" placeholder="Search by name or phone…"
-            value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
-        </div>
-        <select className="form-input text-xs w-44" value={employee} onChange={e=>{setEmployee(e.target.value);setPage(1);}}>
-          <option value="">All Employees</option>
-          {employees.map(e=><option key={e._id} value={e._id}>{e.name}</option>)}
-        </select>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={dueSoon} onChange={e=>{setDueSoon(e.target.checked);setPage(1);}} className="w-4 h-4 rounded accent-blue-600"/>
-          <span className="text-xs font-medium text-gray-700">Due within 2 days</span>
-        </label>
-      </motion.div>
-
-      {/* Table */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="page-card overflow-hidden p-4">
-        <DataTable
-          serverMode
-          columns={columns}
-          rows={leads}
-          loading={loading}
-          page={page}
-          totalPages={totalPages}
-          totalCount={total}
-          onPageChange={setPage}
-          emptyTitle="No follow-ups scheduled"
-          emptyHint="Leads scheduled for follow-up will appear here."
-        />
-      </motion.div>
+      <DataTable
+        serverMode
+        searchable={false}
+        columns={columns}
+        rows={leads}
+        loading={loading}
+        page={page}
+        pageSize={PER_PAGE}
+        totalPages={totalPages}
+        totalCount={total}
+        onPageChange={setPage}
+        getRowId={(l) => l._id}
+        emptyTitle={dueSoon ? 'Nothing due in the next 2 days' : 'No follow-ups scheduled'}
+        emptyHint={dueSoon ? 'Switch to All to see later follow-ups.' : 'Leads get a follow-up date from the post-call form or the lead editor.'}
+      />
     </div>
   );
 }

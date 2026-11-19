@@ -19,7 +19,8 @@ function WarningIco() {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>;
 }
 
-const AVATAR_COLORS = ['#2563EB', '#16A34A', '#D97706', '#DC2626', '#0D9488', '#7C3AED'];
+// One neutral avatar colour: colour is reserved for meaning, not identity.
+const AVATAR_COLORS = ['#524F63'];
 function avatarColor(id) {
   const s = String(id || '');
   let hash = 0;
@@ -43,8 +44,8 @@ function StatusToggle({ user, onSaved }) {
   };
   return (
     <button onClick={toggle} disabled={busy}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium disabled:opacity-50 ${user.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${user.isActive ? 'bg-emerald-500' : 'bg-red-500'}`} />
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium disabled:opacity-50 ${user.isActive ? 'text-emerald-700 bg-emerald-50' : 'text-ink-3 bg-gray-100'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${user.isActive ? 'bg-emerald-500' : 'bg-gray-400'}`} />
       {user.isActive ? 'Active' : 'Inactive'}
     </button>
   );
@@ -180,7 +181,7 @@ export default function UsersPage() {
           </div>
           <div className="min-w-0">
             <p className="font-semibold text-sm text-gray-900 truncate">{u.name}</p>
-            <p className="text-xs text-gray-400 truncate">{u.email}</p>
+            <p className="text-xs text-gray-500 truncate">{u.email}</p>
           </div>
         </div>
       ),
@@ -196,11 +197,11 @@ export default function UsersPage() {
       render: (u) => (
         <div className="flex items-center justify-end gap-1">
           <button onClick={() => openEdit(u)} title="Edit"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors">
             <EditIco />
           </button>
           <button onClick={() => setDeleteUser(u)} title="Delete"
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors">
             <TrashIco />
           </button>
         </div>
@@ -213,17 +214,17 @@ export default function UsersPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Users</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{total} user{total === 1 ? '' : 's'} · manage accounts, status and daily targets</p>
+          <h1 className="page-title">Users</h1>
+          <p className="page-subtitle">{total} user{total === 1 ? '' : 's'} · manage accounts, status and daily targets</p>
         </div>
         <button onClick={() => setShowAdd(true)} className="btn-primary">+ Add User</button>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <StatCard loading={loading} label="Total Users" value={total.toLocaleString()} color="#2563EB" icon={<UsersIco />} />
-        <StatCard loading={loading} label="Active" value={active.toLocaleString()} color="#16A34A" icon={<CheckIco />} />
-        <StatCard loading={loading} label="Inactive" value={(total - active).toLocaleString()} color="#DC2626" icon={<XIco />} />
+        <StatCard loading={loading} label="Total Users" value={total.toLocaleString()} color="#7C3AED" icon={<UsersIco />} />
+        <StatCard loading={loading} label="Active" value={active.toLocaleString()} color="#079455" icon={<CheckIco />} />
+        <StatCard loading={loading} label="Inactive" value={(total - active).toLocaleString()} color="#D92D20" icon={<XIco />} />
       </div>
 
     
@@ -241,14 +242,14 @@ export default function UsersPage() {
 
       {/* ── Add User Modal ── */}
       {showAdd && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(5px)' }}>
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(26,23,38,0.50)', backdropFilter: 'blur(5px)' }}>
           <div className="w-full max-w-md rounded-xl modal-content bg-white border border-gray-200 shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
               <div>
                 <h3 className="font-bold text-sm text-gray-900">Add New User</h3>
-                <p className="text-xs text-gray-400 mt-0.5">They'll receive login credentials for the mobile app</p>
+                <p className="text-xs text-gray-500 mt-0.5">They'll receive login credentials for the mobile app</p>
               </div>
-              <button onClick={() => setShowAdd(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+              <button onClick={() => setShowAdd(false)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 transition-colors">
                 <CloseIco />
               </button>
             </div>
@@ -280,14 +281,14 @@ export default function UsersPage() {
 
       {/* ── Edit User Modal ── */}
       {editUser && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(5px)' }}>
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(26,23,38,0.50)', backdropFilter: 'blur(5px)' }}>
           <div className="w-full max-w-md rounded-xl modal-content bg-white border border-gray-200 shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
               <div>
                 <h3 className="font-bold text-sm text-gray-900">Edit {editUser.name}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Email and password can't be changed here</p>
+                <p className="text-xs text-gray-500 mt-0.5">Email and password can't be changed here</p>
               </div>
-              <button onClick={() => setEditUser(null)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors">
+              <button onClick={() => setEditUser(null)} className="w-7 h-7 rounded-lg flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 transition-colors">
                 <CloseIco />
               </button>
             </div>
@@ -329,13 +330,13 @@ export default function UsersPage() {
 
       {/* ── Delete Confirm Modal ── */}
       {deleteUser && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(5px)' }}>
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-overlay" style={{ background: 'rgba(26,23,38,0.50)', backdropFilter: 'blur(5px)' }}>
           <div className="w-full max-w-sm rounded-xl modal-content bg-white border border-gray-200 shadow-2xl p-5">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center shrink-0"><WarningIco /></div>
               <div>
                 <h3 className="font-bold text-sm text-gray-900">Delete {deleteUser.name}?</h3>
-                <p className="text-xs text-gray-400 mt-1">This permanently removes their account. Their existing call logs and lead assignments are not deleted. This can't be undone.</p>
+                <p className="text-xs text-gray-500 mt-1">This permanently removes their account. Their existing call logs and lead assignments are not deleted. This can't be undone.</p>
               </div>
             </div>
             <div className="flex gap-2 pt-4">

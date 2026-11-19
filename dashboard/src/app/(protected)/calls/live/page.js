@@ -1,859 +1,222 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import Pusher from 'pusher-js';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  AreaChart,
-  Area,
-  ComposedChart,
-  Line,
-  Cell,
-} from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import api from '../../../../lib/api';
 import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { parseUTC } from '../../../../lib/timezone';
-import { motion, AnimatePresence } from 'framer-motion';
+import { PageHeader, CallBadge, ChartTip, EmptyState, Truncate, fmtNum, Skeleton } from '../../../../components/report-shared';
 
-function formatDur(sec) {
-  if (!sec) return '0s';
-  const m = Math.floor(sec / 60),
-    s = sec % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+const LIVE = !!process.env.NEXT_PUBLIC_PUSHER_KEY;
+const fmtDur = (s) => (!s ? '—' : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`);
+const fmtClock = (ts) => parseUTC(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }).toUpperCase();
+const hourLabel = (h) => `${h % 12 || 12}${h >= 12 ? 'p' : 'a'}`;
+const empId = (c) => String(c?.employeeId?._id ?? c?.employeeId ?? '');
+function ago(ts) {
+  const s = Math.max(0, Math.floor((Date.now() - parseUTC(ts)) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
-
-function timeAgo(ts) {
-  const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
-}
-
-function buildISTHourlyData(callsPerHour) {
-  const istMap = {};
-  for (let h = 0; h < 24; h++) istMap[h] = 0;
-  (callsPerHour || []).forEach(({ hour, count }) => {
-    const d = new Date(Date.UTC(2024, 0, 1, hour, 30, 0));
-    const istHour =
-      parseInt(
-        d.toLocaleString('en-US', {
-          timeZone: 'Asia/Kolkata',
-          hour: 'numeric',
-          hour12: false,
-        })
-      ) % 24;
-    istMap[istHour] = (istMap[istHour] || 0) + count;
-  });
-  return Array.from({ length: 24 }, (_, h) => ({
-    h: `${String(h).padStart(2, '0')}:00`,
-    calls: istMap[h] || 0,
-  }));
-}
-
-const TYPE_COLOR = {
-  incoming: '#22C55E',
-  outgoing: '#F59E0B',
-  missed: '#EF4444',
-  rejected: '#8B5CF6',
-};
-const TYPE_BG = {
-  incoming: 'rgba(34,197,94,0.10)',
-  outgoing: 'rgba(245,158,11,0.10)',
-  missed: 'rgba(239,68,68,0.10)',
-  rejected: 'rgba(139,92,246,0.10)',
-};
-const TYPE_ICON = {
-  incoming: '📥',
-  outgoing: '📤',
-  missed: '❌',
-  rejected: '🚫',
-};
-const AVATAR_COLORS = [
-  '#2563EB',
-  '#16A34A',
-  '#D97706',
-  '#DC2626',
-  '#0D9488',
-  '#7C3AED',
-  '#0891B2',
-  '#BE185D',
-];
-
-function Ico({ size = 16, children, className = '' }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      {children}
-    </svg>
-  );
-}
-
-const KpiCard = ({ label, value, sub, color = '#2563EB', bg = '#EFF6FF', icon, delay = 0 }) => {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.4 }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="bg-white rounded-2xl p-5 border border-gray-100 hover:border-blue-200 hover:shadow-xl transition-all duration-300"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center shadow-sm"
-          style={{ background: bg, color }}
-        >
-          {icon}
-        </div>
-        <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-50 text-green-600 border border-green-100">
-          <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-green-500" />
-          Live
-        </span>
-      </div>
-      <p className="text-2xl font-bold text-gray-900 tracking-tight tabular-nums">
-        {value ?? '—'}
-      </p>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mt-1.5">
-        {label}
-      </p>
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
-    </motion.div>
-  );
-};
-
-const PhoneIco = () => (
-  <Ico>
-    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.56a16 16 0 0 0 6.29 6.29l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
-  </Ico>
-);
-const CheckIco = () => (
-  <Ico>
-    <polyline points="20 6 9 17 4 12" />
-  </Ico>
-);
-const MissedIco = () => (
-  <Ico>
-    <line x1="1" y1="1" x2="23" y2="23" />
-    <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.56 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
-  </Ico>
-);
-const RejectIco = () => (
-  <Ico>
-    <circle cx="12" cy="12" r="10" />
-    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-  </Ico>
-);
-const UsersIco = () => (
-  <Ico>
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-  </Ico>
-);
-const InIco = () => (
-  <Ico>
-    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
-    <polyline points="17 18 23 18 23 12" />
-  </Ico>
-);
-const OutIco = () => (
-  <Ico>
-    <polyline points="1 6 10.5 15.5 15.5 10.5 23 18" />
-    <polyline points="7 6 1 6 1 12" />
-  </Ico>
-);
-const ClockIco = () => (
-  <Ico>
-    <circle cx="12" cy="12" r="10" />
-    <polyline points="12 6 12 12 16 14" />
-  </Ico>
-);
-const ActivityIco = () => (
-  <Ico>
-    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-  </Ico>
-);
-const ZapIco = () => (
-  <Ico size={14}>
-    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-  </Ico>
-);
-
-const ChartTip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="rounded-xl px-4 py-3 text-xs shadow-2xl border border-gray-700"
-      style={{ background: 'rgba(15, 23, 42, 0.95)', color: '#fff', backdropFilter: 'blur(10px)' }}
-    >
-      <p className="mb-1.5 font-medium text-gray-400">{label}</p>
-      {payload.map((p, i) => (
-        <div key={i} className="flex items-center gap-2 mt-1">
-          <span
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ background: p.color || p.fill || '#2563EB' }}
-          />
-          <span className="font-bold">
-            {p.name}: <span className="text-white">{p.value}</span>
-          </span>
-        </div>
-      ))}
-    </motion.div>
-  );
-};
+const FILTERS = [['all', 'All'], ['outgoing', 'Outgoing'], ['incoming', 'Incoming'], ['missed', 'Missed'], ['rejected', 'Rejected']];
 
 export default function LiveMonitorPage() {
   const [stats, setStats] = useState(null);
   const [liveFeed, setLiveFeed] = useState([]);
+  const [fresh, setFresh] = useState(() => new Set());
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [, setTick] = useState(0);
 
   const fetchStats = async () => {
-    try {
-      const res = await api.get('/api/calls/stats');
-      setStats(res.data.data);
-    } catch {}
+    try { const res = await api.get('/api/calls/stats'); setStats(res.data.data); } catch {}
   };
 
   useEffect(() => {
     (async () => {
       await Promise.all([
         fetchStats(),
-        api
-          .get('/api/calls/realtime')
-          .then((r) => setLiveFeed((r.data.data || []).slice(0, 30)))
-          .catch(() => {}),
+        api.get('/api/calls/realtime').then((r) => setLiveFeed((r.data.data || []).slice(0, 50))).catch(() => {}),
         getAllEmployeesSafe(api).then(setEmployees).catch(() => {}),
       ]);
       setLoading(false);
     })();
-
     const interval = setInterval(fetchStats, 30000);
-    if (!process.env.NEXT_PUBLIC_PUSHER_KEY) return () => clearInterval(interval);
-
-    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap2',
-    });
+    const clock = setInterval(() => setTick((t) => t + 1), 30000); // keeps "x min ago" honest
+    if (!LIVE) return () => { clearInterval(interval); clearInterval(clock); };
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, { cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'ap2' });
     const channel = pusher.subscribe('managers');
     channel.bind('new_call_log', (data) => {
-      setLiveFeed((prev) => [data, ...prev].slice(0, 30));
+      const id = data._id || `${data.contactNumber}-${data.timestamp}`;
+      setLiveFeed((prev) => [data, ...prev].slice(0, 50));
+      setFresh((s) => new Set(s).add(id));
+      setTimeout(() => setFresh((s) => { const n = new Set(s); n.delete(id); return n; }), 1600);
       fetchStats();
     });
-    return () => {
-      clearInterval(interval);
-      channel.unbind_all();
-      pusher.unsubscribe('managers');
-      pusher.disconnect();
-    };
+    return () => { clearInterval(interval); clearInterval(clock); channel.unbind_all(); pusher.unsubscribe('managers'); pusher.disconnect(); };
   }, []);
 
   const today = stats?.today;
-  const avgDur = today?.totalCalls
-    ? Math.round((today.totalDuration || 0) / today.totalCalls)
-    : 0;
-  const activeAgents = employees.filter((emp) => {
-    const last = liveFeed.find((c) => c.employeeId === emp._id?.toString());
-    return last && Date.now() - new Date(last.timestamp) < 60 * 60 * 1000;
-  }).length;
+  const lastCallBy = useMemo(() => {
+    const m = new Map();
+    liveFeed.forEach((c) => { const id = empId(c); if (id && !m.has(id)) m.set(id, c); });
+    return m;
+  }, [liveFeed]);
 
-  const empLastCall = {};
-  liveFeed.forEach((c) => {
-    if (!empLastCall[c.employeeId]) empLastCall[c.employeeId] = c;
-  });
+  // Agent status: who has called recently. Green < 15 min, amber < 1 h, grey otherwise.
+  const agents = useMemo(() => employees
+    .filter((e) => e.role === 'employee' && e.isActive !== false)
+    .map((e) => {
+      const last = lastCallBy.get(String(e._id));
+      const mins = last ? (Date.now() - parseUTC(last.timestamp)) / 60000 : Infinity;
+      return { id: String(e._id), name: e.name, tl: e.tlName, last, mins, state: mins < 15 ? 'live' : mins < 60 ? 'recent' : 'idle' };
+    })
+    .sort((a, b) => a.mins - b.mins || a.name.localeCompare(b.name)), [employees, lastCallBy]);
+  const activeHour = agents.filter((a) => a.mins < 60).length;
 
-  const hourlyData = buildISTHourlyData(stats?.callsPerHour);
+  const hourly = (today?.callsPerHour || []).filter((h) => h.hour >= 8 && h.hour <= 21).map((h) => ({ label: hourLabel(h.hour), calls: h.count }));
+  const feed = filter === 'all' ? liveFeed : liveFeed.filter((c) => c.callType === filter);
 
-  const compRows = [
-    {
-      label: 'Total Calls',
-      today: today?.totalCalls,
-      week: stats?.thisWeek?.totalCalls,
-      month: stats?.thisMonth?.totalCalls,
-    },
-    {
-      label: 'Incoming',
-      today: today?.incoming,
-      week: stats?.thisWeek?.incoming,
-      month: stats?.thisMonth?.incoming,
-    },
-    {
-      label: 'Outgoing',
-      today: today?.outgoing,
-      week: stats?.thisWeek?.outgoing,
-      month: stats?.thisMonth?.outgoing,
-    },
-    {
-      label: 'Missed',
-      today: today?.missed,
-      week: stats?.thisWeek?.missed,
-      month: stats?.thisMonth?.missed,
-    },
-    {
-      label: 'Connected',
-      today: today?.connectedCalls,
-      week: stats?.thisWeek?.connectedCalls,
-      month: stats?.thisMonth?.connectedCalls,
-    },
-    {
-      label: 'Unique Contacts',
-      today: today?.uniqueClients,
-      week: stats?.thisWeek?.uniqueClients,
-      month: stats?.thisMonth?.uniqueClients,
-    },
+  const comp = [
+    ['Total calls', 'totalCalls'], ['Outgoing', 'outgoing'], ['Incoming', 'incoming'], ['Missed', 'missed'], ['Connected', 'connectedCalls'], ['Unique clients', 'uniqueClients'],
   ];
 
-  // Filtered feed
-  const filteredFeed =
-    activeFilter === 'all'
-      ? liveFeed
-      : liveFeed.filter((call) => call.callType === activeFilter);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50/80 p-4 sm:p-6 lg:p-8">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <div className="skeleton h-8 w-56 rounded-xl" />
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="skeleton h-28 rounded-2xl" />
-            ))}
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="skeleton h-28 rounded-2xl" />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto space-y-6 lg:space-y-8">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white flex items-center justify-center">
-                  <ZapIco />
-                </span>
-                Live Monitor
-                <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-600 border border-green-100">
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-green-500" />
-                  LIVE
-                </span>
-              </h2>
-              <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-                <ActivityIco />
-                Real-time call activity · Auto-refreshes every 30s · IST timezone
-              </p>
+    <div className="space-y-6">
+      <PageHeader
+        title="Live monitor"
+        description={
+          <span className="inline-flex items-center gap-2">
+            {LIVE ? <><span className="live-dot" />Streaming new calls as they sync</> : 'Refreshes every 30 seconds'}
+          </span>
+        }
+        actions={<Link href="/reports/calllogs" className="btn-secondary">Calls report</Link>}
+      />
+
+      <section className="panel overflow-hidden" aria-label="Today so far">
+        <div className="grid grid-cols-2 md:grid-cols-5 [&>*]:border-line-2 [&>*]:border-b md:[&>*]:border-b-0 md:divide-x divide-line-2">
+          {[
+            ['Calls today', fmtNum(today?.totalCalls || 0), `${fmtNum(today?.outgoing || 0)} out · ${fmtNum(today?.incoming || 0)} in`],
+            ['Connected', today?.totalCalls ? `${Math.round(((today.connectedCalls || 0) / today.totalCalls) * 100)}%` : '—', `${fmtNum(today?.connectedCalls || 0)} calls`],
+            ['Missed', fmtNum(today?.missed || 0), today?.neverAttended ? `${fmtNum(today.neverAttended)} never called back` : 'None unanswered'],
+            ['Agents active', `${fmtNum(activeHour)}`, `called in the last hour · of ${fmtNum(agents.length)}`],
+            ['Avg call', fmtDur(today?.avgDuration), `${today?.callDuration || '0s'} talk today`],
+          ].map(([label, value, sub], i) => (
+            <div key={label} className="px-5 py-4 min-w-0">
+              <p className="stat-label">{label}</p>
+              {loading ? <Skeleton className="h-7 w-16 mt-2" /> : <p className={`stat-number mt-1 ${i === 2 && today?.missed ? 'text-behind' : ''}`}>{value}</p>}
+              <p className="text-xs text-ink-3 mt-1 truncate">{sub}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-                <button
-                  onClick={() => setAutoScroll(!autoScroll)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                    autoScroll
-                      ? 'bg-white shadow-sm text-gray-900'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  Auto-scroll
-                </button>
-                <button
-                  onClick={() => setActiveFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                    activeFilter === 'all'
-                      ? 'bg-white shadow-sm text-gray-900'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  All
-                </button>
-                {Object.keys(TYPE_COLOR).map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setActiveFilter(type)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                      activeFilter === type
-                        ? 'bg-white shadow-sm text-gray-900'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                    style={{
-                      color: activeFilter === type ? TYPE_COLOR[type] : undefined,
-                    }}
-                  >
-                    {type}
-                  </button>
-                ))}
-              </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <section className="panel xl:col-span-2 flex flex-col min-h-[520px]" aria-label="Live feed">
+          <div className="panel-head flex-wrap">
+            <div><h2 className="panel-title">Call feed</h2><p className="panel-sub">Newest first · last {fmtNum(liveFeed.length)} calls</p></div>
+            <div className="seg" role="group" aria-label="Filter by call type">
+              {FILTERS.map(([k, l]) => <button key={k} aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>)}
             </div>
           </div>
-        </motion.div>
+          {loading ? (
+            <div className="p-5 space-y-3">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="skeleton h-9" />)}</div>
+          ) : feed.length === 0 ? (
+            <EmptyState title={filter === 'all' ? 'No calls yet' : `No ${filter} calls in the feed`} hint={filter === 'all' ? 'Calls appear here the moment agents’ phones sync them.' : 'Switch the filter to see every call.'} />
+          ) : (
+            <div className="overflow-auto max-h-[560px]">
+              <table className="data-table">
+                <thead className="sticky top-0 z-10">
+                  <tr><th className="w-[120px]">Time</th><th>Agent</th><th className="hidden md:table-cell">Contact</th><th>Type</th><th className="!text-right">Duration</th></tr>
+                </thead>
+                <tbody>
+                  {feed.map((c, i) => {
+                    const id = c._id || `${c.contactNumber}-${c.timestamp}`;
+                    return (
+                      <tr key={`${id}-${i}`} className={fresh.has(id) ? 'ct-flash' : ''}>
+                        <td className="whitespace-nowrap">
+                          <span className="block tabular-nums text-ink">{fmtClock(c.timestamp)}</span>
+                          <span className="block text-xs text-ink-3">{ago(c.timestamp)}</span>
+                        </td>
+                        <td className="font-medium text-ink"><Truncate text={c.employeeName} max={22} /></td>
+                        <td className="hidden md:table-cell">
+                          <span className="tabular-nums text-ink">{c.contactNumber}</span>
+                          {c.contactName && c.contactName !== 'Unknown' && <span className="block text-xs text-ink-3"><Truncate text={c.contactName} max={24} /></span>}
+                        </td>
+                        <td><CallBadge type={c.callType} /></td>
+                        <td className="text-right tabular-nums">{fmtDur(c.duration)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
 
-        {/* KPI Row 1 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            label="Calls Today"
-            value={today?.totalCalls}
-            color="#2563EB"
-            bg="#EFF6FF"
-            icon={<PhoneIco />}
-            delay={0.05}
-          />
-          <KpiCard
-            label="Connected"
-            value={today?.connectedCalls}
-            color="#16A34A"
-            bg="#F0FDF4"
-            sub={
-              today?.totalCalls
-                ? `${Math.round((today.connectedCalls || 0) / today.totalCalls * 100)}% rate`
-                : undefined
-            }
-            icon={<CheckIco />}
-            delay={0.1}
-          />
-          <KpiCard
-            label="Incoming"
-            value={today?.incoming}
-            color="#0D9488"
-            bg="#F0FDFA"
-            icon={<InIco />}
-            delay={0.15}
-          />
-          <KpiCard
-            label="Outgoing"
-            value={today?.outgoing}
-            color="#D97706"
-            bg="#FFFBEB"
-            icon={<OutIco />}
-            delay={0.2}
-          />
-        </div>
-
-        {/* KPI Row 2 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard
-            label="Missed"
-            value={today?.missed}
-            color="#DC2626"
-            bg="#FFF1F2"
-            sub={
-              today?.totalCalls
-                ? `${Math.round((today.missed || 0) / today.totalCalls * 100)}% of calls`
-                : undefined
-            }
-            icon={<MissedIco />}
-            delay={0.25}
-          />
-          <KpiCard
-            label="Rejected"
-            value={today?.rejected || today?.notPickedByClient}
-            color="#7C3AED"
-            bg="#F5F3FF"
-            icon={<RejectIco />}
-            delay={0.3}
-          />
-          <KpiCard
-            label="Active Agents"
-            value={activeAgents}
-            color="#0891B2"
-            bg="#EFF6FF"
-            sub={`of ${employees.length} total`}
-            icon={<UsersIco />}
-            delay={0.35}
-          />
-          <KpiCard
-            label="Avg Duration"
-            value={formatDur(avgDur)}
-            color="#D97706"
-            bg="#FFFBEB"
-            sub="per call today"
-            icon={<ClockIco />}
-            delay={0.4}
-          />
-        </div>
-
-        {/* Live Feed + Team Status */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          {/* Live Feed */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.45 }}
-            className="xl:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
-          >
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Live Call Feed</h3>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {filteredFeed.length} recent events
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-green-50 text-green-600 border border-green-100">
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-green-500" />
-                  Streaming
-                </span>
-              </div>
-            </div>
-            <div className="max-h-[400px] overflow-y-auto">
-              <AnimatePresence>
-                {filteredFeed.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                      <PhoneIco />
-                    </div>
-                    <p className="text-sm text-gray-500">Waiting for live calls…</p>
-                  </div>
-                ) : (
-                  filteredFeed.map((call, i) => (
-                    <motion.div
-                      key={call._id || i}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ delay: i * 0.02 }}
-                      className="flex items-center gap-4 px-6 py-3 border-b border-gray-50 hover:bg-gray-50/50 transition-colors duration-150"
-                    >
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-md"
-                        style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
-                      >
-                        {(call.employeeName || 'U').slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium text-gray-900 truncate">
-                            {call.contactName || call.contactNumber}
-                          </span>
-                          <span
-                            className="text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
-                            style={{
-                              background: TYPE_BG[call.callType] || '#F1F5F9',
-                              color: TYPE_COLOR[call.callType] || '#64748B',
-                            }}
-                          >
-                            {TYPE_ICON[call.callType] || '📞'} {call.callType}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {call.employeeName} · {formatDur(call.duration)}
-                        </p>
-                      </div>
-                      <div className="flex-shrink-0 text-right">
-                        <p className="text-xs font-medium text-gray-600">{timeAgo(call.timestamp)}</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          {parseUTC(call.timestamp).toLocaleTimeString('en-IN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            timeZone: 'Asia/Kolkata',
-                          })}
-                        </p>
-                      </div>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
-            </div>
-          </motion.div>
-
-          {/* Team Status */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
-          >
-            <div className="px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-900">Team Status</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {employees.length} agents · {activeAgents} active
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-xs font-semibold text-green-600">Live</span>
-                </div>
-              </div>
-            </div>
-            <div className="max-h-[400px] overflow-y-auto">
-              {employees.length === 0 ? (
-                <div className="flex items-center justify-center h-40 text-sm text-gray-500">
-                  No agents available
-                </div>
-              ) : (
-                employees.map((emp, i) => {
-                  const last = empLastCall[emp._id?.toString()];
-                  const active = last && Date.now() - new Date(last.timestamp) < 60 * 60 * 1000;
-                  const lastType = last?.callType;
-                  return (
-                    <motion.div
-                      key={emp._id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.02 }}
-                      className="flex items-center gap-3 px-6 py-3 border-b border-gray-50 hover:bg-gray-50/50 transition-colors duration-150"
-                    >
-                      <div className="relative flex-shrink-0">
-                        <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-md"
-                          style={{ background: AVATAR_COLORS[i % AVATAR_COLORS.length] }}
-                        >
-                          {emp.name.slice(0, 2).toUpperCase()}
-                        </div>
-                        <span
-                          className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
-                          style={{ background: active ? '#22C55E' : '#CBD5E1' }}
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{emp.name}</p>
-                        <p className="text-xs text-gray-400">
-                          {last ? timeAgo(last.timestamp) : 'No calls today'}
-                        </p>
-                      </div>
-                      {active && lastType && (
-                        <span
-                          className="text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
-                          style={{
-                            background: TYPE_BG[lastType] || '#F1F5F9',
-                            color: TYPE_COLOR[lastType] || '#64748B',
-                          }}
-                        >
-                          {lastType}
-                        </span>
-                      )}
-                      {!active && last && (
-                        <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500">
-                          Idle
-                        </span>
-                      )}
-                    </motion.div>
-                  );
-                })
-              )}
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Hourly Chart */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.55 }}
-          className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Calls by Hour (IST)</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Hourly distribution in Indian Standard Time
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-green-50 text-green-600 border border-green-100">
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-green-500" />
-                Today
-              </span>
-              <span className="text-xs text-gray-400">
-                Peak: {Math.max(...hourlyData.map((d) => d.calls))} calls
-              </span>
-            </div>
+        <section className="panel flex flex-col max-h-[640px]" aria-label="Agent status">
+          <div className="panel-head">
+            <div><h2 className="panel-title">Agents</h2><p className="panel-sub">By most recent call</p></div>
+            <span className="flex items-center gap-3 text-xs text-ink-3">
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[var(--met)]" />15m</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#F79009]" />1h</span>
+            </span>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <ComposedChart data={hourlyData}>
-              <defs>
-                <linearGradient id="hourGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#2563EB" stopOpacity={0.9} />
-                  <stop offset="100%" stopColor="#3B82F6" stopOpacity={0.1} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-              <XAxis
-                dataKey="h"
-                tick={{ fontSize: 9, fill: '#94A3B8' }}
-                interval={2}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 10, fill: '#94A3B8' }}
-                tickLine={false}
-                axisLine={false}
-                allowDecimals={false}
-                width={28}
-              />
-              <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(37,99,235,0.05)' }} />
-              <Area
-                type="monotone"
-                dataKey="calls"
-                name="Calls"
-                stroke="#2563EB"
-                strokeWidth={2}
-                fill="url(#hourGrad)"
-                fillOpacity={1}
-              />
-              <Bar
-                dataKey="calls"
-                name="Calls"
-                fill="url(#hourGrad)"
-                radius={[6, 6, 0, 0]}
-                barSize={14}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </motion.div>
+          <ul className="overflow-y-auto px-3 py-2 flex-1">
+            {loading ? Array.from({ length: 8 }).map((_, i) => <li key={i} className="skeleton h-11 my-1" />) : agents.length === 0 ? (
+              <li className="text-center text-[13px] text-ink-3 py-10">No active agents</li>
+            ) : agents.map((a) => (
+              <li key={a.id}>
+                <Link href={`/employees/${a.id}`} className="flex items-center gap-3 h-12 px-2 rounded-lg hover:bg-gray-50 transition-colors duration-150">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${a.state === 'live' ? 'bg-[var(--met)]' : a.state === 'recent' ? 'bg-[#F79009]' : 'bg-gray-300'}`} aria-label={a.state} />
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-[13px] truncate ${a.state === 'idle' ? 'text-ink-2' : 'font-medium text-ink'}`}>{a.name}</span>
+                    <span className="block text-xs text-ink-3 truncate">{a.last ? `${a.last.callType} · ${ago(a.last.timestamp)}` : 'No recent calls'}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
 
-        {/* Period Comparison */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
-        >
-          <div className="px-6 py-4 border-b border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900">Period Comparison</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Today · This Week · This Month</p>
-              </div>
-              <span className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-full border border-blue-100">
-                <span className="text-xs font-semibold text-blue-600">📊 Trends</span>
-              </span>
-            </div>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <section className="panel xl:col-span-2" aria-label="Hourly">
+          <div className="panel-head"><div><h2 className="panel-title">Today by hour</h2><p className="panel-sub">IST · 8 AM to 9 PM</p></div></div>
+          <div className="p-5 pb-3 h-[240px] -ml-2">
+            {loading ? <Skeleton className="h-full ml-2" /> : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hourly} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap="28%">
+                  <CartesianGrid stroke="#F1F0F5" vertical={false} />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} interval={0} tick={{ fontSize: 11 }} />
+                  <YAxis axisLine={false} tickLine={false} width={32} allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip content={<ChartTip />} cursor={{ fill: 'rgba(124,58,237,0.05)' }} />
+                  <Bar dataKey="calls" name="Calls" fill="#7C3AED" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Metric
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Today
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">
-                    This Week
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">
-                    This Month
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                    Progress
-                  </th>
+        </section>
+
+        <section className="panel" aria-label="Period comparison">
+          <div className="panel-head"><div><h2 className="panel-title">Compared</h2><p className="panel-sub">Today, last 7 and last 30 days</p></div></div>
+          <table className="data-table">
+            <thead><tr><th>Metric</th><th className="!text-right">Today</th><th className="!text-right">7 days</th><th className="!text-right">30 days</th></tr></thead>
+            <tbody>
+              {comp.map(([label, k]) => (
+                <tr key={k}>
+                  <td className="text-ink-2">{label}</td>
+                  <td className="text-right tabular-nums font-medium text-ink">{fmtNum(today?.[k] || 0)}</td>
+                  <td className="text-right tabular-nums">{fmtNum(stats?.lastWeek?.[k] || 0)}</td>
+                  <td className="text-right tabular-nums">{fmtNum(stats?.lastMonth?.[k] || 0)}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {compRows.map((row) => {
-                  const progress =
-                    row.today && row.week
-                      ? Math.round((row.today / row.week) * 100)
-                      : null;
-                  return (
-                    <motion.tr
-                      key={row.label}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.1 }}
-                      className="hover:bg-gray-50/50 transition-colors duration-150"
-                    >
-                      <td className="px-6 py-3 font-medium text-gray-900">{row.label}</td>
-                      <td className="px-6 py-3 text-right font-bold text-blue-600">
-                        {row.today ?? '—'}
-                      </td>
-                      <td className="px-6 py-3 text-right text-gray-600 hidden sm:table-cell">
-                        {row.week ?? '—'}
-                      </td>
-                      <td className="px-6 py-3 text-right text-gray-600 hidden md:table-cell">
-                        {row.month ?? '—'}
-                      </td>
-                      <td className="px-6 py-3 text-right hidden lg:table-cell">
-                        {progress !== null && progress > 0 ? (
-                          <div className="flex items-center justify-end gap-2">
-                            <span className="text-xs font-semibold text-gray-600">
-                              {progress}%
-                            </span>
-                            <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                              <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${Math.min(progress, 100)}%` }}
-                                transition={{ duration: 0.8 }}
-                                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </td>
-                    </motion.tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </motion.div>
-
-        {/* Quick Stats Footer */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.65 }}
-          className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h4 className="text-lg font-bold">Live Dashboard Insights</h4>
-              <p className="text-blue-100 text-sm mt-1">
-                Real-time monitoring and team performance
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-4">
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
-                <p className="text-xs text-blue-200">Call Volume</p>
-                <p className="text-lg font-bold">{today?.totalCalls || 0}</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
-                <p className="text-xs text-blue-200">Active Agents</p>
-                <p className="text-lg font-bold">{activeAgents}</p>
-              </div>
-              <div className="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-2.5">
-                <p className="text-xs text-blue-200">Connection Rate</p>
-                <p className="text-lg font-bold">
-                  {today?.totalCalls
-                    ? `${Math.round((today.connectedCalls || 0) / today.totalCalls * 100)}%`
-                    : '0%'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </motion.div>
+              ))}
+            </tbody>
+          </table>
+        </section>
       </div>
     </div>
   );

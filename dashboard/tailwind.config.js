@@ -1,111 +1,94 @@
 /** @type {import('tailwindcss').Config} */
+// Neutral scale shared by `gray` and `slate`, so the ~1,000 existing gray-* / slate-* utilities in
+// pages all land on the design system's cool neutrals instead of two slightly different greys.
+const neutral = {
+  50:  '#FAF9FC',
+  100: '#F4F3F8',
+  200: '#E9E7EF',
+  300: '#D5D2DE',
+  400: '#A19DB2',
+  500: '#6B6880',
+  600: '#524F63',
+  700: '#3D3A4D',
+  800: '#26233A',
+  900: '#1A1726',
+  950: '#110F1C',
+};
+
+const violet = {
+  50: '#F5F3FF', 100: '#EDE9FE', 200: '#DDD6FE', 300: '#C4B5FD', 400: '#A78BFA',
+  500: '#8B5CF6', 600: '#7C3AED', 700: '#6D28D9', 800: '#5B21B6', 900: '#4C1D95', 950: '#2E1065',
+};
+
 module.exports = {
   content: [
     './src/pages/**/*.{js,jsx}',
     './src/components/**/*.{js,jsx}',
-    './src/app/**/*.{js,jsx}'
+    './src/app/**/*.{js,jsx}',
+    './src/lib/**/*.{js,jsx}',
   ],
   theme: {
     extend: {
       colors: {
-        /* Primary blue */
-        primary:    '#2563EB',
-        primaryLt:  '#EFF6FF',
-        primaryDk:  '#1D4ED8',
-        /* Grays */
-        bg:         '#F1F5F9',
-        card:       '#FFFFFF',
-        border:     '#E2E8F0',
-        divider:    '#F1F5F9',
-        textPrimary:   '#0F172A',
-        textSecondary: '#374151',
-        textMuted:     '#94A3B8',
-        /* Semantic */
-        success:   '#16A34A',
-        successLt: '#F0FDF4',
-        danger:    '#DC2626',
-        dangerLt:  '#FFF1F2',
-        warning:   '#D97706',
-        warningLt: '#FFFBEB',
-        info:      '#0284C7',
-        infoLt:    '#F0F9FF',
-        purple:    '#7C3AED',
-        purpleLt:  '#F5F3FF',
-        teal:      '#0D9488',
-        tealLt:    '#F0FDFA',
-        orange:    '#EA580C',
-        orangeLt:  '#FFF7ED',
-        /* Sidebar */
-        sidebar:        '#0F172A',
-        sidebarBorder:  '#1E293B',
-        sidebarHov:     '#1E293B',
-        sidebarActive:  '#2563EB',
-        sidebarMuted:   '#475569',
-        sidebarText:    '#94A3B8',
-        sidebarSection: '#334155',
-      },
-      boxShadow: {
-        card:       '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03)',
-        'card-md':  '0 4px 16px rgba(0,0,0,0.07)',
-        'card-hover':'0 8px 24px rgba(0,0,0,0.10)',
-        modal:      '0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.08)',
-        sidebar:    '1px 0 0 rgba(255,255,255,0.04)',
-        glow:       '0 0 0 3px rgba(37,99,235,0.20)',
-      },
-      backgroundImage: {
-        'gradient-primary': 'linear-gradient(135deg, #2563EB 0%, #3B82F6 100%)',
-        'gradient-success': 'linear-gradient(135deg, #16A34A 0%, #22C55E 100%)',
-        'gradient-danger':  'linear-gradient(135deg, #DC2626 0%, #EF4444 100%)',
-        'gradient-warning': 'linear-gradient(135deg, #D97706 0%, #F59E0B 100%)',
-        'gradient-purple':  'linear-gradient(135deg, #7C3AED 0%, #8B5CF6 100%)',
-        'gradient-teal':    'linear-gradient(135deg, #0D9488 0%, #14B8A6 100%)',
-        'gradient-orange':  'linear-gradient(135deg, #EA580C 0%, #F97316 100%)',
-        'gradient-sidebar': 'linear-gradient(180deg, #0F172A 0%, #0F172A 100%)',
+        gray: neutral,
+        slate: neutral,
+        // Brand accent is violet: blue-* and indigo-* utilities all resolve to it.
+        indigo: violet,
+        blue: violet,
+        violet,
+        primary:   '#7C3AED',
+        primaryLt: '#F5F3FF',
+        primaryDk: '#6D28D9',
+        bg:        '#FAFAFC',
+        card:      '#FFFFFF',
+        border:    '#E9E7EF',
+        divider:   '#F1F0F5',
+        textPrimary:   '#1A1726',
+        textSecondary: '#4A4658',
+        textMuted:     '#6B6880',
+        success: '#079455', successLt: '#ECFDF3',
+        danger:  '#D92D20', dangerLt:  '#FEF3F2',
+        warning: '#B54708', warningLt: '#FFFAEB',
+        info:    '#7C3AED', infoLt:    '#F5F3FF',
+        ink: { DEFAULT: '#1A1726', 2: '#4A4658', 3: '#6B6880', 4: '#A19DB2' },
+        line: { DEFAULT: '#E9E7EF', 2: '#F1F0F5' },
+        met: '#079455',
+        behind: '#D92D20',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+      },
+      // Panels are separated by hairline seams; shadow is reserved for things that float.
+      boxShadow: {
+        sm: 'none',
+        DEFAULT: 'none',
+        md: 'none',
+        card: 'none',
+        'card-md': 'none',
+        'card-hover': 'none',
+        sidebar: 'none',
+        lg: '0 12px 32px -8px rgba(26,23,38,0.18), 0 4px 8px -4px rgba(26,23,38,0.06)',
+        xl: '0 16px 40px -10px rgba(26,23,38,0.22), 0 6px 12px -6px rgba(26,23,38,0.08)',
+        '2xl': '0 24px 56px -12px rgba(26,23,38,0.28)',
+        modal: '0 24px 56px -12px rgba(26,23,38,0.28)',
+        glow: '0 0 0 3px rgba(124,58,237,0.14)',
       },
       borderRadius: {
-        '2xl': '1rem',
-        '3xl': '1.5rem',
+        xl: '0.75rem',
+        '2xl': '0.75rem',
+        '3xl': '1rem',
+      },
+      transitionTimingFunction: {
+        out: 'cubic-bezier(0.23, 1, 0.32, 1)',
+        'in-out': 'cubic-bezier(0.77, 0, 0.175, 1)',
+        drawer: 'cubic-bezier(0.32, 0.72, 0, 1)',
       },
       animation: {
-        'fade-in-up':  'fadeInUp 0.35s ease-out both',
-        'fade-in':     'fadeIn 0.22s ease-out both',
-        'scale-in':    'scaleIn 0.2s ease-out both',
-        'slide-down':  'slideDown 0.18s ease-out both',
-        'pulse-ring':  'pulseRing 2s ease-out infinite',
-        'shimmer':     'shimmer 1.5s ease-in-out infinite',
-        'spin-slow':   'spin 3s linear infinite',
+        'fade-in':  'ct-fade 160ms cubic-bezier(0.23,1,0.32,1) both',
+        'scale-in': 'ct-pop 200ms cubic-bezier(0.23,1,0.32,1) both',
+        shimmer:    'ct-shimmer 1.4s linear infinite',
       },
-      keyframes: {
-        fadeInUp: {
-          '0%':   { opacity: '0', transform: 'translateY(14px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        fadeIn: {
-          '0%':   { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        scaleIn: {
-          '0%':   { opacity: '0', transform: 'scale(0.96) translateY(6px)' },
-          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
-        },
-        slideDown: {
-          '0%':   { opacity: '0', transform: 'translateY(-8px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        shimmer: {
-          '0%':   { backgroundPosition: '-400% 0' },
-          '100%': { backgroundPosition:  '400% 0' },
-        },
-        pulseRing: {
-          '0%':   { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(59,130,246,0.45)' },
-          '70%':  { transform: 'scale(1)',    boxShadow: '0 0 0 8px rgba(59,130,246,0)' },
-          '100%': { transform: 'scale(0.95)', boxShadow: '0 0 0 0 rgba(59,130,246,0)' },
-        },
-      },
-    }
+    },
   },
-  plugins: []
+  plugins: [],
 };

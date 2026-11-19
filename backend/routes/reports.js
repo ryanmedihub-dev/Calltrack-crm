@@ -1,4 +1,5 @@
 const express = require('express');
+const { list, anyOf, oidsOf } = require('../lib/multi');
 const mongoose = require('mongoose');
 const router = express.Router();
 const CallLog = require('../models/CallLog');
@@ -61,10 +62,25 @@ function hourSlotLabel(h) {
 }
 // Mongo-level filters so callHistory's separate paginated query (which never
 // loads the full call list into memory) stays consistent with the other tabs.
+const DURATION_BUCKETS = { '0-60': { $gte: 0, $lt: 60 }, '60-300': { $gte: 60, $lt: 300 }, '300+': { $gte: 300 } };
 function applyDurationFilter(filter, duration) {
-  if (duration === '0-60') filter.duration = { $gte: 0, $lt: 60 };
-  else if (duration === '60-300') filter.duration = { $gte: 60, $lt: 300 };
-  else if (duration === '300+') filter.duration = { $gte: 300 };
+  const ranges = list(duration).map((d) => DURATION_BUCKETS[d]).filter(Boolean);
+  if (ranges.length === 1) filter.duration = ranges[0];
+  else if (ranges.length > 1) filter.$and = [...(filter.$and || []), { $or: ranges.map((r) => ({ duration: r })) }];
+}
+// status "active" / "inactive" / both (= no filter).
+function applyActiveFilter(filter, status) {
+  const s = list(status);
+  if (s.includes('active') && !s.includes('inactive')) filter.isActive = true;
+  else if (s.includes('inactive') && !s.includes('active')) filter.isActive = false;
+}
+// Several hour windows (morning,evening) OR-ed as one $expr on the IST hour of `field`.
+function hourWindowsExpr(field, value) {
+  const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
+  const hourExpr = { $hour: { date: field, timezone: 'Asia/Kolkata' } };
+  const parts = list(value).map((v) => ranges[v]).filter(Boolean)
+    .map((r) => ({ $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] }));
+  return parts.length === 0 ? null : parts.length === 1 ? parts[0] : { $or: parts };
 }
 // Added for ryan-crm's Owner Panel call report (/owner/calls/report) — a
 // simple "hide unanswered calls" toggle, additive alongside the bucketed
@@ -73,11 +89,8 @@ function applyConnectedOnlyFilter(filter, connectedOnly) {
   if (connectedOnly === 'true') filter.duration = { ...(filter.duration || {}), $gt: 0 };
 }
 function applyCallTimeFilter(filter, callTime) {
-  const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
-  const r = ranges[callTime];
-  if (!r) return;
-  const hourExpr = { $hour: { date: '$timestamp', timezone: 'Asia/Kolkata' } };
-  filter.$expr = { $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] };
+  const expr = hourWindowsExpr('$timestamp', callTime);
+  if (expr) filter.$expr = expr;
 }
 
 
@@ -332,14 +345,13 @@ router.get('/periodic', protect, isManager, async (req, res) => {
     // `aggregate()` does no schema casting the way `find()` does — an employeeId left as a
     // string matches nothing in a $match and the report silently comes back empty.
     if (employeeId) {
-      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
-        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
-      }
-      filter.employeeId = new mongoose.Types.ObjectId(employeeId);
+      const ids = oidsOf(employeeId);
+      if (!ids) return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+      filter.employeeId = ids;
     } else if (tlName) {
       filter.employeeId = { $in: await resolveEmployeeIdsForTL(tlName) };
     }
-    if (callType) filter.callType = callType;
+    if (callType) filter.callType = anyOf(callType);
     // Source lives on the linked Lead, not the call itself — resolve to the matching lead ids
     // first so every tab below (they all read off the same `filter`) narrows consistently. A
     // call with no leadId (never linked to a lead) has no source and is excluded by this filter.
@@ -820,11 +832,8 @@ const LEAD_STATUS_LABELS = STATUS_LABELS;
 const LEAD_STATUS_KEYS = Object.keys(LEAD_STATUS_LABELS);
 
 function applyLeadTimeFilter(filter, leadTime) {
-  const ranges = { morning: [6, 12], afternoon: [12, 18], evening: [18, 24] };
-  const r = ranges[leadTime];
-  if (!r) return;
-  const hourExpr = { $hour: { date: '$createdAt', timezone: 'Asia/Kolkata' } };
-  filter.$expr = { $and: [{ $gte: [hourExpr, r[0]] }, { $lt: [hourExpr, r[1]] }] };
+  const expr = hourWindowsExpr('$createdAt', leadTime);
+  if (expr) filter.$expr = expr;
 }
 function round1(n) { return Math.round(n * 10) / 10; }
 
@@ -877,14 +886,13 @@ router.get('/leads-periodic', protect, isManager, async (req, res) => {
     if (startDate) filter.createdAt = { ...(filter.createdAt || {}), $gte: istDateStrStart(startDate) };
     if (endDate) filter.createdAt = { ...(filter.createdAt || {}), $lte: istDateStrEnd(endDate) };
     if (employeeId) {
-      if (!mongoose.Types.ObjectId.isValid(employeeId)) {
-        return res.status(400).json({ success: false, error: 'Invalid employeeId' });
-      }
-      filter.assignedTo = new mongoose.Types.ObjectId(employeeId);
+      const ids = oidsOf(employeeId);
+      if (!ids) return res.status(400).json({ success: false, error: 'Invalid employeeId' });
+      filter.assignedTo = ids;
     } else if (tlName) {
       filter.assignedTo = { $in: await resolveEmployeeIdsForTL(tlName) };
     }
-    if (status) filter.status = status;
+    if (status) filter.status = anyOf(status);
     if (source) filter.source = { $regex: source, $options: 'i' };
     applyLeadTimeFilter(filter, leadTime);
 
@@ -1245,10 +1253,9 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const end = endDate ? istDateStrEnd(endDate) : new Date();
 
     const empFilter = scoped(req, { role: 'employee' }, '_id');
-    if (employeeId) empFilter._id = employeeId;
+    if (employeeId) empFilter._id = anyOf(employeeId);
     if (tlName) empFilter.tlName = tlNameMatch(tlName);
-    if (status === 'active') empFilter.isActive = true;
-    else if (status === 'inactive') empFilter.isActive = false;
+    applyActiveFilter(empFilter, status);
 
     const employeesList = await User.find(empFilter).sort({ name: 1 }).lean();
     const employeeIds = employeesList.map((e) => e._id);
@@ -1257,8 +1264,8 @@ router.get('/employees-periodic', protect, isManager, async (req, res) => {
     const leadFilter = { createdAt: { $gte: start, $lte: end }, assignedTo: { $in: employeeIds } };
 
     const [calls, leads] = await Promise.all([
-      CallLog.find(callFilter).select('employeeId duration').lean(),
-      Lead.find(leadFilter).select('assignedTo status').lean(),
+      CallLog.find(callFilter).select('employeeId duration timestamp').lean(),
+      Lead.find(leadFilter).select('assignedTo status createdAt').lean(),
     ]);
 
     const statsMap = {};
@@ -1414,8 +1421,7 @@ router.get('/employees/export', protect, isManager, async (req, res) => {
 
     const empFilter = scoped(req, { role: 'employee' }, '_id');
     if (tlName) empFilter.tlName = tlNameMatch(tlName);
-    if (status === 'active') empFilter.isActive = true;
-    else if (status === 'inactive') empFilter.isActive = false;
+    applyActiveFilter(empFilter, status);
 
     const employeesList = await User.find(empFilter).sort({ name: 1 }).lean();
     const employeeIds = employeesList.map((e) => e._id);

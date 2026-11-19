@@ -5,6 +5,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../../../lib/api';
 import Pagination from '../../../../components/Pagination';
 import { parseUTC } from '../../../../lib/timezone';
+import MultiSelect from '../../../../components/MultiSelect';
 import {
   DataTable, EmptyState, Field, ChartTip, CallBadge, Truncate, EditableRemarks,
   PhoneIco, GridIco, ClipboardIco,
@@ -76,19 +77,15 @@ export default function ClientReportsPage() {
 
         {/* ── Header ── */}
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Client Reports</span>
-          </p>
-          <h1 className="text-xl font-bold text-gray-900 mt-0.5">Client Reports</h1>
+          <h1 className="page-title">Client Reports</h1>
         </div>
 
         {/* ── Search ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
           <div className="grid grid-cols-1 sm:grid-cols-[160px_1fr_auto] gap-3 items-end">
             <Field label="Duration">
-              <select className="input" value={duration} onChange={(e) => setDuration(e.target.value)}>
-                {DURATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <MultiSelect multiple={false} clearable={false} value={duration} onChange={setDuration}
+                ariaLabel="Duration" options={DURATION_OPTIONS} />
             </Field>
             <Field label="Phone Number">
               <div className="relative">
@@ -97,7 +94,7 @@ export default function ClientReportsPage() {
                   onChange={(e) => setPhone(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchReport()}
                   placeholder="Enter phone number…"
-                  className="input pl-9"
+                  className="form-input pl-9"
                 />
               </div>
             </Field>
@@ -134,8 +131,8 @@ export default function ClientReportsPage() {
                     key={tab.key}
                     onClick={() => handleTabChange(tab.key)}
                     className={`relative px-2 py-3.5 text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                      activeTab === tab.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
-                    }`}
+ activeTab === tab.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+ }`}
                   >
                     <span className={`flex items-center justify-center transition-transform ${activeTab === tab.key ? 'scale-110' : ''}`}>
                       {tab.icon}
@@ -164,20 +161,6 @@ export default function ClientReportsPage() {
           </div>
         )}
       </div>
-
-      <style jsx global>{`
-        .input {
-          width: 100%;
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.5rem;
-          border: 1px solid #E5E7EB;
-          font-size: 0.8125rem;
-          outline: none;
-          background: white;
-          transition: border-color 0.15s;
-        }
-        .input:focus { border-color: #3B82F6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-      `}</style>
     </div>
   );
 }
@@ -192,7 +175,7 @@ function ClientSummaryTab({ data }) {
           <h3 className="text-sm font-bold text-gray-900 mb-3">Call Type Breakdown</h3>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-xs text-gray-400 uppercase">
+              <tr className="text-xs text-gray-500 ">
                 <th className="text-left pb-2">Call Type</th>
                 <th className="text-right pb-2">Calls</th>
                 <th className="text-right pb-2">Duration</th>
@@ -217,12 +200,12 @@ function ClientSummaryTab({ data }) {
           {sidebarStats && (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100">
               {[
-                { label: 'Never Attended', value: sidebarStats.neverAttended, color: '#DC2626' },
-                { label: 'Not Pickup by Client', value: sidebarStats.notPickupByClient, color: '#EA580C' },
-                { label: 'Connected Calls', value: sidebarStats.connectedCalls, color: '#16A34A' },
+                { label: 'Never Attended', value: sidebarStats.neverAttended, color: '#D92D20' },
+                { label: 'Not Pickup by Client', value: sidebarStats.notPickupByClient, color: '#B54708' },
+                { label: 'Connected Calls', value: sidebarStats.connectedCalls, color: '#079455' },
               ].map((s, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-400">{s.label}</p>
+                  <p className="text-xs text-gray-500">{s.label}</p>
                   <p className="text-sm font-bold mt-0.5" style={{ color: s.color }}>{s.value ?? '—'}</p>
                 </div>
               ))}
@@ -233,7 +216,7 @@ function ClientSummaryTab({ data }) {
         {pieData?.length > 0 && (
           <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
             <h3 className="text-sm font-bold text-gray-900 mb-1">Distribution</h3>
-            <p className="text-xs text-gray-400 mb-3">Overall split by call type</p>
+            <p className="text-xs text-gray-500 mb-3">Overall split by call type</p>
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
@@ -256,7 +239,7 @@ function ClientSummaryTab({ data }) {
       {employeeSummary?.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Summary</h3>
-          <p className="text-xs text-gray-400 mb-3">Per-employee performance for this client</p>
+          <p className="text-xs text-gray-500 mb-3">Per-employee performance for this client</p>
           <DataTable
             rows={employeeSummary}
             pageSize={employeeSummary.length || 10}
@@ -265,7 +248,7 @@ function ClientSummaryTab({ data }) {
                 key: 'employeeName', label: 'Employee', render: (r) => (
                   <div>
                     <p className="font-medium text-gray-900"><Truncate text={r.employeeName} /></p>
-                    {r.employeePhone && <p className="text-xs text-gray-400">({r.employeePhone})</p>}
+                    {r.employeePhone && <p className="text-xs text-gray-500">({r.employeePhone})</p>}
                   </div>
                 ),
               },
@@ -296,9 +279,9 @@ function ClientHistoryTab({ data, page, onPage, onSaveRemark }) {
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-sm font-bold text-gray-900">Call History</h3>
-        <span className="text-xs text-gray-400">{data?.total || 0} total</span>
+        <span className="text-xs text-gray-500">{data?.total || 0} total</span>
       </div>
-      <p className="text-xs text-gray-400 mb-3">Every call to/from this client</p>
+      <p className="text-xs text-gray-500 mb-3">Every call to/from this client</p>
       <DataTable
         rows={calls}
         pageSize={50}
@@ -310,7 +293,7 @@ function ClientHistoryTab({ data, page, onPage, onSaveRemark }) {
             key: 'employeeName', label: 'Employee', width: 160, render: (r) => (
               <div>
                 <p className="font-medium text-gray-900"><Truncate text={r.employeeName} /></p>
-                {r.employeeTL && <p className="text-[11px] text-gray-400">TL: <Truncate text={r.employeeTL} max={14} /></p>}
+                {r.employeeTL && <p className="text-xs text-gray-500">TL: <Truncate text={r.employeeTL} max={14} /></p>}
               </div>
             ),
           },

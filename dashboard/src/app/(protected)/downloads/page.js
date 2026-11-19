@@ -106,10 +106,10 @@ export default function DownloadsPage() {
       </div>
 
       <div className="page-card overflow-hidden">
-        <div className="px-5 py-3.5 flex items-center gap-3" style={{ borderBottom: '1px solid #E2E8F0' }}>
-          <h3 className="font-bold text-sm" style={{ color: '#0F172A' }}>{jobs.length} file{jobs.length === 1 ? '' : 's'}</h3>
+        <div className="px-5 py-3.5 flex items-center gap-3" style={{ borderBottom: '1px solid #E9E7EF' }}>
+          <h3 className="font-bold text-sm" style={{ color: '#1A1726' }}>{jobs.length} file{jobs.length === 1 ? '' : 's'}</h3>
           {processingCount > 0 && (
-            <span className="badge inline-flex items-center gap-1.5" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+            <span className="badge inline-flex items-center gap-1.5" style={{ background: '#F5F3FF', color: '#7C3AED' }}>
               <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               {processingCount} generating…
             </span>
@@ -126,28 +126,28 @@ export default function DownloadsPage() {
                 key: 'filename', label: 'File',
                 render: (job) => (
                   <>
-                    <p className="font-mono text-xs font-medium" style={{ color: '#0F172A' }}>{job.filename}</p>
+                    <p className="tabular-nums text-xs font-medium" style={{ color: '#1A1726' }}>{job.filename}</p>
                     {job.status === 'processing' && (
-                      <span className="badge inline-flex items-center gap-1.5" style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                      <span className="badge inline-flex items-center gap-1.5" style={{ background: '#F5F3FF', color: '#7C3AED' }}>
                         <span className="inline-block w-2.5 h-2.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                         Processing…
                       </span>
                     )}
-                    {job.status === 'failed' && <span className="badge" style={{ background: '#FEF2F2', color: '#DC2626' }}>Failed</span>}
+                    {job.status === 'failed' && <span className="badge" style={{ background: '#FEF3F2', color: '#D92D20' }}>Failed</span>}
                   </>
                 ),
               },
-              { key: 'label', label: 'Type', render: (job) => <span className="text-xs" style={{ color: '#475569' }}>{job.label}</span> },
+              { key: 'label', label: 'Type', render: (job) => <span className="text-xs" style={{ color: '#524F63' }}>{job.label}</span> },
               {
                 key: 'sizeBytes', label: 'Size', searchable: false,
                 render: (job) => (
-                  <span className="text-xs tabular-nums" style={{ color: '#475569' }}>
+                  <span className="text-xs tabular-nums" style={{ color: '#524F63' }}>
                     {job.status === 'processing' ? '—' : formatBytes(job.sizeBytes)}
                   </span>
                 ),
               },
-              { key: 'createdAt', label: 'Created', searchable: false, render: (job) => <span className="text-xs" style={{ color: '#94A3B8' }}>{fmtDateTime(job.createdAt)}</span> },
-              { key: 'expiresAt', label: 'Expires In', searchable: false, render: (job) => <span className="text-xs font-medium" style={{ color: '#D97706' }}>{formatExpiresIn(job.expiresAt)}</span> },
+              { key: 'createdAt', label: 'Created', searchable: false, render: (job) => <span className="text-xs" style={{ color: '#6B6880' }}>{fmtDateTime(job.createdAt)}</span> },
+              { key: 'expiresAt', label: 'Expires In', searchable: false, render: (job) => <span className="text-xs font-medium" style={{ color: '#B54708' }}>{formatExpiresIn(job.expiresAt)}</span> },
               {
                 key: 'actions', label: 'Actions', align: 'right', sortable: false, searchable: false,
                 render: (job) => {
@@ -157,7 +157,7 @@ export default function DownloadsPage() {
                       <button
                         onClick={() => handleDownload(job)}
                         disabled={busyId === job._id || processing}
-                        className="btn-secondary text-[11px] py-1 px-2.5"
+                        className="btn-secondary text-xs py-1 px-2.5"
                         title={processing ? 'Still generating…' : 'Download'}
                       >
                         {processing
@@ -167,8 +167,8 @@ export default function DownloadsPage() {
                       <button
                         onClick={() => handleDelete(job)}
                         disabled={busyId === job._id}
-                        className="btn-secondary text-[11px] py-1 px-2.5"
-                        style={{ color: '#DC2626' }}
+                        className="btn-secondary text-xs py-1 px-2.5"
+                        style={{ color: '#D92D20' }}
                         title="Delete"
                       >
                         <TrashIco />

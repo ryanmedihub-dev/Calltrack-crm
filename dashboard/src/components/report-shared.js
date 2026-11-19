@@ -3,16 +3,22 @@ import { Fragment, useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../lib/api';
 import { fmtDateTime } from '../lib/timezone';
+import MultiSelect from './MultiSelect';
+export { MultiSelect };
 
 /* ────────────────────────────────────────────────────────────
    CONSTANTS
 ──────────────────────────────────────────────────────────── */
+// One colour per call type, everywhere (badges, chart series, legends). Outgoing is the agent's
+// own work, so it takes the brand blue; missed is the only red; no purple.
 export const TYPE_META = {
-  incoming: { label: 'Incoming', color: '#16A34A', bg: '#F0FDF4' },
-  outgoing: { label: 'Outgoing', color: '#D97706', bg: '#FFFBEB' },
-  missed:   { label: 'Missed',   color: '#DC2626', bg: '#FEF2F2' },
-  rejected: { label: 'Rejected', color: '#7C3AED', bg: '#F5F3FF' },
+  incoming: { label: 'Incoming', color: '#0E9384', bg: '#F0FDF9' },
+  outgoing: { label: 'Outgoing', color: '#7C3AED', bg: '#F5F3FF' },
+  missed:   { label: 'Missed',   color: '#D92D20', bg: '#FEF3F2' },
+  rejected: { label: 'Rejected', color: '#B54708', bg: '#FFFAEB' },
 };
+
+export const fmtNum = (n) => (n == null || Number.isNaN(Number(n)) ? '—' : Number(n).toLocaleString('en-IN'));
 
 /* ────────────────────────────────────────────────────────────
    UTILITY
@@ -69,8 +75,7 @@ export const GridIco        = () => <Ico size={15} className="text-indigo-500"><
 export function CallBadge({ type }) {
   const m = TYPE_META[type] || TYPE_META.outgoing;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium whitespace-nowrap"
-      style={{ color: m.color, background: m.bg }}>
+    <span className="badge" style={{ color: m.color, background: m.bg }}>
       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: m.color }} />
       {m.label}
     </span>
@@ -78,26 +83,35 @@ export function CallBadge({ type }) {
 }
 
 /* Lead status pill — statusStyle/statusLabel come from lib/leadStatus.js,
-   the single source of truth for the 9-value lead status taxonomy. */
+   the single source of truth for the lead status taxonomy. */
 export function LeadStatusBadge({ status, style, label }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border whitespace-nowrap ${style.bg} ${style.text} ${style.border}`}>
+    <span className={`badge ${style.bg} ${style.text}`}>
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
       {label}
     </span>
   );
 }
 
+// Hover/focus help. Fast (125ms) and scaled from just above the trigger, per the tooltip recipe.
 export function InfoDot({ text }) {
   const [open, setOpen] = useState(false);
   return (
-    <span className="relative inline-flex ml-1 cursor-help" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-      <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold flex items-center justify-center select-none">i</span>
+    <span className="relative inline-flex ml-1 align-middle"
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
+      {/* A span, not a button: InfoDot often sits inside a tab or header button, and buttons can't nest. */}
+      <span tabIndex={0} aria-label={text}
+        className="w-4 h-4 rounded-full text-ink-3 hover:text-ink flex items-center justify-center cursor-help">
+        <Ico size={13}><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></Ico>
+      </span>
       <AnimatePresence>
         {open && (
-          <motion.span
-            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-            className="absolute z-30 left-1/2 -translate-x-1/2 top-6 w-60 bg-gray-900 text-white text-[11px] leading-snug rounded-lg px-3 py-2 shadow-xl pointer-events-none">
+          <motion.span role="tooltip"
+            initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.125, ease: [0.23, 1, 0.32, 1] }}
+            style={{ transformOrigin: 'top center' }}
+            className="absolute z-40 left-1/2 -translate-x-1/2 top-6 w-60 bg-ink text-white text-xs font-normal normal-case tracking-normal leading-snug rounded-lg px-3 py-2 shadow-lg pointer-events-none">
             {text}
           </motion.span>
         )}
@@ -109,71 +123,81 @@ export function InfoDot({ text }) {
 export function ChartTip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white rounded-xl px-3 py-2.5 text-xs shadow-lg border border-gray-200 min-w-[120px]">
-      {label && <p className="text-gray-400 font-medium mb-1.5 text-[11px]">{label}</p>}
+    <div className="bg-white rounded-lg px-3 py-2 text-xs shadow-lg border border-line min-w-[140px]">
+      {label != null && <p className="text-ink-3 mb-1.5">{label}</p>}
       {payload.map((p, i) => (
-        <p key={i} className="font-semibold flex items-center gap-1.5 mt-0.5" style={{ color: p.color || p.fill }}>
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color || p.fill }} />
-          {p.name}: {p.value?.toLocaleString?.() ?? p.value}
+        <p key={i} className="flex items-center gap-2 mt-0.5 text-ink-2">
+          <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: p.color || p.fill }} />
+          <span className="flex-1">{p.name}</span>
+          <span className="font-semibold text-ink tabular-nums">{p.value?.toLocaleString?.('en-IN') ?? p.value}</span>
         </p>
       ))}
     </div>
   );
 }
 
-export function StatCard({ label, value, sub, color, icon, delta, loading = false }) {
-  if (loading) return <div className="bg-white rounded-xl border border-gray-200 p-4 animate-pulse"><div className="h-9 w-9 bg-gray-100 rounded-lg"/><div className="h-7 w-24 bg-gray-100 rounded mt-3"/><div className="h-3 w-20 bg-gray-100 rounded mt-2"/></div>;
+// A score, not a tile: label, number, context. No icon blocks, no decorative circles.
+// `tone` colours the number only when it carries meaning ('behind' / 'met').
+export function StatCard({ label, value, sub, delta, tone, loading = false, onClick }) {
+  if (loading) {
+    return (
+      <div className="panel p-4">
+        <div className="skeleton h-3.5 w-24" />
+        <div className="skeleton h-7 w-20 mt-3" />
+        <div className="skeleton h-3 w-28 mt-2" />
+      </div>
+    );
+  }
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-      className="relative bg-white rounded-xl border border-gray-200 p-4 overflow-hidden group hover:border-gray-300 hover:shadow-sm transition-all">
-      <div className="absolute -right-4 -top-4 w-20 h-20 rounded-full opacity-[0.06] group-hover:opacity-[0.1] transition-opacity" style={{ background: color }} />
-      <div className="flex items-start justify-between">
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${color}14`, color }}>
-          {icon}
-        </div>
+    <Tag onClick={onClick}
+      className={`panel p-4 text-left w-full ${onClick ? 'card-hover cursor-pointer' : ''}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="stat-label truncate">{label}</p>
         {delta != null && (
-          <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${delta >= 0 ? 'text-emerald-600 bg-emerald-50' : 'text-red-600 bg-red-50'}`}>
-            {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}%
+          <span className={`text-xs font-medium tabular-nums ${delta >= 0 ? 'text-met' : 'text-behind'}`}>
+            {delta >= 0 ? '+' : '−'}{Math.abs(delta)}%
           </span>
         )}
       </div>
-      <p className="text-2xl font-bold text-gray-900 mt-3 tabular-nums leading-none">{value}</p>
-      <p className="text-xs text-gray-500 mt-1">{label}</p>
-      {sub && <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>}
-    </motion.div>
+      <p className={`stat-number mt-1.5 ${tone === 'behind' ? 'text-behind' : tone === 'met' ? 'text-met' : ''}`}>
+        {typeof value === 'number' ? fmtNum(value) : value}
+      </p>
+      {sub && <p className="text-xs text-ink-3 mt-1 truncate">{sub}</p>}
+    </Tag>
   );
 }
 
 export function Skeleton({ className = '' }) {
-  return <div className={`bg-gray-100 rounded animate-pulse ${className}`} />;
+  return <div className={`skeleton ${className}`} />;
 }
 
-export function EmptyState({ title = 'No records found', hint = 'Try widening your date range or clearing filters.' }) {
+export function EmptyState({ title = 'No records found', hint = 'Try a wider date range or clear the filters.', action }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-      <InboxIco s={36} />
-      <p className="mt-4 text-sm font-semibold text-gray-600">{title}</p>
-      <p className="text-xs text-gray-400 mt-1">{hint}</p>
+    <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
+      <span className="w-10 h-10 rounded-full bg-gray-100 text-ink-3 flex items-center justify-center"><InboxIco s={20} /></span>
+      <p className="mt-3 text-sm font-medium text-ink">{title}</p>
+      <p className="text-[13px] text-ink-3 mt-1 max-w-sm">{hint}</p>
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
 
 export function InsightCard({ icon, title, rows }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5 h-full">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h4 className="text-sm font-bold text-gray-900">{title}</h4>
+    <div className="panel h-full">
+      <div className="panel-head">
+        <h4 className="panel-title flex items-center gap-2">{icon}{title}</h4>
       </div>
-      <div className="space-y-4">
+      <dl className="px-5 py-2">
         {rows.map((r, i) => (
-          <div key={i} className={i > 0 ? 'pt-3 border-t border-gray-100' : ''}>
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">{r.label}</p>
-            <p className="text-sm font-semibold text-gray-900 mt-0.5 truncate">{r.value || '—'}</p>
-            {r.sub && <p className="text-xs text-gray-500 mt-0.5">{r.sub}</p>}
+          <div key={i} className={`py-3 ${i > 0 ? 'border-t border-line-2' : ''}`}>
+            <dt className="text-xs text-ink-3">{r.label}</dt>
+            <dd className="text-sm font-medium text-ink mt-0.5 truncate">{r.value || '—'}</dd>
+            {r.sub && <dd className="text-xs text-ink-3 mt-0.5">{r.sub}</dd>}
           </div>
         ))}
-      </div>
+      </dl>
     </div>
   );
 }
@@ -181,13 +205,49 @@ export function InsightCard({ icon, title, rows }) {
 export function LiveBanner({ count, label = 'new logs available — click to refresh', onRefresh }) {
   if (!count) return null;
   return (
-    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center mb-3">
-      <button onClick={onRefresh}
-        className="inline-flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 px-4 py-1.5 rounded-full text-xs font-semibold hover:bg-amber-100 transition-colors shadow-sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        {count.toLocaleString()} {label}
+    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }} className="flex justify-center mb-3">
+      <button onClick={onRefresh} className="btn-secondary btn-sm rounded-full">
+        <span className="live-dot" />
+        {count.toLocaleString('en-IN')} {label}
       </button>
     </motion.div>
+  );
+}
+
+// One page header pattern for every page: title, optional description, actions on the right.
+export function PageHeader({ title, description, actions, children }) {
+  return (
+    <div className="page-header">
+      <div className="min-w-0">
+        <h1 className="page-title truncate">{title}</h1>
+        {description && <p className="page-subtitle">{description}</p>}
+      </div>
+      {(actions || children) && <div className="flex items-center gap-2 flex-wrap">{actions}{children}</div>}
+    </div>
+  );
+}
+
+// Sliding-underline tabs (state indication). The indicator moves between tabs with layout
+// animation instead of colours swapping in place.
+export function Tabs({ tabs, value, onChange, id = 'tabs' }) {
+  return (
+    <div className="tab-nav" role="tablist">
+      {tabs.map((t) => {
+        const active = t.key === value;
+        return (
+          <button key={t.key} role="tab" aria-selected={active} onClick={() => onChange(t.key)}
+            className={`tab-item ${active ? '!border-transparent text-ink' : ''}`}>
+            {t.icon}{t.label}
+            {t.count != null && <span className="text-xs text-ink-3 tabular-nums">{fmtNum(t.count)}</span>}
+            {active && (
+              <motion.span layoutId={`${id}-indicator`} className="absolute left-0 right-0 -bottom-px h-0.5 bg-[var(--blue)] rounded-full"
+                transition={{ duration: 0.25, ease: [0.77, 0, 0.175, 1] }} />
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -210,21 +270,17 @@ export function TLFilter({ value, onChange, className = '' }) {
     api.get('/api/employees/tl-names').then((r) => setNames(r.data.data || [])).catch(() => {});
   }, []);
   return (
-    <select
-      value={value || ''}
-      onChange={(e) => onChange(e.target.value)}
-      className={`px-3 py-2 text-sm rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-white text-gray-700 ${className}`}>
-      <option value="">All Team Leads</option>
-      {names.map((n) => <option key={n} value={n}>{n}</option>)}
-    </select>
+    <MultiSelect value={value || ''} onChange={onChange} options={names} placeholder="All Team Leads"
+      noun="team leads" ariaLabel="Team lead" className={`w-auto min-w-[180px] ${className}`} />
   );
 }
 
-export function Field({ label, children }) {
+export function Field({ label, hint, children }) {
   return (
     <div>
-      <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{label}</label>
+      <label className="form-label">{label}</label>
       {children}
+      {hint && <p className="form-hint">{hint}</p>}
     </div>
   );
 }
@@ -306,7 +362,7 @@ export function EditableRemarks({ value, updatedAt, updatedByName, onSave, place
         </button>
       )}
       {stamp.at && (
-        <p className="text-[10px] text-gray-400 mt-1">
+        <p className="text-xs text-gray-400 mt-1">
           edited {fmtDateTime(stamp.at)}{stamp.by ? ` · ${stamp.by}` : ''}
         </p>
       )}
@@ -321,12 +377,14 @@ export function ActiveFilterChips({ filters, labels = {}, onClear, onClearAll })
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {entries.map(([k, v]) => (
-        <span key={k} className="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 text-xs font-medium pl-2.5 pr-1.5 py-1 rounded-full border border-blue-100">
-          <span className="text-blue-400 text-[10px] uppercase tracking-wide">{labels[k] || k}:</span> {v}
-          <button onClick={() => onClear(k)} className="hover:bg-blue-100 rounded-full p-0.5 transition-colors"><XIco /></button>
+        <span key={k} className="inline-flex items-center gap-1.5 h-7 bg-white text-ink-2 text-xs pl-2.5 pr-1 rounded-md border border-line">
+          <span className="text-ink-3">{labels[k] || k}</span>
+          <span className="font-medium text-ink">{v}</span>
+          <button onClick={() => onClear(k)} aria-label={`Clear ${labels[k] || k}`}
+            className="w-5 h-5 rounded flex items-center justify-center text-ink-3 hover:bg-gray-100 hover:text-ink transition-colors"><XIco s={11} /></button>
         </span>
       ))}
-      <button onClick={onClearAll} className="text-xs text-gray-400 hover:text-red-500 underline underline-offset-2 transition-colors">Clear all</button>
+      <button onClick={onClearAll} className="text-xs font-medium text-ink-3 hover:text-ink px-1 transition-colors">Clear all</button>
     </div>
   );
 }
@@ -335,7 +393,7 @@ export function ActiveFilterChips({ filters, labels = {}, onClear, onClearAll })
    underlying raw value even when its `render()` shows a badge/pin/etc instead. */
 function matchesColumnFilter(row, col, val) {
   const raw = col?.filterValue ? col.filterValue(row) : row[col?.key];
-  if (col?.filterType === 'select') return String(raw ?? '') === val;
+  if (col?.filterType === 'select') return String(val).split(',').includes(String(raw ?? ''));
   if (col?.filterType === 'date') {
     if (!raw) return false;
     const d = new Date(raw), sel = new Date(val);
@@ -433,7 +491,7 @@ export function DataTable({
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const cell = compact ? 'px-3 py-2' : 'px-4 py-3';
+  const cell = compact ? 'px-3 py-2' : 'px-4 py-2.5';
 
   const allOnPageSelected = selectable && pageRows.length > 0 && pageRows.every((r) => selectedIds?.has(getRowId(r)));
   let effectiveColumns = showRowNumber
@@ -458,80 +516,66 @@ export function DataTable({
   return (
     <div>
       {capNotice && (
-        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-[var(--warn-50)] text-xs text-[var(--warn)]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--warn)] shrink-0" />
           {capNotice}
         </div>
       )}
-      <div className="flex items-center justify-between px-1 pb-3">
-        <span className="text-xs text-gray-400">
-          {rangeTotal === 0 ? '0'
-            : serverMode
-              ? `Page ${page}`
-              : `${(page - 1) * rpp + 1}–${Math.min(page * rpp, rangeTotal)}`} of {rangeTotal.toLocaleString()}
-        </span>
-        {(!serverMode || onPageSizeChange) && (
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            Show
-            <select value={rpp} onChange={(e) => { const n = Number(e.target.value); setRpp(n); changeRpp(n); }}
-              className="border border-gray-200 rounded-md px-2 py-1 text-xs outline-none focus:border-blue-400 bg-white">
-              {[10, 25, 50, 100].map((n) => <option key={n}>{n}</option>)}
-            </select>
-          </div>
-        )}
-      </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-100 shadow-sm">
+      <div className="overflow-hidden rounded-[10px] border border-line bg-white">
         <div className="overflow-auto" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
-        <table className="w-full text-sm min-w-[600px]" style={hasWidths ? { tableLayout: 'fixed' } : undefined}>
+        <table className="w-full text-[13px] min-w-[720px] border-separate border-spacing-0" style={hasWidths ? { tableLayout: 'fixed' } : undefined}>
           {hasWidths && (
             <colgroup>
               {effectiveColumns.map((c) => <col key={c.key} style={{ width: c.width ? c.width : `${100 / effectiveColumns.length}%` }} />)}
             </colgroup>
           )}
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
-              {effectiveColumns.map((c) => (
-                <th key={c.key}
-                  className={`${cell} text-[11px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
-                  <button
-                    onClick={() => c.sortable !== false && toggleSort(c.key)}
-                    className={`inline-flex items-center gap-1 ${!serverMode && c.sortable !== false ? 'hover:text-gray-800 cursor-pointer' : 'cursor-default'}`}>
-                    {c.label}
-                    {!serverMode && sortKey === c.key && (sortDir === 'asc' ? <ArrowUpIco /> : <ArrowDownIco />)}
-                  </button>
-                </th>
-              ))}
+            <tr className="sticky top-0 z-10">
+              {effectiveColumns.map((c) => {
+                const sortable = !serverMode && c.sortable !== false;
+                const sorted = !serverMode && sortKey === c.key;
+                return (
+                  <th key={c.key} aria-sort={sorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                    className={`${cell} h-9 py-0 bg-gray-50 border-b border-line text-xs font-medium whitespace-nowrap ${sorted ? 'text-ink' : 'text-ink-3'} ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
+                    <button
+                      onClick={() => sortable && toggleSort(c.key)}
+                      className={`group/sort inline-flex items-center gap-1 ${c.align === 'right' ? 'flex-row-reverse' : ''} ${sortable ? 'hover:text-ink cursor-pointer' : 'cursor-default'}`}>
+                      {c.label}
+                      {sortable && (
+                        <span className={`transition-opacity duration-150 ${sorted ? 'opacity-100' : 'opacity-0 group-hover/sort:opacity-50'}`}>
+                          {sorted && sortDir === 'desc' ? <ArrowDownIco s={11} /> : <ArrowUpIco s={11} />}
+                        </span>
+                      )}
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
             {searchable && !serverMode && (
-              <tr className="bg-white border-b border-gray-100">
+              <tr>
                 {effectiveColumns.map((c) => (
-                  <td key={c.key} className={`${cell} pt-2 pb-2`}>
+                  <td key={c.key} className={`${cell} py-1.5 bg-white border-b border-line-2`}>
                     {c.searchable === false ? null : c.filterType === 'select' ? (
-                      <select
+                      <MultiSelect
                         value={colSearch[c.key] || ''}
-                        onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-gray-50">
-                        <option value="">{c.filterPlaceholder || 'All'}</option>
-                        {(c.filterOptions || []).map((opt) => {
-                          const value = typeof opt === 'string' ? opt : opt.value;
-                          const label = typeof opt === 'string' ? opt : opt.label;
-                          return <option key={value} value={value}>{label}</option>;
-                        })}
-                      </select>
+                        onChange={(v) => setColSearch((s) => ({ ...s, [c.key]: v }))}
+                        placeholder={c.filterPlaceholder || 'All'} ariaLabel={`Filter ${c.label || c.key}`}
+                        options={c.filterOptions || []} className="h-8 text-xs" />
                     ) : c.filterType === 'date' ? (
                       <input
                         type="date"
                         value={colSearch[c.key] || ''}
                         onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
-                        className="w-full px-2 py-1.5 text-xs rounded-lg border border-gray-200 outline-none focus:border-blue-400 bg-gray-50"
+                        className="form-input h-8 text-xs"
                       />
                     ) : (
                       <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-300"><SearchIco /></span>
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4 pointer-events-none"><SearchIco s={12} /></span>
                         <input
-                          placeholder="Filter…"
-                          className="w-full pl-6 pr-2 py-1.5 text-xs rounded-lg border border-gray-200 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50"
+                          placeholder="Filter"
+                          aria-label={`Filter ${typeof c.label === 'string' ? c.label : ''}`}
+                          className="form-input h-8 text-xs pl-7"
                           value={colSearch[c.key] || ''}
                           onChange={(e) => setColSearch((s) => ({ ...s, [c.key]: e.target.value }))}
                         />
@@ -542,12 +586,14 @@ export function DataTable({
               </tr>
             )}
           </thead>
-          <tbody className="divide-y divide-gray-50 bg-white">
+          <tbody className="bg-white">
             {loading ? (
               Array.from({ length: Math.min(rpp, 8) }).map((_, i) => (
-                <tr key={i} className="animate-pulse">
+                <tr key={i}>
                   {effectiveColumns.map((c, j) => (
-                    <td key={j} className={cell}><div className="h-4 bg-gray-100 rounded w-3/4" /></td>
+                    <td key={j} className={`${cell} h-11 border-b border-line-2`}>
+                      <div className={`skeleton h-3.5 ${c.align === 'right' ? 'ml-auto w-10' : j === 0 ? 'w-32' : 'w-20'}`} />
+                    </td>
                   ))}
                 </tr>
               ))
@@ -559,24 +605,25 @@ export function DataTable({
                 const isExpanded = renderExpanded && expandedId === rowId;
                 return (
                   <Fragment key={rowId}>
-                    <motion.tr
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                      transition={{ delay: Math.min(i * 0.015, 0.15) }}
+                    <tr
                       onClick={renderExpanded ? () => onToggleExpand?.(rowId) : undefined}
-                      className={`transition-colors hover:bg-blue-50/40 ${renderExpanded ? 'cursor-pointer' : ''} ${i % 2 === 1 ? 'bg-gray-50/40' : ''}`}>
+                      className={`group/row transition-colors duration-150 hover:bg-[#F8F9FB] ${renderExpanded ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-[#F8F9FB]' : ''}`}>
                       {effectiveColumns.map((c) => (
                         <td key={c.key}
-                          className={`${cell} ${c.wrap ? 'whitespace-normal break-words align-top' : 'whitespace-nowrap overflow-hidden text-ellipsis'} text-gray-700 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
-                          {c.render ? c.render(row, i) : (row[c.key] ?? '—')}
+                          className={`${cell} h-11 border-b border-line-2 ${c.wrap ? 'whitespace-normal break-words align-top' : 'whitespace-nowrap overflow-hidden text-ellipsis'} text-ink-2 ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${c.className || ''}`}>
+                          {c.render ? c.render(row, i) : (typeof row[c.key] === 'number' ? fmtNum(row[c.key]) : (row[c.key] ?? '—'))}
                         </td>
                       ))}
-                    </motion.tr>
+                    </tr>
                     {isExpanded && (
-                      <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-gray-50/60">
-                        <td colSpan={effectiveColumns.length} className="px-4 py-3">
-                          {renderExpanded(row)}
+                      <tr className="bg-gray-50">
+                        <td colSpan={effectiveColumns.length} className="px-4 py-3 border-b border-line-2">
+                          <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}>
+                            {renderExpanded(row)}
+                          </motion.div>
                         </td>
-                      </motion.tr>
+                      </tr>
                     )}
                   </Fragment>
                 );
@@ -585,9 +632,9 @@ export function DataTable({
           </tbody>
           {footer && !loading && pageRows.length > 0 && (
             <tfoot>
-              <tr className="border-t-2 border-gray-100 bg-gray-50/60 font-semibold text-gray-900">
+              <tr className="bg-gray-50 font-semibold text-ink">
                 {effectiveColumns.map((c) => (
-                  <td key={c.key} className={`${cell} whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}>
+                  <td key={c.key} className={`${cell} h-11 border-t border-line whitespace-nowrap ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'}`}>
                     {footer[c.key] !== undefined ? footer[c.key] : ''}
                   </td>
                 ))}
@@ -598,26 +645,35 @@ export function DataTable({
         </div>
       </div>
 
-      {!loading && rangeTotal > 0 && (
-        <div className="flex items-center justify-between mt-3 px-1">
-          <span className="text-xs text-gray-400">Page {page} of {totalPages}</span>
-          <div className="flex gap-1">
-            <button disabled={page === 1} onClick={() => goToPage(1)}
-              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
-              «
-            </button>
-            <button disabled={page === 1} onClick={() => goToPage(page - 1)}
-              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
-              Prev
-            </button>
-            <button disabled={page === totalPages} onClick={() => goToPage(page + 1)}
-              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
-              Next
-            </button>
-            <button disabled={page === totalPages} onClick={() => goToPage(totalPages)}
-              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium disabled:opacity-30 hover:bg-gray-50 hover:border-gray-300 transition-colors">
-              »
-            </button>
+      {/* Footer: range on the left, page size + pager on the right — one row, under the table */}
+      {(rangeTotal > 0 || loading) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 px-0.5">
+          <span className="text-xs text-ink-3 tabular-nums">
+            {loading ? 'Loading…' : serverMode
+              ? <>Page <b className="font-medium text-ink-2">{page}</b> of {fmtNum(totalPages)} · {fmtNum(rangeTotal)} total</>
+              : <><b className="font-medium text-ink-2">{fmtNum((page - 1) * rpp + 1)}–{fmtNum(Math.min(page * rpp, rangeTotal))}</b> of {fmtNum(rangeTotal)}</>}
+          </span>
+          <div className="flex items-center gap-3">
+            {(!serverMode || onPageSizeChange) && (
+              <label className="flex items-center gap-2 text-xs text-ink-3">
+                Rows
+                <select value={rpp} onChange={(e) => { const n = Number(e.target.value); setRpp(n); changeRpp(n); }}
+                  className="form-input h-8 w-[68px] text-xs pr-7">
+                  {[10, 25, 50, 100].map((n) => <option key={n}>{n}</option>)}
+                </select>
+              </label>
+            )}
+            <div className="flex items-center gap-1">
+              <button aria-label="Previous page" disabled={page === 1 || loading} onClick={() => goToPage(page - 1)}
+                className="btn-secondary btn-sm btn-icon w-8">
+                <Ico size={14}><polyline points="15 18 9 12 15 6"/></Ico>
+              </button>
+              <span className="text-xs text-ink-2 tabular-nums px-2 min-w-[56px] text-center">{fmtNum(page)} / {fmtNum(totalPages)}</span>
+              <button aria-label="Next page" disabled={page === totalPages || loading} onClick={() => goToPage(page + 1)}
+                className="btn-secondary btn-sm btn-icon w-8">
+                <Ico size={14}><polyline points="9 18 15 12 9 6"/></Ico>
+              </button>
+            </div>
           </div>
         </div>
       )}

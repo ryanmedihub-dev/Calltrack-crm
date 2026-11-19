@@ -1,4 +1,5 @@
 const express = require('express');
+const { list, anyOf } = require('../lib/multi');
 const router  = express.Router();
 const AuditLog = require('../models/AuditLog');
 const { protect, requireFullAccess } = require('../middleware/auth');
@@ -8,8 +9,9 @@ router.get('/', protect, requireFullAccess, async (req, res) => {
   try {
     const { page = 1, limit = 50, userId, action } = req.query;
     const filter = {};
-    if (userId) filter.userId = userId;
-    if (action) filter.action = { $regex: action, $options: 'i' };
+    if (userId) filter.userId = anyOf(userId);
+    // Several actions from the multi-select are OR-ed (same substring match as before).
+    if (action) filter.action = { $regex: list(action).join('|'), $options: 'i' };
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [logs, total] = await Promise.all([
       AuditLog.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),

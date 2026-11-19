@@ -28,7 +28,6 @@ const TABS = [
   { key: 'hourly',   label: 'Hourly Analysis' },
 ];
 
-const MEDALS = ['🥇', '🥈', '🥉'];
 
 function initials(name) {
   return (name || 'U').slice(0, 2).toUpperCase();
@@ -54,11 +53,11 @@ function InfoRow({ icon, label, value }) {
 
 function AccentCard({ title, name, value, sub }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 border-l-4 border-l-blue-600 p-4">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{title}</p>
+    <div className="panel p-4">
+      <p className="stat-label">{title}</p>
       <p className="text-sm font-bold text-gray-900 mt-1.5 truncate">{name || '—'}</p>
       <p className="text-xl font-extrabold text-blue-600 mt-1 tabular-nums">{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -126,7 +125,7 @@ export default function LeaderboardPage() {
   const columns = [
     {
       key: 'rank', label: 'Rank', sortable: false, searchable: false,
-      render: (row) => row.rank <= 3 ? <span className="text-lg">{MEDALS[row.rank - 1]}</span> : <span className="font-bold text-xs text-gray-400">#{row.rank}</span>,
+      render: (row) => row.rank <= 3 ? <span className="inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-semibold tabular-nums bg-[var(--blue-50)] text-[var(--blue)]">{row.rank}</span> : <span className="inline-flex w-6 justify-center text-xs text-ink-3 tabular-nums">{row.rank}</span>,
     },
     {
       key: 'name', label: 'Agent',
@@ -143,12 +142,12 @@ export default function LeaderboardPage() {
       render: (row) => (
         <div className="flex items-center justify-end gap-2">
           <div className="w-20 h-1.5 rounded-full overflow-hidden bg-gray-200"><div className="h-full rounded-full bg-blue-600" style={{ width: `${(row.count / maxCalls) * 100}%` }} /></div>
-          <span className="text-xs tabular-nums w-9 text-right text-gray-400">{row.share}%</span>
+          <span className="text-xs tabular-nums w-9 text-right text-gray-500">{row.share}%</span>
         </div>
       ),
     },
-    { key: 'first', label: 'First Call', align: 'right', searchable: false, render: (row) => <span className="text-xs tabular-nums text-gray-400">{row.first ? fmtTime(row.first) : '—'}</span> },
-    { key: 'last',  label: 'Last Call',  align: 'right', searchable: false, render: (row) => <span className="text-xs tabular-nums text-gray-400">{row.last ? fmtTime(row.last) : '—'}</span> },
+    { key: 'first', label: 'First Call', align: 'right', searchable: false, render: (row) => <span className="text-xs tabular-nums text-gray-500">{row.first ? fmtTime(row.first) : '—'}</span> },
+    { key: 'last',  label: 'Last Call',  align: 'right', searchable: false, render: (row) => <span className="text-xs tabular-nums text-gray-500">{row.last ? fmtTime(row.last) : '—'}</span> },
   ];
 
   return (
@@ -156,10 +155,7 @@ export default function LeaderboardPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            Employees <span className="text-gray-300">/</span> <span className="text-gray-500">Leaderboard</span>
-          </p>
-          <h1 className="text-xl font-bold text-gray-900 mt-0.5">Leaderboard</h1>
+          <h1 className="page-title">Leaderboard</h1>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -171,7 +167,7 @@ export default function LeaderboardPage() {
             ))}
           </div>
           <button onClick={exportCSV} disabled={!rows.length}
-            className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium shadow-sm disabled:opacity-40">
+            className="flex items-center gap-2 px-3.5 py-2 bg-[var(--blue)] text-white rounded-lg hover:bg-[var(--blue-600)] transition-colors text-sm font-medium shadow-sm disabled:opacity-40">
             <DownloadIco /> Export
           </button>
         </div>
@@ -243,7 +239,7 @@ export default function LeaderboardPage() {
                       </ResponsiveContainer>
                       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                         <p className="text-xl font-extrabold text-gray-900">{data.totalCalls}</p>
-                        <p className="text-[11px] text-gray-400">Calls</p>
+                        <p className="text-xs text-gray-500">Calls</p>
                       </div>
                     </div>
                     <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 mt-2">
@@ -270,7 +266,7 @@ export default function LeaderboardPage() {
 
               <div className="bg-white rounded-xl border border-gray-200 p-5">
                 <h3 className="text-sm font-bold text-gray-900 mb-1">Full Rankings</h3>
-                <p className="text-xs text-gray-400 mb-3">Ranked by call volume for the selected period</p>
+                <p className="text-xs text-gray-500 mb-3">Ranked by call volume for the selected period</p>
                 <DataTable
                   columns={columns}
                   rows={rows}
@@ -302,19 +298,19 @@ export default function LeaderboardPage() {
                 <ResponsiveContainer width="100%" height={260}>
                   {chartMode === 'line' ? (
                     <LineChart data={hourlyRows}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} interval={1} />
-                      <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#A19DB2' }} tickLine={false} axisLine={false} interval={1} />
+                      <YAxis tick={{ fontSize: 10, fill: '#A19DB2' }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
                       <Tooltip content={<ChartTip />} />
-                      <Line type="monotone" dataKey="calls" name="Calls" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 3, fill: '#2563EB' }} />
+                      <Line type="monotone" dataKey="calls" name="Calls" stroke="#7C3AED" strokeWidth={2.5} dot={{ r: 3, fill: '#7C3AED' }} />
                     </LineChart>
                   ) : (
                     <BarChart data={hourlyRows}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} interval={1} />
-                      <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#A19DB2' }} tickLine={false} axisLine={false} interval={1} />
+                      <YAxis tick={{ fontSize: 10, fill: '#A19DB2' }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
                       <Tooltip content={<ChartTip />} />
-                      <Bar dataKey="calls" name="Calls" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="calls" name="Calls" fill="#7C3AED" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   )}
                 </ResponsiveContainer>

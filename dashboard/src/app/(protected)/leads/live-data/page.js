@@ -340,14 +340,11 @@ export default function LiveDataPage() {
         {/* ── Header ── */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <p className="text-xs text-gray-400 flex items-center gap-1.5">
-              Leads <span className="text-gray-300">/</span> <span className="text-gray-500">Live Data</span>
-            </p>
-            <h1 className="text-xl font-bold text-gray-900 mt-0.5 flex items-center gap-2">
+            <h1 className="page-title flex items-center gap-2">
               Live Data
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                style={{ background: '#FEE2E2', color: '#DC2626' }}>
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#DC2626' }} />
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full"
+                style={{ background: '#FEF3F2', color: '#D92D20' }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: '#D92D20' }} />
                 LIVE
               </span>
             </h1>
@@ -385,7 +382,7 @@ export default function LiveDataPage() {
             <button
               onClick={() => fileRef.current?.click()}
               disabled={uploading}
-              className="flex items-center gap-2 px-3.5 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium shadow-sm disabled:opacity-50"
+              className="flex items-center gap-2 px-3.5 py-2 bg-[var(--blue)] text-white rounded-lg hover:bg-[var(--blue-600)] text-sm font-medium shadow-sm disabled:opacity-50"
             >
               <UploadIco /> {uploading ? 'Uploading…' : 'Upload leads'}
             </button>
@@ -400,11 +397,11 @@ export default function LiveDataPage() {
 
         {/* ── Stats ── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <StatCard label="Available now"  value={(stats?.available ?? 0).toLocaleString()} color="#2563EB" icon={<InboxIco />} loading={loading} />
-          <StatCard label="Attended today" value={(stats?.claimedToday ?? 0).toLocaleString()} color="#16A34A" icon={<CheckIco />} loading={loading} />
-          <StatCard label="Recycled today" value={(stats?.recycledToday ?? 0).toLocaleString()} color="#D97706" icon={<RecycleIco />} loading={loading} />
-          <StatCard label="Sources"        value={(stats?.bySource?.length ?? 0).toLocaleString()} color="#7C3AED" icon={<LayersIco />} loading={loading} />
-          <StatCard label="Oldest waiting" value={waitingSince(stats?.oldestWaitingSince)} color="#D97706" icon={<ClockIco />} loading={loading} />
+          <StatCard label="Available now"  value={(stats?.available ?? 0).toLocaleString()} color="#7C3AED" icon={<InboxIco />} loading={loading} />
+          <StatCard label="Attended today" value={(stats?.claimedToday ?? 0).toLocaleString()} color="#079455" icon={<CheckIco />} loading={loading} />
+          <StatCard label="Recycled today" value={(stats?.recycledToday ?? 0).toLocaleString()} color="#B54708" icon={<RecycleIco />} loading={loading} />
+          <StatCard label="Sources"        value={(stats?.bySource?.length ?? 0).toLocaleString()} color="#524F63" icon={<LayersIco />} loading={loading} />
+          <StatCard label="Oldest waiting" value={waitingSince(stats?.oldestWaitingSince)} color="#B54708" icon={<ClockIco />} loading={loading} />
         </div>
 
         {/* ── Pool table ── */}
@@ -412,7 +409,7 @@ export default function LiveDataPage() {
           <div className="flex items-center justify-between gap-3 mb-3">
             <div>
               <h3 className="text-sm font-bold text-gray-900">Unclaimed leads</h3>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 Any agent can attend these from the app · least-worked first (0 attempts at the top)
               </p>
             </div>
@@ -446,20 +443,20 @@ export default function LiveDataPage() {
             renderExpanded={(row) => (
               row.extraDetails?.length ? (
                 <div className="px-2 py-1">
-                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  <p className="text-xs font-semibold text-gray-500 mb-2">
                     Form answers
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
                     {row.extraDetails.map((d, i) => (
                       <div key={`${d.label}-${i}`}>
-                        <p className="text-[11px] text-gray-400">{d.label}</p>
+                        <p className="text-xs text-gray-500">{d.label}</p>
                         <p className="text-sm font-medium text-gray-800 mt-0.5 break-words">{d.value}</p>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-gray-400 px-2 py-1">No extra details captured for this lead.</p>
+                <p className="text-xs text-gray-500 px-2 py-1">No extra details captured for this lead.</p>
               )
             )}
             columns={[
@@ -470,8 +467,8 @@ export default function LiveDataPage() {
                     <Truncate text={r.name} max={22} />
                     {r.recycleCount > 0 && (
                       <span
-                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
-                        style={{ background: '#FEF3C7', color: '#D97706' }}
+                        className="text-xs font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                        style={{ background: '#FFFAEB', color: '#B54708' }}
                         title={`Recycled ${r.recycleCount} time(s) — the last agent(s) didn't reach them`}
                       >
                         Retry {r.recycleCount}/3
@@ -492,8 +489,8 @@ export default function LiveDataPage() {
                     <span
                       className="text-xs font-bold px-2 py-0.5 rounded-full tabular-nums"
                       style={n === 0
-                        ? { background: '#ECFDF5', color: '#059669' }   // untouched — the ones to work first
-                        : { background: '#F1F5F9', color: '#475569' }}
+                        ? { background: '#ECFDF5', color: '#079455' }   // untouched — the ones to work first
+                        : { background: '#F4F3F8', color: '#524F63' }}
                       title={n === 0 ? 'Never called' : `${n} call(s) logged · ${r.connectedCallCount || 0} connected`}
                     >
                       {n}
@@ -508,7 +505,7 @@ export default function LiveDataPage() {
                     <div className="leading-tight">
                       <div className="text-xs text-gray-700">{fmtDateTime(r.lastCallAt)}</div>
                       {!!r.lastCallEmployee && (
-                        <div className="text-[11px] text-gray-400">by {r.lastCallEmployee}</div>
+                        <div className="text-xs text-gray-500">by {r.lastCallEmployee}</div>
                       )}
                     </div>
                   )
@@ -518,7 +515,7 @@ export default function LiveDataPage() {
                 key: 'source', label: 'Source', width: 120,
                 render: (r) => (
                   <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-                    style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                    style={{ background: '#F5F3FF', color: '#7C3AED' }}>
                     {r.source || 'Unknown'}
                   </span>
                 ),
@@ -536,7 +533,7 @@ export default function LiveDataPage() {
                 render: (r) => (r.extraDetails?.length
                   ? (
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-                      style={{ background: '#F5F3FF', color: '#7C3AED' }}>
+                      style={{ background: '#F4F3F8', color: '#524F63' }}>
                       {r.extraDetails.length} {expandedId === r._id ? '▴' : '▾'}
                     </span>
                   )
@@ -564,7 +561,7 @@ export default function LiveDataPage() {
                 <UsersIco s={16} />
                 <div>
                   <h3 className="text-sm font-bold text-gray-900">Employee attempts on pool leads</h3>
-                  <p className="text-xs text-gray-400">Calls made to still-unclaimed numbers, by employee</p>
+                  <p className="text-xs text-gray-500">Calls made to still-unclaimed numbers, by employee</p>
                 </div>
               </div>
               <button
@@ -599,7 +596,7 @@ export default function LiveDataPage() {
             className="w-full flex items-center justify-between px-5 py-3.5 text-left"
           >
             <span className="text-sm font-semibold text-gray-800">Connecting Meta lead ads</span>
-            <span className="text-xs text-gray-400">{showHelp ? 'Hide' : 'Show'}</span>
+            <span className="text-xs text-gray-500">{showHelp ? 'Hide' : 'Show'}</span>
           </button>
           {showHelp && (
             <div className="px-5 pb-5 border-t border-gray-100 pt-4 space-y-3 text-xs text-gray-600">
@@ -611,7 +608,7 @@ export default function LiveDataPage() {
               <div>
                 <p className="font-semibold text-gray-700 mb-1">Auth header</p>
                 <code className="block bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 break-all">X-Webhook-Token: &lt;META_WEBHOOK_TOKEN&gt;</code>
-                <p className="mt-1 text-gray-400">Set <code>META_WEBHOOK_TOKEN</code> in the backend env. Until it is set, the endpoint rejects everything.</p>
+                <p className="mt-1 text-gray-500">Set <code>META_WEBHOOK_TOKEN</code> in the backend env. Until it is set, the endpoint rejects everything.</p>
               </div>
               <div>
                 <p className="font-semibold text-gray-700 mb-1">Body</p>
@@ -620,7 +617,7 @@ export default function LiveDataPage() {
 // or a batch:
 { "leads": [ { "name": "...", "phone": "..." }, ... ] }`}</pre>
               </div>
-              <p className="text-gray-400">
+              <p className="text-gray-500">
                 Verification handshake: Meta calls <code>GET {webhookUrl}</code> with <code>hub.verify_token</code>, matched against <code>META_VERIFY_TOKEN</code>.
                 Duplicate phone numbers are skipped, never re-pooled — an existing lead may already be assigned and actively worked.
               </p>

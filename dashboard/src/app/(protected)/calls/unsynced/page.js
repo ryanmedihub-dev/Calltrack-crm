@@ -6,7 +6,8 @@ import { getAllEmployeesSafe } from '../../../../lib/employees';
 import { triggerLocalExport } from '../../../../lib/downloads';
 import { fmtDateTime } from '../../../../lib/timezone';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DataTable } from '../../../../components/report-shared';
+import { DataTable, CallBadge, PageHeader } from '../../../../components/report-shared';
+import MultiSelect from '../../../../components/MultiSelect';
 
 function Ico({ size = 16, children, className = '' }) {
   return (
@@ -83,13 +84,6 @@ const CloseIco = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </Ico>
 );
-const CALL_TYPE_STYLES = {
-  incoming: { bg: 'rgba(34,197,94,0.10)', color: '#16A34A', border: '#BBF7D0', label: 'Incoming', icon: '📥' },
-  outgoing: { bg: 'rgba(245,158,11,0.10)', color: '#D97706', border: '#FDE68A', label: 'Outgoing', icon: '📤' },
-  missed: { bg: 'rgba(239,68,68,0.10)', color: '#DC2626', border: '#FECACA', label: 'Missed', icon: '❌' },
-  rejected: { bg: 'rgba(139,92,246,0.10)', color: '#7C3AED', border: '#DDD6FE', label: 'Rejected', icon: '🚫' },
-};
-
 const CALL_TYPES = [
   { value: '', label: 'All Types' },
   { value: 'incoming', label: 'Incoming' },
@@ -97,25 +91,6 @@ const CALL_TYPES = [
   { value: 'missed', label: 'Missed' },
   { value: 'rejected', label: 'Rejected' },
 ];
-
-function TypeBadge({ type }) {
-  const s =
-    CALL_TYPE_STYLES[type?.toLowerCase()] || {
-      bg: '#F1F5F9',
-      color: '#64748B',
-      border: '#CBD5E1',
-      label: type || '—',
-      icon: '📞',
-    };
-  return (
-    <span
-      className="inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize"
-      style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
-    >
-      {s.icon} {s.label}
-    </span>
-  );
-}
 
 const fmt = fmtDateTime;
 
@@ -133,12 +108,12 @@ const ChartTip = ({ active, payload, label }) => {
       className="rounded-xl px-4 py-3 text-xs shadow-2xl border border-gray-700"
       style={{ background: 'rgba(15, 23, 42, 0.95)', color: '#fff', backdropFilter: 'blur(10px)' }}
     >
-      <p className="mb-1.5 font-medium text-gray-400">{label}</p>
+      <p className="mb-1.5 font-medium text-gray-500">{label}</p>
       {payload.map((p, i) => (
         <div key={i} className="flex items-center gap-2 mt-1">
           <span
             className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ background: p.color || p.fill || '#2563EB' }}
+            style={{ background: p.color || p.fill || '#7C3AED' }}
           />
           <span className="font-bold">
             {p.name}: <span className="text-white">{p.value}</span>
@@ -245,312 +220,121 @@ export default function UnsyncedCallsPage() {
   const totalPages = Math.ceil(total / PER_PAGE);
 
   const unsyncedColumns = [
+    { key: 'employeeName', label: 'Agent', width: '20%', render: (c) => <span className="font-medium text-ink truncate block">{c.employeeName || '—'}</span> },
     {
-      key: 'employeeName',
-      label: 'Employee',
+      key: 'contactNumber', label: 'Contact', width: '24%',
       render: (c) => (
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0 shadow-sm"
-            style={{ background: '#2563EB' }}
-          >
-            {(c.employeeName || '?')[0].toUpperCase()}
-          </div>
-          <span className="text-sm font-medium text-gray-900 truncate max-w-[120px]">
-            {c.employeeName || '—'}
-          </span>
-        </div>
+        <span className="block min-w-0">
+          <span className="block tabular-nums text-ink">{c.contactNumber || '—'}</span>
+          {c.contactName && c.contactName !== 'Unknown' && <span className="block text-xs text-ink-3 truncate">{c.contactName}</span>}
+        </span>
       ),
     },
+    { key: 'callType', label: 'Type', width: '14%', render: (c) => <CallBadge type={c.callType} /> },
+    { key: 'duration', label: 'Duration', align: 'right', width: '10%', render: (c) => <span className="tabular-nums">{dur(c.duration)}</span> },
+    { key: 'timestamp', label: 'When', width: '18%', render: (c) => <span className="tabular-nums whitespace-nowrap">{fmt(c.timestamp)}</span> },
     {
-      key: 'contactNumber',
-      label: 'Contact',
-      render: (c) => (
-        <div>
-          <span className="font-mono text-sm font-semibold text-gray-900">
-            {c.contactNumber || '—'}
-          </span>
-          {c.contactName && c.contactName !== 'Unknown' && (
-            <p className="text-xs text-gray-500 mt-0.5">{c.contactName}</p>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'callType',
-      label: 'Type',
-      render: (c) => <TypeBadge type={c.callType} />,
-    },
-    {
-      key: 'duration',
-      label: 'Duration',
-      align: 'left',
-      render: (c) => <span className="text-sm text-gray-700 tabular-nums">{dur(c.duration)}</span>,
-    },
-    {
-      key: 'timestamp',
-      label: 'Date & Time',
-      render: (c) => <span className="text-sm text-gray-600 whitespace-nowrap">{fmt(c.timestamp)}</span>,
-    },
-    {
-      key: 'action',
-      label: 'Action',
-      sortable: false,
-      searchable: false,
+      key: 'action', label: '', align: 'right', width: '14%', sortable: false, searchable: false,
       render: (c) => (
         <button
           onClick={() => {
             setCreating(c);
-            setForm({
-              name: c.contactName !== 'Unknown' ? c.contactName || '' : '',
-              email: '',
-              assignedTo: '',
-            });
+            setForm({ name: c.contactName !== 'Unknown' ? c.contactName || '' : '', email: '', assignedTo: '' });
             setFormErr('');
           }}
-          className="group flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600"
+          className="btn-secondary btn-sm"
         >
-          <LeadPlusIco s={12} />
-          Create Lead
+          <LeadPlusIco s={13} /> Create lead
         </button>
       ),
     },
   ];
 
-  // Calculate stats
-  const typeCounts = calls.reduce((acc, call) => {
-    const type = call.callType?.toLowerCase() || 'unknown';
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {});
+  const confirmCreatePage = () => {
+    if (!calls.length) return;
+    if (window.confirm(`Create a lead for each of the ${calls.length} calls on this page?`)) createAllLeads();
+  };
 
   return (
-    <div className="min-h-screen ">
-      <div className="max-w-7xl mx-auto space-y-6 lg:space-y-4">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-                <span className="w-8 h-8 rounded-xl bg-gradient-to-r from-red-500 to-orange-500 text-white flex items-center justify-center">
-                  <AlertIco s={16} />
-                </span>
-                Unsynced Calls
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Calls with no matching lead record in the database
-              </p>
-            </div>
-            <button
-              onClick={load}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors duration-200"
-            >
-              <RefreshIco s={13} />
-              Refresh
+    <div className="space-y-5">
+      <PageHeader
+        title="Not synced"
+        description={loading && !total ? 'Loading…' : `${total.toLocaleString('en-IN')} calls whose number doesn’t match any lead yet`}
+        actions={
+          <>
+            <button onClick={exportList} className="btn-secondary" disabled={!calls.length}>Export this page</button>
+            <button onClick={load} className="btn-secondary btn-icon" aria-label="Refresh" title="Refresh"><RefreshIco s={14} /></button>
+          </>
+        }
+      />
+
+      <p className="text-[13px] text-ink-2 -mt-2 max-w-3xl">
+        These calls were made or received, but no lead has this phone number. Create a lead from a call to link it — future calls to that number then link automatically.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[240px] max-w-md">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-4 pointer-events-none"><SearchIco s={14} /></span>
+          <input className="form-input pl-9" placeholder="Search number or agent" aria-label="Search calls"
+            value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+        </div>
+        <div className="seg" role="group" aria-label="Call type">
+          {CALL_TYPES.map((t) => (
+            <button key={t.value || 'all'} aria-pressed={callType === t.value} onClick={() => { setCallType(t.value); setPage(1); }}>
+              {t.value ? t.label : 'All'}
             </button>
-          </div>
-        </motion.div>
-
-        {/* Stats Banner */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="bg-gradient-to-r from-red-50 to-orange-50 rounded-2xl p-6 border border-red-100"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-600 flex items-center justify-center">
-                <PhoneIco s={24} />
-              </div>
-              <div>
-                <p className="text-3xl font-extrabold text-red-600 tabular-nums tracking-tight">
-                  {total}
-                </p>
-                <p className="text-xs font-medium text-gray-500 mt-0.5">Total unsynced calls</p>
-              </div>
-            </div>
-            <div className="flex-1">
-              <div className="text-sm bg-white/60 backdrop-blur-sm rounded-xl px-4 py-3 text-gray-700 border border-red-100">
-                <span className="font-semibold text-red-600">⚠️ Action Required:</span>{' '}
-                These calls were made/received but the contact number doesn't match any lead in the system.
-                <span className="block text-xs text-gray-500 mt-1">
-                  💡 Create leads from these calls to sync them with your database.
-                </span>
-              </div>
-            </div>
-            {Object.keys(typeCounts).length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(typeCounts).map(([type, count]) => {
-                  const style = CALL_TYPE_STYLES[type];
-                  if (!style) return null;
-                  return (
-                    <span
-                      key={type}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-                      style={{ background: style.bg, color: style.color }}
-                    >
-                      {style.icon} {style.label}: {count}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Filters */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm"
-        >
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                <SearchIco s={14} />
-              </span>
-              <input
-                className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-sm"
-                placeholder="Search by contact number or employee name…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <div className="flex gap-3">
-              <div className="relative">
-                <select
-                  className="appearance-none pl-4 pr-10 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-sm bg-white min-w-[140px]"
-                  value={callType}
-                  onChange={(e) => {
-                    setCallType(e.target.value);
-                    setPage(1);
-                  }}
-                >
-                  {CALL_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <FilterIco />
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setSearch('');
-                  setCallType('');
-                  setPage(1);
-                }}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors duration-200 text-sm font-medium"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Table */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
-        >
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-gray-900">Unsynced Call Records</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {total} records found
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-red-50 text-red-600 border border-red-100">
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-red-500" />
-                {loading ? 'Loading…' : 'Ready'}
-              </span>
-            </div>
-          </div>
-          <div className="p-4">
-            <DataTable
-              serverMode
-              columns={unsyncedColumns}
-              rows={calls}
-              loading={loading}
-              page={page}
-              totalPages={totalPages}
-              totalCount={total}
-              onPageChange={setPage}
-              emptyTitle="All calls are synced!"
-              emptyHint="No unsynced calls found. All call records have matching leads in the database."
-            />
-          </div>
-        </motion.div>
-
-        {/* Quick Actions */}
+          ))}
+        </div>
         {calls.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm"
-          >
-            <h4 className="text-sm font-bold text-gray-900 mb-3">Quick Actions</h4>
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={createAllLeads}
-                disabled={bulkCreating}
-                className="px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 text-sm font-medium flex items-center gap-2 disabled:opacity-60"
-              >
-                <LeadPlusIco s={14} />
-                {bulkCreating ? 'Creating…' : 'Create All Leads'}
-              </button>
-              <button
-                onClick={exportList}
-                className="px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors duration-200 text-sm font-medium"
-              >
-                📥 Export List
-              </button>
-            </div>
-          </motion.div>
+          <button onClick={confirmCreatePage} disabled={bulkCreating} className="btn-primary ml-auto">
+            <LeadPlusIco s={14} /> {bulkCreating ? 'Creating…' : `Create leads for this page (${calls.length})`}
+          </button>
         )}
+      </div>
 
-        {/* Create Lead Modal */}
+      <DataTable
+        serverMode
+        searchable={false}
+        columns={unsyncedColumns}
+        rows={calls}
+        loading={loading}
+        page={page}
+        pageSize={PER_PAGE}
+        totalPages={Math.max(1, totalPages)}
+        totalCount={total}
+        onPageChange={setPage}
+        getRowId={(c) => c._id}
+        emptyTitle={search || callType ? 'No unsynced calls match' : 'Every call is linked to a lead'}
+        emptyHint={search || callType ? 'Clear the search or type filter.' : 'Nothing to do here.'}
+      />
+
+      {/* Create Lead Modal */}
         <AnimatePresence>
           {creating && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(26,23,38,0.45)]"
               onClick={() => setCreating(null)}
             >
               <motion.div
-                initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.95, y: 20 }}
-                className="w-full max-w-md bg-white rounded-2xl shadow-2xl"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                className="w-full max-w-md bg-white rounded-xl shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                   <div>
                     <h3 className="text-lg font-bold text-gray-900">Create Lead from Call</h3>
-                    <p className="text-sm text-gray-500 mt-0.5 font-mono">
+                    <p className="text-sm text-gray-500 mt-0.5 tabular-nums">
                       {creating.contactNumber}
                     </p>
                   </div>
                   <button
                     onClick={() => setCreating(null)}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors duration-200"
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 hover:bg-red-50 hover:text-red-500 transition-colors duration-200"
                   >
                     <CloseIco />
                   </button>
@@ -562,55 +346,46 @@ export default function UnsyncedCallsPage() {
                     </div>
                   )}
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    <label className="form-label">
                       Full Name *
                     </label>
                     <input
-                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-gray-900"
+                      className="form-input"
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
                       placeholder="Enter full name"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    <label className="form-label">
                       Email (optional)
                     </label>
                     <input
                       type="email"
-                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-gray-900"
+                      className="form-input"
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
                       placeholder="Enter email address"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                    <label className="form-label">
                       Assign To
                     </label>
-                    <select
-                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none text-gray-900"
-                      value={form.assignedTo}
-                      onChange={(e) => setForm({ ...form, assignedTo: e.target.value })}
-                    >
-                      <option value="">Unassigned</option>
-                      {employees.map((e) => (
-                        <option key={e._id} value={e._id}>
-                          {e.name}
-                        </option>
-                      ))}
-                    </select>
+                    <MultiSelect multiple={false} placeholder="Unassigned" ariaLabel="Assign to"
+                      value={form.assignedTo} onChange={(v) => setForm({ ...form, assignedTo: v })}
+                      options={employees.map((e) => [e._id, e.name])} />
                   </div>
                   <div className="flex gap-3 pt-2">
                     <button
                       onClick={() => setCreating(null)}
-                      className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors duration-200 font-medium text-sm"
+                      className="btn-secondary flex-1"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={createLead}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-200 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-primary flex-1"
                     >
                       Create Lead
                     </button>
@@ -620,7 +395,6 @@ export default function UnsyncedCallsPage() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
     </div>
   );
 }

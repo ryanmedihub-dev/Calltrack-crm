@@ -9,6 +9,7 @@ import api from '../../../lib/api';
 import { getAllEmployeesSafe } from '../../../lib/employees';
 import Pagination from '../../../components/Pagination';
 import { parseUTC } from '../../../lib/timezone';
+import MultiSelect from '../../../components/MultiSelect';
 import {
   DataTable, Skeleton, EmptyState, Field, ActiveFilterChips, ChartTip, CallBadge, TYPE_META,
   CalendarIco, ChevronIco, GridIco, BarChartTabIco, CalendarTabIco, ClockTabIco,
@@ -67,7 +68,7 @@ export default function ReportsPage() {
     ? fmtDate(filters.startDate)
     : `${fmtDate(filters.startDate)} – ${fmtDate(filters.endDate)}`;
 
-  const employeeName = employees.find((e) => e._id === filters.employeeId)?.name;
+  const employeeName = filters.employeeId ? filters.employeeId.split(',').map((id) => employees.find((e) => e._id === id)?.name || id).join(', ') : undefined;
 
   return (
     <div className="min-h-screen">
@@ -75,10 +76,7 @@ export default function ReportsPage() {
 
         {/* ── Header ── */}
         <div>
-          <p className="text-xs text-gray-400 flex items-center gap-1.5">
-            Reports <span className="text-gray-300">/</span> <span className="text-gray-500">Periodic Reports</span>
-          </p>
-          <h1 className="text-xl font-bold text-gray-900 mt-0.5">Periodic Reports</h1>
+          <h1 className="page-title">Periodic Reports</h1>
         </div>
 
         {/* ── Filters ── */}
@@ -86,7 +84,7 @@ export default function ReportsPage() {
           <button onClick={() => setFiltersOpen((o) => !o)} className="w-full flex items-center justify-between px-5 py-3.5">
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-gray-800">Filters</span>
-              <span className="text-xs text-gray-400">{dateLabel}</span>
+              <span className="text-xs text-gray-500">{dateLabel}</span>
             </div>
             <ChevronIco open={filtersOpen} />
           </button>
@@ -98,29 +96,23 @@ export default function ReportsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <Field label="From Date">
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><CalendarIco /></span>
-                        <input type="date" className="input pl-9" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"><CalendarIco /></span>
+                        <input type="date" className="form-input pl-9" value={filters.startDate} onChange={(e) => setFilters({ ...filters, startDate: e.target.value })} />
                       </div>
                     </Field>
                     <Field label="To Date">
                       <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><CalendarIco /></span>
-                        <input type="date" className="input pl-9" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"><CalendarIco /></span>
+                        <input type="date" className="form-input pl-9" value={filters.endDate} onChange={(e) => setFilters({ ...filters, endDate: e.target.value })} />
                       </div>
                     </Field>
                     <Field label="Employee">
-                      <select className="input" value={filters.employeeId} onChange={(e) => setFilters({ ...filters, employeeId: e.target.value })}>
-                        <option value="">All Employees</option>
-                        {employees.map((e) => <option key={e._id} value={e._id}>{e.name}</option>)}
-                      </select>
+                      <MultiSelect value={filters.employeeId} onChange={(v) => setFilters({ ...filters, employeeId: v })}
+                        placeholder="All employees" noun="employees" ariaLabel="Employee" options={employees.map((e) => [e._id, e.name])} />
                     </Field>
                     <Field label="Call Type">
-                      <select className="input" value={filters.callType} onChange={(e) => setFilters({ ...filters, callType: e.target.value })}>
-                        <option value="">All Types</option>
-                        {['incoming', 'outgoing', 'missed', 'rejected'].map((v) => (
-                          <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>
-                        ))}
-                      </select>
+                      <MultiSelect value={filters.callType} onChange={(v) => setFilters({ ...filters, callType: v })}
+                        placeholder="All types" noun="types" ariaLabel="Call type" options={[['incoming', 'Incoming'], ['outgoing', 'Outgoing'], ['missed', 'Missed'], ['rejected', 'Rejected']]} />
                     </Field>
                   </div>
 
@@ -166,8 +158,8 @@ export default function ReportsPage() {
                     key={tab.key}
                     onClick={() => handleTab(tab.key)}
                     className={`relative px-2 py-3.5 text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                      activeTab === tab.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
-                    }`}
+ activeTab === tab.key ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
+ }`}
                   >
                     <span className={`flex items-center justify-center transition-transform ${activeTab === tab.key ? 'scale-110' : ''}`}>
                       {tab.icon}
@@ -202,20 +194,6 @@ export default function ReportsPage() {
           </>
         )}
       </div>
-
-      <style jsx global>{`
-        .input {
-          width: 100%;
-          padding: 0.5rem 0.75rem;
-          border-radius: 0.5rem;
-          border: 1px solid #E5E7EB;
-          font-size: 0.8125rem;
-          outline: none;
-          background: white;
-          transition: border-color 0.15s;
-        }
-        .input:focus { border-color: #3B82F6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-      `}</style>
     </div>
   );
 }
@@ -233,7 +211,7 @@ function SummaryTab({ data }) {
           <h3 className="text-sm font-bold text-gray-900 mb-3">Call Type Breakdown</h3>
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-xs text-gray-400 uppercase">
+              <tr className="text-xs text-gray-500 ">
                 <th className="text-left pb-2">Call Type</th>
                 <th className="text-right pb-2">Calls</th>
                 <th className="text-right pb-2">Duration</th>
@@ -258,15 +236,15 @@ function SummaryTab({ data }) {
           {sidebarStats && (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100">
               {[
-                { label: 'Never Attended', value: sidebarStats.neverAttended, color: '#DC2626' },
-                { label: 'Not Pickup by Client', value: sidebarStats.notPickupByClient, color: '#EA580C' },
-                { label: 'Connected Calls', value: sidebarStats.connectedCalls, color: '#16A34A' },
-                { label: 'Unique Connected', value: sidebarStats.uniqueConnectedCalls, color: '#0891B2' },
-                { label: 'Unique Clients', value: sidebarStats.uniqueClients, color: '#7C3AED' },
-                { label: 'Working Hours', value: sidebarStats.workingHours, color: '#D97706' },
+                { label: 'Never Attended', value: sidebarStats.neverAttended, color: '#D92D20' },
+                { label: 'Not Pickup by Client', value: sidebarStats.notPickupByClient, color: '#B54708' },
+                { label: 'Connected Calls', value: sidebarStats.connectedCalls, color: '#079455' },
+                { label: 'Unique Connected', value: sidebarStats.uniqueConnectedCalls, color: '#0E9384' },
+                { label: 'Unique Clients', value: sidebarStats.uniqueClients, color: '#524F63' },
+                { label: 'Working Hours', value: sidebarStats.workingHours, color: '#B54708' },
               ].map((s, i) => (
                 <div key={i} className="bg-gray-50 rounded-lg p-3">
-                  <p className="text-xs text-gray-400">{s.label}</p>
+                  <p className="text-xs text-gray-500">{s.label}</p>
                   <p className="text-sm font-bold mt-0.5" style={{ color: s.color }}>{s.value ?? '—'}</p>
                 </div>
               ))}
@@ -277,7 +255,7 @@ function SummaryTab({ data }) {
         {pieData?.length > 0 && (
           <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
             <h3 className="text-sm font-bold text-gray-900 mb-1">Distribution</h3>
-            <p className="text-xs text-gray-400 mb-3">Overall split by call type</p>
+            <p className="text-xs text-gray-500 mb-3">Overall split by call type</p>
             <div className="relative">
               <ResponsiveContainer width="100%" height={200}>
                 <PieChart>
@@ -289,7 +267,7 @@ function SummaryTab({ data }) {
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ top: -8 }}>
                 <p className="text-2xl font-bold text-gray-900">{grandTotal.toLocaleString()}</p>
-                <p className="text-xs text-gray-400">Calls</p>
+                <p className="text-xs text-gray-500">Calls</p>
               </div>
               <div className="flex justify-center gap-4 mt-2 flex-wrap">
                 {pieData.map((d, i) => (
@@ -306,7 +284,7 @@ function SummaryTab({ data }) {
       {employeeSummary?.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Summary</h3>
-          <p className="text-xs text-gray-400 mb-3">Per-employee call performance</p>
+          <p className="text-xs text-gray-500 mb-3">Per-employee call performance</p>
           <EmployeeSummaryTable rows={employeeSummary} />
         </div>
       )}
@@ -320,7 +298,7 @@ function AnalysisTab({ data }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <h3 className="text-sm font-bold text-gray-900 mb-1">Employee Analysis</h3>
-      <p className="text-xs text-gray-400 mb-3">Per-employee call performance</p>
+      <p className="text-xs text-gray-500 mb-3">Per-employee call performance</p>
       <EmployeeSummaryTable rows={data.employeeSummary} />
     </div>
   );
@@ -335,7 +313,7 @@ function EmployeeSummaryTable({ rows }) {
         {
           key: 'employeeName', label: 'Employee', render: (r) => (
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[9px] font-bold shrink-0" style={{ background: '#2563EB' }}>
+              <div className="w-6 h-6 rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: '#7C3AED' }}>
                 {(r.employeeName || '?')[0].toUpperCase()}
               </div>
               <span className="font-medium text-gray-900">{r.employeeName}</span>
@@ -367,12 +345,12 @@ function DaywiseTab({ data }) {
     <div className="space-y-4">
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-bold text-gray-900 mb-1">Daily Call Volume</h3>
-        <p className="text-xs text-gray-400 mb-4">Calls per day, split by type</p>
+        <p className="text-xs text-gray-500 mb-4">Calls per day, split by type</p>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data.daywise}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-            <XAxis dataKey="date" tick={{ fill: '#94A3B8', fontSize: 10 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} axisLine={false} tickLine={false} width={28} allowDecimals={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" vertical={false} />
+            <XAxis dataKey="date" tick={{ fill: '#A19DB2', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: '#A19DB2', fontSize: 10 }} axisLine={false} tickLine={false} width={28} allowDecimals={false} />
             <Tooltip content={<ChartTip />} />
             <Bar dataKey="incoming" fill={TYPE_META.incoming.color} radius={[3, 3, 0, 0]} name="Incoming" />
             <Bar dataKey="outgoing" fill={TYPE_META.outgoing.color} radius={[3, 3, 0, 0]} name="Outgoing" />
@@ -394,7 +372,7 @@ function DaywiseTab({ data }) {
 
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h3 className="text-sm font-bold text-gray-900 mb-1">Day-wise Totals</h3>
-        <p className="text-xs text-gray-400 mb-3">Daily totals within the selected date range</p>
+        <p className="text-xs text-gray-500 mb-3">Daily totals within the selected date range</p>
         <DataTable
           rows={rows}
           pageSize={rows.length || 10}
@@ -419,18 +397,18 @@ function HourlyTab({ data }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <h3 className="text-sm font-bold text-gray-900 mb-1">Hourly Call Distribution</h3>
-      <p className="text-xs text-gray-400 mb-4">Call volume by hour (IST)</p>
+      <p className="text-xs text-gray-500 mb-4">Call volume by hour (IST)</p>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data.hourly} barCategoryGap="40%">
           <defs>
             <linearGradient id="hbar" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#2563EB" stopOpacity={0.9} />
-              <stop offset="100%" stopColor="#2563EB" stopOpacity={0.25} />
+              <stop offset="0%" stopColor="#7C3AED" stopOpacity={0.9} />
+              <stop offset="100%" stopColor="#7C3AED" stopOpacity={0.25} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-          <XAxis dataKey="label" tick={{ fill: '#94A3B8', fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fill: '#94A3B8', fontSize: 10 }} axisLine={false} tickLine={false} width={28} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#F4F3F8" vertical={false} />
+          <XAxis dataKey="label" tick={{ fill: '#A19DB2', fontSize: 10 }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fill: '#A19DB2', fontSize: 10 }} axisLine={false} tickLine={false} width={28} />
           <Tooltip content={<ChartTip />} />
           <Bar dataKey="totalCalls" fill="url(#hbar)" radius={[4, 4, 0, 0]} name="Total Calls" />
         </BarChart>
@@ -448,7 +426,7 @@ function NeverAttendedTab({ data, page, onPage }) {
         <h3 className="text-sm font-bold text-gray-900">Never Attended</h3>
         <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-red-50 text-red-600 text-xs font-semibold">{data?.total || 0} records</span>
       </div>
-      <p className="text-xs text-gray-400 mb-4">Missed calls with zero follow-up outgoing call</p>
+      <p className="text-xs text-gray-500 mb-4">Missed calls with zero follow-up outgoing call</p>
       <DataTable
         rows={records}
         pageSize={100}
@@ -475,7 +453,7 @@ function NotPickupTab({ data, page, onPage }) {
         <h3 className="text-sm font-bold text-gray-900">Not Picked Up by Client</h3>
         <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 text-xs font-semibold">{data?.total || 0} records</span>
       </div>
-      <p className="text-xs text-gray-400 mb-4">Outbound attempts that went unanswered</p>
+      <p className="text-xs text-gray-500 mb-4">Outbound attempts that went unanswered</p>
       <DataTable
         rows={records}
         pageSize={100}
@@ -502,7 +480,7 @@ function UniqueClientsTab({ data, page, onPage }) {
         <h3 className="text-sm font-bold text-gray-900">Unique Clients</h3>
         <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-semibold">{data?.total || 0}</span>
       </div>
-      <p className="text-xs text-gray-400 mb-4">Every distinct client contacted this period</p>
+      <p className="text-xs text-gray-500 mb-4">Every distinct client contacted this period</p>
       <DataTable
         rows={records}
         pageSize={100}
@@ -510,7 +488,7 @@ function UniqueClientsTab({ data, page, onPage }) {
         columns={[
           {
             key: 'contactNumber', label: 'Contact', render: (r) => (
-              <div><p className="font-medium text-blue-600">{r.contactNumber}</p><p className="text-xs text-gray-400">{r.contactName || ''}</p></div>
+              <div><p className="font-medium text-blue-600">{r.contactNumber}</p><p className="text-xs text-gray-500">{r.contactName || ''}</p></div>
             ),
           },
           { key: 'totalCalls', label: 'Total', align: 'right', render: (r) => <span className="font-semibold text-gray-900">{r.totalCalls}</span> },
@@ -535,9 +513,9 @@ function CallHistoryTab({ data, page, onPage }) {
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-sm font-bold text-gray-900">Call History</h3>
-        <span className="text-xs text-gray-400">{calls.length} of {data?.total || 0}</span>
+        <span className="text-xs text-gray-500">{calls.length} of {data?.total || 0}</span>
       </div>
-      <p className="text-xs text-gray-400 mb-3">Every individual call record</p>
+      <p className="text-xs text-gray-500 mb-3">Every individual call record</p>
       <DataTable
         rows={calls}
         pageSize={100}
@@ -545,7 +523,7 @@ function CallHistoryTab({ data, page, onPage }) {
         columns={[
           {
             key: 'employeeName', label: 'Employee', render: (r) => (
-              <div><p className="font-medium text-gray-900">{r.employeeName}</p>{r.employeePhone && <p className="text-xs text-gray-400">{r.employeePhone}</p>}</div>
+              <div><p className="font-medium text-gray-900">{r.employeeName}</p>{r.employeePhone && <p className="text-xs text-gray-500">{r.employeePhone}</p>}</div>
             ),
           },
           { key: 'contactNumber', label: 'Contact', render: (r) => <span className="text-blue-600">{r.contactNumber}</span> },
